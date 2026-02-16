@@ -1,0 +1,5 @@
+{
+  "name": "DeepSearch Overseer",
+  "description": "A fully transparent, agentic AI research assistant where an Overseer AI orchestrates specialized agents to exhaustively discover and synthesize information.",
+  "requestFramePermissions": []
+}
