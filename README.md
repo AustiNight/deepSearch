@@ -1,0 +1,45 @@
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+</div>
+
+# Run and deploy your AI Studio app
+
+This contains everything you need to run your app locally.
+
+View your app in AI Studio: https://ai.studio/apps/drive/15nbWFNEYh8ec84B_f70xPi14fkgQW50J
+
+## Run Locally
+
+**Prerequisites:**  Node.js
+
+
+1. Install dependencies:
+   `npm install`
+2. Set API keys in [.env.local](.env.local):
+   `GEMINI_API_KEY` for Google Gemini
+   `OPENAI_API_KEY` for OpenAI
+3. Optionally set `LLM_PROVIDER` to `google` or `openai` (defaults to Google unless only OpenAI is set)
+4. Optionally set `OPENAI_MODEL_FAST` and `OPENAI_MODEL_REASONING`
+5. Optional: set `ADMIN_PASSWORD` to lock settings and search behind a password prompt
+6. Run the app:
+   `npm run dev`
+
+## Cloudflare Worker Proxy (Recommended for Production)
+
+To keep API keys off the client, deploy the included Worker and point the frontend at it.
+
+1. Install and login to Wrangler:
+   `npm i -g wrangler`
+   `wrangler login`
+2. Set Worker secrets:
+   `wrangler secret put OPENAI_API_KEY`
+   `wrangler secret put GEMINI_API_KEY`
+3. Deploy the Worker:
+   `wrangler deploy`
+4. Set the Worker URL in `.env.local`:
+   `PROXY_BASE_URL=https://<your-worker>.<your-subdomain>.workers.dev`
+5. Rebuild or restart the frontend dev server.
+
+Notes:
+- If `PROXY_BASE_URL` is set, the app will use the proxy and no client API keys are required.
+- `ADMIN_PASSWORD` is a client-side gate, not a security boundary. Real security comes from the proxy.
