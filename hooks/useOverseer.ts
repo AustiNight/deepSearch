@@ -407,6 +407,17 @@ const recordExhaustionRound = (
   return metrics;
 };
 
+const computeExhaustionScore = (metrics: ExhaustionMetrics) => {
+  const noveltyScore = clamp(1 - metrics.queryNoveltyRatio, 0, 1);
+  const domainScore = clamp(1 - metrics.newDomains / Math.max(1, metrics.totalDomains), 0, 1);
+  const sourceScore = clamp(1 - metrics.newSources / Math.max(1, metrics.totalSources), 0, 1);
+  return clamp(
+    0.5 * metrics.diminishingReturnsScore + 0.2 * noveltyScore + 0.15 * domainScore + 0.15 * sourceScore,
+    0,
+    1
+  );
+};
+
 const formatWeightedVerticals = (verticals: WeightedVertical[]) => {
   return verticals.map(v => `${v.id} (${v.weight.toFixed(2)})`).join(', ');
 };
@@ -1333,8 +1344,11 @@ export const useOverseer = () => {
       
       const allFindingsText = findingsRef.current.map(f => f.content).join('\n');
       const critique = await critiqueAndFindGaps(topic, allFindingsText);
+      const latestMetrics = exhaustionTracker.rounds[exhaustionTracker.rounds.length - 1];
+      const exhaustionScore = latestMetrics ? computeExhaustionScore(latestMetrics) : 0;
+      const isExhausted = latestMetrics ? exhaustionScore >= earlyStopDiminishingScore : false;
 
-      if (!critique.isExhaustive && critique.newMethod) {
+      if ((forceExhaustion || !isExhausted) && critique.newMethod) {
          addLog(overseerId, overseer.name, `CRITIQUE: Major Blindspot - ${critique.gapAnalysis}`, 'warning');
          
          const gapAgentId = generateId();
@@ -1381,6 +1395,13 @@ export const useOverseer = () => {
            [critique.newMethod.query],
            gapSources
          );
+      } else if (critique.newMethod) {
+        addLog(
+          overseerId,
+          overseer.name,
+          'CRITIQUE: Blindspot noted, but exhaustion score is high; skipping gap fill.',
+          'info'
+        );
       } else {
         addLog(overseerId, overseer.name, 'Red Team Assessment: Sufficient data density achieved.', 'success');
       }
@@ -1390,7 +1411,7 @@ export const useOverseer = () => {
       const currentDomainCount = new Set(currentSources.map((s: any) => normalizeDomain(s.uri))).size;
       const shouldExhaust =
         forceExhaustion ||
-        !critique.isExhaustive ||
+        !isExhausted ||
         currentDomainCount < Math.max(6, Math.floor(minAgents / 2));
 
       if (shouldExhaust) {
