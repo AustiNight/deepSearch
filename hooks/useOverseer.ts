@@ -171,6 +171,10 @@ const extractCityStateFromTopic = (topic: string) => {
 const inferVerticalHints = (topic: string) => {
   const hints: string[] = [];
   const lower = topic.toLowerCase();
+  const hasCreativeWork = /\b(film|movie|book|novel|album|song|painting)\b/i.test(lower);
+  const hasReceptionSignals =
+    /\b(review|reviews|rating|ratings|critic|critics|audience|sentiment|award|awards|nomination|box office)\b/i.test(lower) ||
+    /\b(rotten\s+tomatoes|metacritic|goodreads|imdb|omdb)\b/i.test(lower);
   if (isPersonLike(topic)) hints.push('individual');
   if (isAddressLike(topic)) hints.push('location');
   if (/\b(inc|llc|ltd|corp|corporation|company|co\\.)\b/i.test(topic)) hints.push('corporation');
@@ -179,7 +183,8 @@ const inferVerticalHints = (topic: string) => {
   if (/\b(event|incident|summit|conference|protest)\b/i.test(lower)) hints.push('event');
   if (/\b(law|statute|regulation|act|code|v\\.)\b/i.test(lower)) hints.push('legal_matter');
   if (/\b(disease|condition|syndrome|drug|medication|anatomy)\b/i.test(lower)) hints.push('medical_subject');
-  if (/\b(film|movie|book|novel|album|song|painting)\b/i.test(lower)) hints.push('creative_work');
+  if (hasCreativeWork) hints.push('creative_work');
+  if (hasReceptionSignals || hasCreativeWork) hints.push('reception');
   if (/\b(algorithm|protocol|framework|library|api|system)\b/i.test(lower)) hints.push('technical_concept');
   if (/\b(theory|movement|ideology|philosophy)\b/i.test(lower)) hints.push('nontechnical_concept');
   if (hints.length === 0) hints.push('general_discovery');
@@ -383,6 +388,29 @@ const evaluateVerticalExhaustion = (context: {
     ];
     if (!hasKeyword(creativeKeywords)) {
       reasons.push('Creative work: missing reception or plot/credit signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('reception')) {
+    const receptionKeywords = [
+      'review',
+      'reviews',
+      'rating',
+      'ratings',
+      'critic',
+      'critics',
+      'audience',
+      'sentiment',
+      'award',
+      'awards',
+      'score',
+      'metacritic',
+      'rottentomatoes',
+      'goodreads',
+      'imdb'
+    ];
+    if (!hasKeyword(receptionKeywords)) {
+      reasons.push('Reception: missing review, ratings, or awards signals.');
     }
   }
 
@@ -874,6 +902,7 @@ const VERTICAL_SEED_QUERIES: Record<string, string> = {
   technical_concept: '"{topic}" implementation',
   nontechnical_concept: '"{topic}" definition',
   creative_work: '"{topic}" review',
+  reception: '"{topic}" reviews',
   medical_subject: '"{topic}" overview',
   legal_matter: '"{topic}" summary',
   general_discovery: '{topic} overview'

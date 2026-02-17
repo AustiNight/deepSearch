@@ -153,17 +153,17 @@
   - [ ] Encode catalog findings into taxonomy tactics and blueprint fields so they are used by the live search workflow (not just documentation)
   - [ ] Add acceptance: every cataloged public resource appears in at least one vertical’s tactics or is captured by a newly proposed vertical
 
-- [ ] Epic: Add Reception as a new top-level vertical with correct taxonomy + logic
-  - [ ] Add a new `reception` vertical to `data/researchTaxonomy.ts` with:
-    - [ ] Blueprint fields that reflect review/reception coverage (e.g., criticScores, audienceScores, reviewSources, reviewQuotes, sentiment, awards, comparisons, controversy)
-    - [ ] Subtopics that mirror the provided table row: Review sources (RottenTomatoes/Goodreads/Metacritic/OMDB/Amazon), Thematic Analysis, Production History, Credits/Personnel, Cast, Ending/Plot
-    - [ ] Tactics for each subtopic, including review aggregators and common review surfaces
-  - [ ] Add `reception` to the vertical seed query map (e.g., `{topic} review`)
-  - [ ] Update `inferVerticalHints` to allow `reception` to trigger directly (e.g., review/ratings/critic/sentiment terms) and to be hinted alongside creative_work
-  - [ ] Update `evaluateVerticalExhaustion` with reception-specific coverage checks (review/ratings/critic/audience/awards keywords)
-  - [ ] Ensure the selection logic can include `reception` alongside other verticals without discarding it unnecessarily
-  - [ ] Add tests/fixtures to validate reception hinting, seed query generation, and coexistence with `creative_work`
-  - [ ] Acceptance: a topic like “The Great Gatsby reviews” selects `reception` and triggers reception tactics; a topic like “The Great Gatsby” can include both `creative_work` and `reception`
+- [x] Epic: Add Reception as a new top-level vertical with correct taxonomy + logic
+  - [x] Add a new `reception` vertical to `data/researchTaxonomy.ts` with:
+    - [x] Blueprint fields that reflect review/reception coverage (e.g., criticScores, audienceScores, reviewSources, reviewQuotes, sentiment, awards, comparisons, controversy)
+    - [x] Subtopics that mirror the provided table row: Review sources (RottenTomatoes/Goodreads/Metacritic/OMDB/Amazon), Thematic Analysis, Production History, Credits/Personnel, Cast, Ending/Plot
+    - [x] Tactics for each subtopic, including review aggregators and common review surfaces
+  - [x] Add `reception` to the vertical seed query map (e.g., `{topic} review`)
+  - [x] Update `inferVerticalHints` to allow `reception` to trigger directly (e.g., review/ratings/critic/sentiment terms) and to be hinted alongside creative_work
+  - [x] Update `evaluateVerticalExhaustion` with reception-specific coverage checks (review/ratings/critic/audience/awards keywords)
+  - [x] Ensure the selection logic can include `reception` alongside other verticals without discarding it unnecessarily
+  - [x] Add tests/fixtures to validate reception hinting, seed query generation, and coexistence with `creative_work`
+  - [x] Acceptance: a topic like “The Great Gatsby reviews” selects `reception` and triggers reception tactics; a topic like “The Great Gatsby” can include both `creative_work` and `reception`
 
 - [ ] Epic: Update vertical blueprint fields and tactics to match the revised table (and wire into search workflow)
   - [ ] Update blueprint fields per the provided table edits:

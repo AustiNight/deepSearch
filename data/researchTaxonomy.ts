@@ -652,6 +652,53 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
       ]
     ),
     vertical(
+      'reception',
+      'Reception (Reviews / Ratings / Awards)',
+      [
+        'criticScores',
+        'audienceScores',
+        'reviewSources',
+        'reviewQuotes',
+        'sentiment',
+        'awards',
+        'comparisons',
+        'controversy'
+      ],
+      [
+        subtopic('review_sources', 'Review Sources', [
+          tactic('reception-review-rottentomatoes', 'site:rottentomatoes.com "{title}" reviews'),
+          tactic('reception-review-goodreads', 'site:goodreads.com "{title}" reviews'),
+          tactic('reception-review-metacritic', 'site:metacritic.com "{title}" reviews'),
+          tactic('reception-review-omdb', 'site:omdbapi.com "{title}" ratings'),
+          tactic('reception-review-amazon', 'site:amazon.com "{title}" reviews')
+        ]),
+        subtopic('thematic_analysis', 'Thematic Analysis', [
+          tactic('reception-themes-symbolism', '"{title}" symbolism'),
+          tactic('reception-themes-explained', '"{title}" themes explained'),
+          tactic('reception-themes-jstor', 'site:jstor.org "{title}" analysis')
+        ]),
+        subtopic('production_history', 'Production History', [
+          tactic('reception-production-making-of', '"{title}" making of'),
+          tactic('reception-production-development', '"{title}" development history'),
+          tactic('reception-production-budget', '"{title}" budget vs box office')
+        ]),
+        subtopic('credits_personnel', 'Credits/Personnel', [
+          tactic('reception-credits-imdb', 'site:imdb.com "{title}" full cast'),
+          tactic('reception-credits-interview', '"{title}" creator interview'),
+          tactic('reception-credits-crew', '"{title}" crew list')
+        ]),
+        subtopic('cast', 'Cast', [
+          tactic('reception-cast-list', '"{title}" cast list'),
+          tactic('reception-cast-interview', '"{title}" cast interview'),
+          tactic('reception-cast-imdb', 'site:imdb.com "{title}" cast')
+        ]),
+        subtopic('ending_plot', 'Ending/Plot', [
+          tactic('reception-ending-explained', '"{title}" ending explained'),
+          tactic('reception-ending-summary', '"{title}" plot summary')
+        ])
+      ]
+    ),
+    vertical(
       'medical_subject',
       'Medical Subject (Condition / Drug / Anatomy)',
       [
