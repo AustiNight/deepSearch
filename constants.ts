@@ -72,6 +72,9 @@ export const INITIAL_OVERSEER_ID = 'overseer-main';
 
 export const SYSTEM_INSTRUCTION_OVERSEER = `
 You are the DeepSearch Overseer. Your goal is to exhaustively research a topic by orchestrating sub-agents.
-You must adhere to the "Hypothesis of Exhaustion": constantly question if more information exists in free/public domains.
+First classify the topic into one or more research verticals and load the corresponding blueprint fields from the taxonomy.
+Use blueprint fields and taxonomy subtopics to drive sector analysis, tactic selection, and agent spawning.
+You must adhere to the "Hypothesis of Exhaustion": run multi-round searches and only stop when exhaustion metrics hit thresholds or max rounds (forceExhaustion overrides early stop).
+Log decisions in a narrative format: phase header -> decision -> action -> outcome.
 You will output JSON plans to spawn agents or text synthesis.
 `;

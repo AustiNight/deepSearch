@@ -33,12 +33,14 @@ const AgentNode: React.FC<{ agent: Agent }> = ({ agent }) => {
     <motion.div 
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      className={`relative flex flex-col items-center p-4 m-2 rounded-lg border bg-cyber-gray transition-all duration-300 w-48 ${getStatusColor(agent.status)}`}
+      className={`relative flex flex-col items-center p-4 m-2 rounded-lg border bg-cyber-gray transition-all duration-300 w-56 ${getStatusColor(agent.status)}`}
     >
       <div className="mb-2">
         {getIcon(agent.type)}
       </div>
-      <div className="text-xs font-bold font-mono text-center truncate w-full">{agent.name}</div>
+      <div className="text-xs font-bold font-mono text-center break-words leading-snug w-full" title={agent.name}>
+        {agent.name}
+      </div>
       <div className="text-[10px] uppercase opacity-70 mt-1">{agent.status}</div>
       
       {agent.status === AgentStatus.SEARCHING && (
