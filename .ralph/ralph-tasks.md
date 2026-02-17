@@ -50,11 +50,11 @@
   - [x] Update validation and error messages so raw JSON is never displayed to end users (log raw JSON to sessionStorage only)
   - [x] Add acceptance check: with a known topic, the report body is plain English prose and not JSON text
 
-- [ ] Epic: Correct Person/Entity vertical bias toward “tax assessor/collector roles”
-  - [ ] Audit the Person/Entity taxonomy and prompt templates to remove/avoid role‑bias language that causes searching for people who *are* tax assessors/collectors rather than searching tax records *about* the named person
-  - [ ] Update Person/Entity blueprint to explicitly include “property ownership records for the named person” and “appraisal district search for the person’s name”
-  - [ ] Add targeted tactics that bind the person’s name to property records and appraisal searches (e.g., `\"{name}\" \"property search\" \"appraisal district\"`, `\"{name}\" \"property records\" \"county\"`)
-  - [ ] Add acceptance check: searching “Jonathan Aulson of Dallas Texas” produces queries that search property records for Jonathan Aulson, not people with assessor/collector job titles
+- [x] Epic: Correct Person/Entity vertical bias toward “tax assessor/collector roles”
+  - [x] Audit the Person/Entity taxonomy and prompt templates to remove/avoid role‑bias language that causes searching for people who *are* tax assessors/collectors rather than searching tax records *about* the named person
+  - [x] Update Person/Entity blueprint to explicitly include “property ownership records for the named person” and “appraisal district search for the person’s name”
+  - [x] Add targeted tactics that bind the person’s name to property records and appraisal searches (e.g., `\"{name}\" \"property search\" \"appraisal district\"`, `\"{name}\" \"property records\" \"county\"`)
+  - [x] Add acceptance check: searching “Jonathan Aulson of Dallas Texas” produces queries that search property records for Jonathan Aulson, not people with assessor/collector job titles
 
 - [ ] Epic: Expand Person/Entity property searches to {Primary Location(s)} + {Surrounding Cities and Counties within reasonable search radius based on typical human migration behavior} appraisal districts
   - [ ] Add a geo‑expansion rule: when the person query includes a city (e.g., Dallas, TX), include the city’s central appraisal district first, then expand to nearby metros/adjacent counties within a reasonable radius (DFW & surrounding counties for Dallas)

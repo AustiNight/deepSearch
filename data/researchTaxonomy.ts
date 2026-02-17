@@ -170,6 +170,8 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'affiliations',
         'publicRecords',
         'assets',
+        'propertyOwnershipRecords',
+        'appraisalDistrictSearch',
         'socialProfiles',
         'newsMentions',
         'legalIssues'
@@ -181,9 +183,10 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('individual-professional-resume', 'filetype:pdf "resume" {name}'),
           tactic('individual-professional-cv', 'filetype:pdf "cv" {name}')
         ]),
-        subtopic('assets', 'Assets', [
-          tactic('individual-assets-assessment', '"property assessment" {name}'),
-          tactic('individual-assets-tax', '"tax collector" {name}')
+        subtopic('assets', 'Assets & Property', [
+          tactic('individual-assets-property-records-county', '"{name}" "property records" "county"'),
+          tactic('individual-assets-appraisal-district-search', '"{name}" "property search" "appraisal district"'),
+          tactic('individual-assets-property-ownership', '"{name}" "property ownership"')
         ]),
         subtopic('news', 'News', [
           tactic('individual-news-newspapers', 'site:newspapers.com {name}'),
