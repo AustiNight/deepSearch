@@ -21,6 +21,7 @@ import {
   EARLY_STOP_NEW_SOURCES
 } from '../constants';
 import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
+import { inferVerticalHints, isAddressLike, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -33,20 +34,6 @@ const normalizeDomain = (url: string) => {
   } catch (_) {
     return '';
   }
-};
-
-const isAddressLike = (topic: string) => {
-  const hasNumber = /\d{2,}/.test(topic);
-  const hasStreet = /\b(ave|avenue|st|street|rd|road|blvd|boulevard|ln|lane|dr|drive|ct|court|cir|circle|way|pkwy|parkway|pl|place|hwy|highway)\b/i.test(topic);
-  const hasZip = /\b\d{5}(?:-\d{4})?\b/.test(topic);
-  return (hasNumber && hasStreet) || hasZip;
-};
-
-const isPersonLike = (topic: string) => {
-  const parts = topic.trim().split(/\s+/);
-  if (parts.length < 2) return false;
-  if (/\d/.test(topic)) return false;
-  return true;
 };
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
@@ -166,29 +153,6 @@ const extractCityStateFromTopic = (topic: string) => {
   const parsedHint = parseCityState(hint);
   if (parsedHint.city || parsedHint.state) return parsedHint;
   return parseCityState(topic);
-};
-
-const inferVerticalHints = (topic: string) => {
-  const hints: string[] = [];
-  const lower = topic.toLowerCase();
-  const hasCreativeWork = /\b(film|movie|book|novel|album|song|painting)\b/i.test(lower);
-  const hasReceptionSignals =
-    /\b(review|reviews|rating|ratings|critic|critics|audience|sentiment|award|awards|nomination|box office)\b/i.test(lower) ||
-    /\b(rotten\s+tomatoes|metacritic|goodreads|imdb|omdb)\b/i.test(lower);
-  if (isPersonLike(topic)) hints.push('individual');
-  if (isAddressLike(topic)) hints.push('location');
-  if (/\b(inc|llc|ltd|corp|corporation|company|co\\.)\b/i.test(topic)) hints.push('corporation');
-  if (/\b(product|device|software|app|platform|tool|service)\b/i.test(lower)) hints.push('product');
-  if (/\b(city|county|state|province|region|district)\b/i.test(lower)) hints.push('location');
-  if (/\b(event|incident|summit|conference|protest)\b/i.test(lower)) hints.push('event');
-  if (/\b(law|statute|regulation|act|code|v\\.)\b/i.test(lower)) hints.push('legal_matter');
-  if (/\b(disease|condition|syndrome|drug|medication|anatomy)\b/i.test(lower)) hints.push('medical_subject');
-  if (hasCreativeWork) hints.push('creative_work');
-  if (hasReceptionSignals || hasCreativeWork) hints.push('reception');
-  if (/\b(algorithm|protocol|framework|library|api|system)\b/i.test(lower)) hints.push('technical_concept');
-  if (/\b(theory|movement|ideology|philosophy)\b/i.test(lower)) hints.push('nontechnical_concept');
-  if (hints.length === 0) hints.push('general_discovery');
-  return uniqueList(hints);
 };
 
 const collectFindingsText = (findings: Array<{ content?: string }>) => {
@@ -891,21 +855,6 @@ const normalizeClassification = (
     isUncertain,
     notes: typeof raw?.notes === 'string' ? raw.notes : undefined
   };
-};
-
-const VERTICAL_SEED_QUERIES: Record<string, string> = {
-  individual: '"{topic}" biography',
-  corporation: '"{topic}" company profile',
-  product: '"{topic}" specifications',
-  location: '"{topic}" demographics',
-  event: '"{topic}" timeline',
-  technical_concept: '"{topic}" implementation',
-  nontechnical_concept: '"{topic}" definition',
-  creative_work: '"{topic}" review',
-  reception: '"{topic}" reviews',
-  medical_subject: '"{topic}" overview',
-  legal_matter: '"{topic}" summary',
-  general_discovery: '{topic} overview'
 };
 
 const buildVerticalSeedSectors = (selected: WeightedVertical[], verticalLabels: Map<string, string>, topic: string) => {

@@ -182,13 +182,13 @@
   - [ ] Add tests/fixtures that confirm the updated fields/tactics are exercised in the live workflow (seed queries, sector mapping, exhaustion gating)
   - [ ] Acceptance: the updated taxonomy directly affects sector seeds, method discovery, and exhaustion gating in a live run
 
-- [ ] Epic: Fill the vertical logic table and keep it consistent with code
-  - [ ] Update the vertical logic table to include missing data for `creative_work` and to add the new `reception` vertical row
-  - [ ] Ensure the table’s “Subtopics + example tactic themes” and “Seed Query Template” are sourced from the taxonomy and seed map (single source of truth)
-  - [ ] Define the single source of truth for table generation (taxonomy + seed map + hint logic) and implement a generator or snapshot script
-  - [ ] Generate the missing cell content for `creative_work` and `reception` so the table is complete and accurate
-  - [ ] Add a validation step (script or test) that fails if the table drifts from taxonomy/seed mapping/hint logic
-  - [ ] Acceptance: table matches live taxonomy + logic and updates automatically when taxonomy changes
+- [x] Epic: Fill the vertical logic table and keep it consistent with code
+  - [x] Update the vertical logic table to include missing data for `creative_work` and to add the new `reception` vertical row
+  - [x] Ensure the table’s “Subtopics + example tactic themes” and “Seed Query Template” are sourced from the taxonomy and seed map (single source of truth)
+  - [x] Define the single source of truth for table generation (taxonomy + seed map + hint logic) and implement a generator or snapshot script
+  - [x] Generate the missing cell content for `creative_work` and `reception` so the table is complete and accurate
+  - [x] Add a validation step (script or test) that fails if the table drifts from taxonomy/seed mapping/hint logic
+  - [x] Acceptance: table matches live taxonomy + logic and updates automatically when taxonomy changes
 
 - [ ] Epic: Add a Transparency UI panel for verticals, blueprints, subtopics, tactics
   - [ ] Build a new UI component that is collapsed/hidden by default but accessible to any user (no auth gate)
