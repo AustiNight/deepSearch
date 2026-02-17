@@ -1,6 +1,6 @@
 # Ralph Tasks
 
-- [ ] Epic: Implement CI/CD allowlist sync (Worker → Access policy)
+- [x] Epic: Implement CI/CD allowlist sync (Worker → Access policy)
   - [ ] Replace the stubbed Worker fetch in `.ralph/CICD.sh` with a real `curl` to `ALLOWLIST_ENDPOINT` using Access service token headers (`CF-Access-Client-Id`, `CF-Access-Client-Secret`)
   - [ ] Parse Worker response and enforce required fields (`entries`, `updatedAt`); fail fast on invalid JSON or missing fields
   - [ ] Add robust HTTP error handling: timeouts, retries/backoff, `--fail`, and non‑zero exits on network/HTTP failures
