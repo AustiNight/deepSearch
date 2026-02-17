@@ -6,6 +6,7 @@ import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
 import { LLMProvider, ModelOverrides, ModelRole } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
+import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistService';
 import {
   MIN_AGENT_COUNT,
   MAX_AGENT_COUNT,
@@ -50,6 +51,7 @@ const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const isModelNameValid = (value: string) => MODEL_NAME_PATTERN.test(value.trim());
 
 const ACCESS_ALLOWLIST_STORAGE_KEY = 'overseer_access_allowlist';
+const ACCESS_ALLOWLIST_UPDATED_AT_KEY = 'overseer_access_allowlist_updated_at';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const OPENAI_MODEL_SUGGESTIONS = [
@@ -164,6 +166,9 @@ const App: React.FC = () => {
   const [allowlistInput, setAllowlistInput] = useState('');
   const [allowlistInputError, setAllowlistInputError] = useState('');
   const [allowlistCopyStatus, setAllowlistCopyStatus] = useState('');
+  const [allowlistUpdatedAt, setAllowlistUpdatedAt] = useState<string | null>(null);
+  const [allowlistSyncStatus, setAllowlistSyncStatus] = useState<{ tone: 'success' | 'error' | 'warning' | 'info'; message: string } | null>(null);
+  const [allowlistSyncing, setAllowlistSyncing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(!REQUIRES_PASSWORD);
@@ -171,6 +176,40 @@ const App: React.FC = () => {
   const [authInput, setAuthInput] = useState('');
   const [authError, setAuthError] = useState('');
   const [pendingAction, setPendingAction] = useState<'settings' | 'start' | null>(null);
+
+  const refreshAllowlistFromWorker = async (showStatus: boolean, updateDraft = false) => {
+    setAllowlistSyncing(true);
+    if (showStatus) {
+      setAllowlistSyncStatus({ tone: 'info', message: 'SYNCING ACCESS ALLOWLIST…' });
+    }
+    try {
+      const data = await fetchAllowlist();
+      const entries = Array.isArray(data?.entries) ? data.entries : [];
+      setAccessAllowlist(entries);
+      localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(entries));
+      if (data?.updatedAt) {
+        setAllowlistUpdatedAt(data.updatedAt);
+        localStorage.setItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY, data.updatedAt);
+      } else {
+        setAllowlistUpdatedAt(null);
+        localStorage.removeItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY);
+      }
+      if (updateDraft) {
+        setDraftAllowlistText(entries.join('\n'));
+      }
+      if (showStatus) {
+        const stamp = data?.updatedAt ? ` (updated ${new Date(data.updatedAt).toLocaleString()})` : '';
+        setAllowlistSyncStatus({ tone: 'success', message: `ALLOWLIST SYNCED${stamp}` });
+      }
+    } catch (err) {
+      if (showStatus) {
+        const message = err instanceof Error ? err.message : 'Allowlist sync failed.';
+        setAllowlistSyncStatus({ tone: 'error', message: `SYNC FAILED: ${message}` });
+      }
+    } finally {
+      setAllowlistSyncing(false);
+    }
+  };
 
   // Initialize from local storage if available
   useEffect(() => {
@@ -231,6 +270,12 @@ const App: React.FC = () => {
     } catch (_) {
       // ignore
     }
+    try {
+      const storedUpdatedAt = localStorage.getItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY);
+      if (storedUpdatedAt) setAllowlistUpdatedAt(storedUpdatedAt);
+    } catch (_) {
+      // ignore
+    }
     if (REQUIRES_PASSWORD) {
       try {
         const unlocked = sessionStorage.getItem('overseer_unlocked') === 'true';
@@ -239,9 +284,10 @@ const App: React.FC = () => {
         // ignore
       }
     }
+    void refreshAllowlistFromWorker(false);
   }, []);
 
-  const handleSaveKey = () => {
+  const handleSaveKey = async () => {
     const nextKeys = {
       google: draftKeys.google.trim(),
       openai: draftKeys.openai.trim()
@@ -296,8 +342,45 @@ const App: React.FC = () => {
     const sanitizedAllowlist = parseAllowlistText(draftAllowlistText).entries;
     setAccessAllowlist(sanitizedAllowlist);
     localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(sanitizedAllowlist));
+    setAllowlistSyncStatus({ tone: 'info', message: 'SYNCING ACCESS ALLOWLIST…' });
+    setAllowlistSyncing(true);
+    try {
+      const allowlistResult = await updateAllowlist(sanitizedAllowlist, allowlistUpdatedAt);
+      if (allowlistResult.ok) {
+        const { entries, updatedAt } = allowlistResult.data;
+        const resolvedEntries = Array.isArray(entries) ? entries : sanitizedAllowlist;
+        setAccessAllowlist(resolvedEntries);
+        localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(resolvedEntries));
+        if (updatedAt) {
+          setAllowlistUpdatedAt(updatedAt);
+          localStorage.setItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY, updatedAt);
+        }
+        setDraftAllowlistText(resolvedEntries.join('\n'));
+        setAllowlistSyncStatus({
+          tone: 'success',
+          message: `SYNCED TO CLOUDFLARE ACCESS (${resolvedEntries.length} ENTRIES).`
+        });
+      } else if (allowlistResult.status === 409 || allowlistResult.status === 428) {
+        setAllowlistSyncStatus({
+          tone: 'warning',
+          message: 'ALLOWLIST CHANGED ON SERVER. REFRESH BEFORE RESUBMITTING.'
+        });
+      } else {
+        setAllowlistSyncStatus({
+          tone: 'error',
+          message: `SYNC FAILED: ${allowlistResult.error}`
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Allowlist sync failed.';
+      setAllowlistSyncStatus({
+        tone: 'error',
+        message: `SYNC FAILED: ${message}`
+      });
+    } finally {
+      setAllowlistSyncing(false);
+    }
 
-    setShowSettings(false);
   };
 
   const handleClearKey = () => {
@@ -314,6 +397,7 @@ const App: React.FC = () => {
     setAllowlistInput('');
     setAllowlistInputError('');
     setAllowlistCopyStatus('');
+    setAllowlistSyncStatus(null);
     setShowSettings(true);
   };
 
@@ -655,6 +739,13 @@ const App: React.FC = () => {
                       <span className="text-[10px] font-mono text-gray-500">{allowlistCopyStatus}</span>
                     )}
                     <button
+                      onClick={() => refreshAllowlistFromWorker(true, true)}
+                      disabled={allowlistSyncing}
+                      className="text-[10px] font-mono text-gray-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {allowlistSyncing ? 'SYNCING…' : 'REFRESH'}
+                    </button>
+                    <button
                       onClick={handleCopyAllowlist}
                       className="text-[10px] font-mono text-gray-400 hover:text-white transition-colors"
                     >
@@ -703,11 +794,31 @@ const App: React.FC = () => {
                     {draftAllowlistInvalid.length > 3 ? '…' : ''}
                   </p>
                 )}
+                {allowlistSyncStatus && (
+                  <p
+                    className={`text-[10px] font-mono ${
+                      allowlistSyncStatus.tone === 'success'
+                        ? 'text-cyber-green'
+                        : allowlistSyncStatus.tone === 'warning'
+                          ? 'text-yellow-500'
+                          : allowlistSyncStatus.tone === 'error'
+                            ? 'text-red-500'
+                            : 'text-gray-500'
+                    }`}
+                  >
+                    {allowlistSyncStatus.message}
+                  </p>
+                )}
+                {allowlistUpdatedAt && (
+                  <p className="text-[10px] text-gray-500 font-mono">
+                    Last synced: {new Date(allowlistUpdatedAt).toLocaleString()}
+                  </p>
+                )}
                 <p className="text-[10px] text-gray-500">
-                  This helper only prepares an Access policy allowlist; it does not secure the client app.
+                  Synced to Cloudflare Access on Save. This helper only prepares an Access policy allowlist; it does not secure the client app.
                 </p>
                 <p className="text-[10px] text-gray-500">
-                  Example: copy the list below into Cloudflare Access → Include → Emails in.
+                  Example: copy the list below into Cloudflare Access → Include → Emails in when syncing is unavailable.
                 </p>
                 <pre className="text-[10px] text-gray-500 bg-black/60 border border-gray-800 rounded p-2 whitespace-pre-wrap font-mono">
 {`Include
@@ -857,12 +968,21 @@ const App: React.FC = () => {
                 >
                   <Trash2 className="w-4 h-4" /> CLEAR OVERRIDE
                 </button>
-                <button
-                  onClick={handleSaveKey}
-                  className="flex items-center gap-2 px-4 py-2 bg-cyber-gray border border-gray-600 hover:border-cyber-green hover:bg-gray-800 text-white font-mono text-xs uppercase tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Save className="w-4 h-4" /> Save Configuration
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowSettings(false)}
+                    className="px-3 py-2 text-gray-400 hover:text-white rounded text-xs font-mono transition-colors"
+                  >
+                    CLOSE
+                  </button>
+                  <button
+                    onClick={handleSaveKey}
+                    disabled={allowlistSyncing}
+                    className="flex items-center gap-2 px-4 py-2 bg-cyber-gray border border-gray-600 hover:border-cyber-green hover:bg-gray-800 text-white font-mono text-xs uppercase tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Save className="w-4 h-4" /> Save Configuration
+                  </button>
+                </div>
               </div>
               {!draftHasKey && !USE_PROXY && (
                 <p className="text-[10px] text-yellow-500 font-mono">

@@ -88,7 +88,7 @@
   - [x] Define CORS expectations and request size limits for browser-originated calls (align with `ALLOWED_ORIGINS` in the Worker)
   - [x] Acceptance: POSTing a valid list updates KV and the Access policy; GET returns the same list and updated timestamp
 
-- [ ] Epic: Wire Settings UI to immediate allowlist sync
+- [x] Epic: Wire Settings UI to immediate allowlist sync
   - [ ] Add a small API helper that targets the proxy base URL (same approach as `PROXY_BASE_URL` in `services/*Service.ts`) for `/api/access/allowlist`
   - [ ] On Settings Save in `App.tsx`, call the Worker endpoint with the normalized entries and show a clear success/error status near the allowlist controls
   - [ ] On app load (or Settings open), call `GET /api/access/allowlist` to hydrate `overseer_access_allowlist` in localStorage; include `updatedAt` for optimistic concurrency and fall back to localStorage if the fetch fails
