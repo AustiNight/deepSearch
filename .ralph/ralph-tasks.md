@@ -165,7 +165,7 @@
   - [x] Add tests/fixtures to validate reception hinting, seed query generation, and coexistence with `creative_work`
   - [x] Acceptance: a topic like “The Great Gatsby reviews” selects `reception` and triggers reception tactics; a topic like “The Great Gatsby” can include both `creative_work` and `reception`
 
-- [ ] Epic: Update vertical blueprint fields and tactics to match the revised table (and wire into search workflow)
+- [x] Epic: Update vertical blueprint fields and tactics to match the revised table (and wire into search workflow)
   - [ ] Update blueprint fields per the provided table edits:
     - [ ] Individual: add voter registration; add OpenData search by Locations
     - [ ] Corporation: ensure tech stack includes Github/BuiltWith/StackShare

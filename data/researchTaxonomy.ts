@@ -169,12 +169,14 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'employment',
         'affiliations',
         'publicRecords',
+        'voterRegistration',
         'professionalLicenses',
         'courtRecords',
         'publicSafetyRecords',
         'assets',
         'propertyOwnershipRecords',
         'appraisalDistrictSearch',
+        'openDataByLocation',
         'socialProfiles',
         'newsMentions',
         'legalIssues'
@@ -217,6 +219,17 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
             tactic('individual-records-public-records', '"{name}" "public records" "{city}"')
           ],
           'Public records only. Avoid sensitive or private data; summarize at a high level without doxxing.'
+        ),
+        subtopic(
+          'civic_records',
+          'Civic Records & Open Data',
+          [
+            tactic('individual-civic-voter-registration', '"{name}" "voter registration" "{city}"'),
+            tactic('individual-civic-voter-lookup', '"{name}" "voter lookup"'),
+            tactic('individual-civic-open-data-portal', '"{city}" "open data" portal'),
+            tactic('individual-civic-open-data-311', '"{city}" 311 data')
+          ],
+          'Use official civic sources and aggregated datasets. Avoid sensitive or personally identifying data.'
         ),
         subtopic('news', 'News', [
           tactic('individual-news-newspapers', 'site:newspapers.com {name}'),
@@ -278,6 +291,7 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('corp-legal-doj', 'site:justice.gov "{company}"')
         ]),
         subtopic('tech_stack', 'Tech Stack', [
+          tactic('corp-tech-github', 'site:github.com "{company}"'),
           tactic('corp-tech-builtwith', 'site:builtwith.com "{company}"'),
           tactic('corp-tech-stackshare', 'site:stackshare.io "{company}"'),
           tactic('corp-tech-blog', '"{company}" engineering blog')
@@ -306,6 +320,7 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'variants',
         'pricing',
         'marketplaceListings',
+        'marketplaceListingSources',
         'resaleSignals',
         'supportStatus',
         'knownIssues',
@@ -368,6 +383,7 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'codeViolations',
         'gisLayers',
         'economy',
+        'actuarialAnalysis',
         'majorEmployers',
         'educationRecords',
         'transportationData',
@@ -450,6 +466,11 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('location-economy-chamber', '"{city}" chamber of commerce directory'),
           tactic('location-economy-unemployment', '"{city}" unemployment rate history')
         ]),
+        subtopic('actuarial_analysis', 'Actuarial/Risk Analysis', [
+          tactic('location-actuarial-age-risk', '"{city}" actuarial analysis "age" "risk factor"'),
+          tactic('location-actuarial-insurance', '"{city}" insurance risk factors "actuarial"'),
+          tactic('location-actuarial-mortality', '"{city}" mortality table "actuarial"')
+        ], 'Use aggregated actuarial or insurance studies; avoid personal data.'),
         subtopic('community', 'Community', [
           tactic('location-community-reddit', 'site:reddit.com/r/{city}'),
           tactic('location-community-facebook', 'site:facebook.com "residents of {city}"'),
@@ -471,7 +492,10 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'incidentLogs',
         'afterActionReports',
         'coverage',
+        'historicalStudies',
+        'anthropologicalDiscourse',
         'impact',
+        'actuarialAnalysis',
         'controversy'
       ],
       [
@@ -479,6 +503,12 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('event-primary-transcript', '"{event}" full transcript'),
           tactic('event-primary-report', '"{event}" official report filetype:pdf'),
           tactic('event-primary-archive', 'site:archive.org "{event}"')
+        ]),
+        subtopic('historical_anthropological', 'Historical & Anthropological Studies', [
+          tactic('event-historical-study', '"{event}" historical study'),
+          tactic('event-historical-analysis', '"{event}" historical analysis'),
+          tactic('event-anthropological-analysis', '"{event}" anthropological analysis'),
+          tactic('event-ethnography', '"{event}" ethnographic study')
         ]),
         subtopic('incident_records', 'Incident Records', [
           tactic('event-incident-report', '"{event}" incident report'),
@@ -511,6 +541,11 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('event-impact-aftermath', '"{event}" aftermath'),
           tactic('event-impact-policy', '"{event}" policy changes'),
           tactic('event-impact-damages', '"{event}" death toll OR damages')
+        ]),
+        subtopic('actuarial_analysis', 'Actuarial/Risk Analysis', [
+          tactic('event-actuarial-risk', '"{event}" actuarial analysis "age" "risk factor"'),
+          tactic('event-actuarial-losses', '"{event}" insurance loss estimates "actuarial"'),
+          tactic('event-actuarial-mortality', '"{event}" mortality table "actuarial"')
         ])
       ]
     ),
@@ -707,6 +742,7 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'symptoms',
         'diagnosis',
         'treatment',
+        'homeopathicTheories',
         'guidelines',
         'statistics',
         'publicHealthData',
@@ -714,7 +750,8 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'inspectionData',
         'studies',
         'patientExperience',
-        'risks'
+        'risks',
+        'actuarialAnalysis'
       ],
       [
         subtopic('clinical_definition', 'Clinical Definition', [
@@ -737,9 +774,19 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('medical-treatment-standard', '"{condition}" standard of care'),
           tactic('medical-treatment-fda', '"{drug}" FDA label filetype:pdf')
         ]),
+        subtopic('homeopathic_theories', 'Homeopathic Theories', [
+          tactic('medical-homeopathic-theory', '"{condition}" homeopathic theory'),
+          tactic('medical-homeopathic-treatment', '"{condition}" homeopathic treatment'),
+          tactic('medical-homeopathic-evidence', '"{condition}" homeopathy evidence')
+        ], 'Include as contextual background only; do not present as medical advice.'),
         subtopic('statistics', 'Statistics', [
           tactic('medical-stats-prevalence', '"{condition}" prevalence statistics'),
           tactic('medical-stats-mortality', '"{condition}" mortality rate')
+        ]),
+        subtopic('actuarial_analysis', 'Actuarial/Risk Analysis', [
+          tactic('medical-actuarial-age-risk', '"{condition}" actuarial risk "age"'),
+          tactic('medical-actuarial-morbidity', '"{condition}" morbidity table "actuarial"'),
+          tactic('medical-actuarial-location', '"{condition}" "{city}" actuarial analysis "risk factors"')
         ]),
         subtopic('public_health_environment', 'Public Health & Environment', [
           tactic('medical-public-health-dashboard', '"{condition}" public health dashboard {state}'),
@@ -764,8 +811,10 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'courtRecords',
         'bankruptcy',
         'liensJudgments',
+        'openDataByLocation',
         'recordsRequests',
-        'enforcementActions'
+        'enforcementActions',
+        'actuarialAnalysis'
       ],
       [
         subtopic('statutory_text', 'Statutory Text', [
@@ -805,6 +854,16 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('legal-public-records-portal', '"{state}" "public records request" portal'),
           tactic('legal-sunshine-law', '"{state}" sunshine law request'),
           tactic('legal-open-records', '"{state}" "open records" request')
+        ]),
+        subtopic('open_data_location', 'Local Open Data', [
+          tactic('legal-open-data-portal-city', '"{city}" "open data" portal'),
+          tactic('legal-open-data-portal-ordinances', '"{city}" open data ordinances'),
+          tactic('legal-open-data-portal-courts', '"{city}" "open data" court records')
+        ], 'Use official local government portals and aggregated datasets.'),
+        subtopic('actuarial_analysis', 'Actuarial/Risk Analysis', [
+          tactic('legal-actuarial-risk', '"{law}" actuarial analysis "risk factor"'),
+          tactic('legal-actuarial-liability', '"{law}" insurance liability "actuarial"'),
+          tactic('legal-actuarial-impact', '"{law}" actuarial impact "age"')
         ])
       ]
     ),
@@ -819,7 +878,8 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'sourceTypes',
         'openDataSources',
         'osintTechniques',
-        'recordsRequestOptions'
+        'recordsRequestOptions',
+        'actuarialAnalysis'
       ],
       [
         subtopic('general_discovery', 'General Discovery', [
@@ -828,6 +888,11 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('general-discovery-primary', '{topic} primary sources'),
           tactic('general-discovery-controversy', '{topic} controversy'),
           tactic('general-discovery-latest', '{topic} latest news')
+        ]),
+        subtopic('actuarial_analysis', 'Actuarial/Risk Analysis', [
+          tactic('general-actuarial-risk', '"{topic}" actuarial analysis "age" "risk factor"'),
+          tactic('general-actuarial-table', '"{topic}" actuarial table'),
+          tactic('general-actuarial-insurance', '"{topic}" insurance actuarial study')
         ]),
         subtopic('osint_methods', 'OSINT & Open Data Methods', [
           tactic('general-osint-site-gov', '{topic} site:gov filetype:pdf'),
