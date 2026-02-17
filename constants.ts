@@ -2,6 +2,7 @@ export const GEMINI_MODEL_FAST = 'gemini-3-flash-preview';
 export const GEMINI_MODEL_REASONING = 'gemini-3-flash-preview'; // Using Flash for speed/cost in demo, Pro recommended for prod
 export const OPENAI_MODEL_FAST = 'gpt-4.1-mini';
 export const OPENAI_MODEL_REASONING = 'gpt-4.1';
+export const MODEL_OVERRIDE_STORAGE_KEY = 'overseer_model_overrides';
 
 export const DEFAULT_LLM_PROVIDER = 'google';
 

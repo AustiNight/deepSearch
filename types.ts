@@ -125,6 +125,33 @@ export interface Skill {
 
 export type LLMProvider = 'google' | 'openai';
 
+export type ModelRole =
+  | 'overseer_planning'
+  | 'method_discovery'
+  | 'sector_analysis'
+  | 'deep_research_l1'
+  | 'deep_research_l2'
+  | 'method_audit'
+  | 'gap_hunter'
+  | 'exhaustion_scout'
+  | 'critique'
+  | 'synthesis'
+  | 'validation';
+
+export type ModelOverrides = {
+  overseer_planning?: string;
+  method_discovery?: string;
+  sector_analysis?: string;
+  deep_research_l1?: string;
+  deep_research_l2?: string;
+  method_audit?: string;
+  gap_hunter?: string;
+  exhaustion_scout?: string;
+  critique?: string;
+  synthesis?: string;
+  validation?: string;
+};
+
 export interface AppState {
   topic: string;
   isRunning: boolean;

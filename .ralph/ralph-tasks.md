@@ -1,12 +1,12 @@
 # Ralph Tasks
 
-- [ ] Epic: Define model‑override architecture for OpenAI agent roles
-  - [ ] Enumerate every OpenAI call site and map each to a distinct agent role (Overseer planning, Method Discovery, Sector Analysis, Deep Research L1/L2, Method Audit, Gap Hunter, Exhaustion Scout, Critique, Synthesis, Validation) in a short design note (e.g., `docs/model-roles.md`)
-  - [ ] Define a `ModelOverrides` type in `types.ts` with explicit keys per role and optional values (blank = default model)
-  - [ ] Add a single persisted settings object in localStorage (e.g., `overseer_model_overrides`) that stores the role->model mapping
-  - [ ] Define precedence rules: UI override > env default (`OPENAI_MODEL_FAST/REASONING`) > service hard default
-  - [ ] Add a small helper that resolves the model for a role (e.g., `resolveModelForRole(role, overrides, defaults)`)
-  - [ ] Validate that every OpenAI call site has a named role and a resolved model (acceptance criteria)
+- [x] Epic: Define model‑override architecture for OpenAI agent roles
+  - [x] Enumerate every OpenAI call site and map each to a distinct agent role (Overseer planning, Method Discovery, Sector Analysis, Deep Research L1/L2, Method Audit, Gap Hunter, Exhaustion Scout, Critique, Synthesis, Validation) in a short design note (e.g., `docs/model-roles.md`)
+  - [x] Define a `ModelOverrides` type in `types.ts` with explicit keys per role and optional values (blank = default model)
+  - [x] Add a single persisted settings object in localStorage (e.g., `overseer_model_overrides`) that stores the role->model mapping
+  - [x] Define precedence rules: UI override > env default (`OPENAI_MODEL_FAST/REASONING`) > service hard default
+  - [x] Add a small helper that resolves the model for a role (e.g., `resolveModelForRole(role, overrides, defaults)`)
+  - [x] Validate that every OpenAI call site has a named role and a resolved model (acceptance criteria)
 
 - [ ] Epic: Implement OpenAI model selector UI in Settings dialog
   - [ ] Add a “OpenAI Model per Agent Role” section in the settings UI (likely in `App.tsx`) that is only visible when provider = OpenAI
