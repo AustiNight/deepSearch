@@ -1,5 +1,6 @@
 import { OPENAI_MODEL_FAST, OPENAI_MODEL_REASONING } from "../constants";
 import { Skill } from "../types";
+import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
@@ -162,6 +163,52 @@ const jsonRequest = async (model: string, prompt: string) => {
   return parseJsonFromText(text || "{}");
 };
 
+export const classifyResearchVertical = async (input: {
+  topic: string;
+  taxonomySummary: Array<{ id: string; label: string; blueprintFields?: string[] }>;
+  hintVerticalIds?: string[];
+  contextText?: string;
+}) => {
+  if (!openAIKey) throw new Error("OpenAI not initialized");
+  const summaryLines = input.taxonomySummary.map((v) => {
+    const fields = Array.isArray(v.blueprintFields) && v.blueprintFields.length > 0
+      ? ` fields: ${v.blueprintFields.join(", ")}`
+      : "";
+    return `${v.id} (${v.label})${fields}`;
+  }).join("\n");
+  const hints = Array.isArray(input.hintVerticalIds) && input.hintVerticalIds.length > 0
+    ? input.hintVerticalIds.join(", ")
+    : "none";
+  const contextSnippet = input.contextText ? input.contextText.substring(0, 6000) : "";
+
+  const prompt = `
+    Topic: "${input.topic}"
+    Vertical Hints: ${hints}
+
+    Available Verticals:
+    ${summaryLines}
+
+    Optional Context:
+    ${contextSnippet || "none"}
+
+    Task: Classify the topic into one or more verticals from the list above.
+    Return JSON with:
+    - verticals: [{ id, weight, reason }]
+    - isUncertain: boolean
+    - confidence: number (0-1)
+    Notes:
+    - Weights must sum to 1.
+    - Include multiple verticals if the topic spans them (hybrid).
+    - If unsure, set isUncertain true and lower confidence.
+  `;
+
+  try {
+    return await jsonRequest(getModelFast(), prompt);
+  } catch (_) {
+    return { verticals: [], isUncertain: true, confidence: 0 };
+  }
+};
+
 export const extractResearchMethods = async (topic: string, sourceText: string) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
   const prompt = `
@@ -176,6 +223,54 @@ export const extractResearchMethods = async (topic: string, sourceText: string) 
     return await jsonRequest(getModelFast(), prompt);
   } catch (_) {
     return { methods: [] };
+  }
+};
+
+export const proposeTaxonomyGrowth = async (input: {
+  topic: string;
+  agentName: string;
+  agentFocus: string;
+  findingsText: string;
+  taxonomySummary: Array<{ id: string; label: string; subtopics: Array<{ id: string; label: string }> }>;
+  hintVerticalIds?: string[];
+}): Promise<TaxonomyProposalBundle> => {
+  if (!openAIKey) throw new Error("OpenAI not initialized");
+  const summaryLines = input.taxonomySummary.map((v) => {
+    const subs = v.subtopics.map(s => `${s.id} (${s.label})`).join(", ");
+    return `${v.id} (${v.label}): ${subs}`;
+  }).join("\n");
+  const hints = Array.isArray(input.hintVerticalIds) && input.hintVerticalIds.length > 0
+    ? input.hintVerticalIds.join(", ")
+    : "none";
+
+  const prompt = `
+    Topic: "${input.topic}"
+    Agent: ${input.agentName}
+    Focus: ${input.agentFocus}
+    Vertical Hints: ${hints}
+
+    Existing Taxonomy (verticals and subtopics):
+    ${summaryLines}
+
+    Findings Snippet:
+    ${input.findingsText.substring(0, 8000)}
+
+    Propose taxonomy growth for future research. Focus on NEW search query templates (tactics) that are not already in the taxonomy.
+    Use placeholders like {topic}, {name}, {company}, {companyDomain}, {product}, {brandDomain}, {city}, {county}, {address}, {year}, {event}, {concept}, {title}, {condition}, {drug}, {law}, {statuteCitation}, {billName}.
+    Prefer adding tactics to existing subtopics. Only propose a new subtopic or vertical if the taxonomy clearly lacks coverage.
+
+    Return JSON with:
+    - tactics: [{ verticalId, subtopicId, template, notes? }]
+    - subtopics: [{ verticalId, id?, label, description?, tactics: [{ template, notes? }] }]
+    - verticals: [{ id?, label, description?, blueprintFields, subtopics: [{ id?, label, tactics: [{ template, notes? }] }] }]
+
+    Limits: max 5 tactics, max 1 subtopic, max 1 vertical. If nothing useful, return empty arrays.
+  `;
+
+  try {
+    return await jsonRequest(getModelFast(), prompt);
+  } catch (_) {
+    return { tactics: [], subtopics: [], verticals: [] };
   }
 };
 
