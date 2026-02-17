@@ -4,6 +4,7 @@ import { useOverseer } from './hooks/useOverseer';
 import { AgentGraph } from './components/AgentGraph';
 import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
+import { TransparencyPanel } from './components/TransparencyPanel';
 import { LLMProvider, ModelOverrides, ModelRole } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
 import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistService';
@@ -171,6 +172,7 @@ const App: React.FC = () => {
   const [allowlistSyncing, setAllowlistSyncing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
+  const [showTransparency, setShowTransparency] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(!REQUIRES_PASSWORD);
   const [showAuth, setShowAuth] = useState(false);
   const [authInput, setAuthInput] = useState('');
@@ -556,6 +558,13 @@ const App: React.FC = () => {
              title="Configure API Key"
            >
              <Settings className="w-5 h-5" />
+           </button>
+           <button
+             onClick={() => setShowTransparency(true)}
+             className="p-2 rounded-full hover:bg-gray-800 transition-colors text-gray-400"
+             title="Open Transparency Panel"
+           >
+             <Terminal className="w-5 h-5" />
            </button>
         </div>
       </header>
@@ -1033,6 +1042,8 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      <TransparencyPanel open={showTransparency} onClose={() => setShowTransparency(false)} />
 
       {/* Main Content */}
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full flex flex-col gap-6 relative">
