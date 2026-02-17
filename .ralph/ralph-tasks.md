@@ -109,20 +109,20 @@
     - [x] Keep `forceExhaustion` override while replacing `critique.isExhaustive` gating with computed   exhaustion score
     - [x] Validate that low-coverage topics trigger extra rounds and that exhaustion stops only after   thresholds are met (acceptance criteria)
   
-  - [ ] Feature: Update prompts, types, and UI telemetry
-    - [ ] Extend `types.ts` for taxonomy/blueprint models (ResearchVertical, ResearchSubtopic,   ResearchTactic, BlueprintField, ExhaustionMetrics)
-    - [ ] Update OpenAI/Gemini prompts to accept taxonomy/blueprint context in sector analysis, critique, and   method extraction
-    - [ ] Update agent naming to reflect assigned vertical + subtopic + tactic pack in `hooks/useOverseer.ts`   so UI nodes display intent, not generic labels
-    - [ ] Update `components/AgentGraph.tsx` (and related UI) to render the enriched agent name without   truncating key vertical/tactic identifiers
-    - [ ] Log vertical classification decision with confidence/weights in `hooks/useOverseer.ts`
-    - [ ] Log blueprint fields selected per vertical before spawning agents
-    - [ ] Log tactic pack selection per subtopic and the exact query templates used
-    - [ ] Log per-round exhaustion metrics and explicit stop reason (threshold met vs max rounds vs   forceExhaustion)
-    - [ ] Log taxonomy growth events (agent‑proposed tactics accepted/rejected with provenance) 
-    - [ ] Log hybrid branching and coverage metrics in `hooks/useOverseer.ts`
-    - [ ] Define and implement a narrative Overseer log format (phase header -> decision -> action ->   outcome) so UI logs read as a coherent story of the new approach
-    - [ ] Ensure `SYSTEM_INSTRUCTION_OVERSEER` reflects vertical classification + exhaustion-first reasoning
-    - [ ] Validate the app completes a run and displays the new telemetry logs (acceptance criteria)
+  - [x] Feature: Update prompts, types, and UI telemetry
+    - [x] Extend `types.ts` for taxonomy/blueprint models (ResearchVertical, ResearchSubtopic,   ResearchTactic, BlueprintField, ExhaustionMetrics)
+    - [x] Update OpenAI/Gemini prompts to accept taxonomy/blueprint context in sector analysis, critique, and   method extraction
+    - [x] Update agent naming to reflect assigned vertical + subtopic + tactic pack in `hooks/useOverseer.ts`   so UI nodes display intent, not generic labels
+    - [x] Update `components/AgentGraph.tsx` (and related UI) to render the enriched agent name without   truncating key vertical/tactic identifiers
+    - [x] Log vertical classification decision with confidence/weights in `hooks/useOverseer.ts`
+    - [x] Log blueprint fields selected per vertical before spawning agents
+    - [x] Log tactic pack selection per subtopic and the exact query templates used
+    - [x] Log per-round exhaustion metrics and explicit stop reason (threshold met vs max rounds vs   forceExhaustion)
+    - [x] Log taxonomy growth events (agent‑proposed tactics accepted/rejected with provenance) 
+    - [x] Log hybrid branching and coverage metrics in `hooks/useOverseer.ts`
+    - [x] Define and implement a narrative Overseer log format (phase header -> decision -> action ->   outcome) so UI logs read as a coherent story of the new approach
+    - [x] Ensure `SYSTEM_INSTRUCTION_OVERSEER` reflects vertical classification + exhaustion-first reasoning
+    - [x] Validate the app completes a run and displays the new telemetry logs (acceptance criteria)
   
   - [ ] Feature: Prepare GitHub Pages deployment for Cloudflare Access protection
     - [ ] Add a `CNAME` file at repo root with `deepsearches.app` to support custom domain on GitHub Pages

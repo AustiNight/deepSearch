@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import {
@@ -341,19 +341,6 @@ type ClassificationSummary = {
   notes?: string;
 };
 
-type ExhaustionMetrics = {
-  round: number;
-  label: string;
-  totalQueries: number;
-  uniqueQueries: number;
-  queryNoveltyRatio: number;
-  newDomains: number;
-  totalDomains: number;
-  newSources: number;
-  totalSources: number;
-  diminishingReturnsScore: number;
-};
-
 type ExhaustionTracker = {
   rounds: ExhaustionMetrics[];
   seenQueries: Set<string>;
@@ -661,6 +648,12 @@ const dedupeParagraphs = (text: string) => {
   return out.join('\n\n');
 };
 
+const buildNarrativeMessage = (phase: string, decision: string, action: string, outcome?: string) => {
+  const parts = [phase, `Decision: ${decision}`, `Action: ${action}`];
+  if (outcome) parts.push(`Outcome: ${outcome}`);
+  return parts.join(' | ');
+};
+
 type KnowledgeBase = {
   domains: string[];
   methods: string[];
@@ -827,7 +820,16 @@ export const useOverseer = () => {
       findings: []
     };
     addAgent(overseer);
-    addLog(overseerId, overseer.name, `Protocol Started: "${topic}"`, 'action');
+    const logOverseer = (
+      phase: string,
+      decision: string,
+      action: string,
+      outcome?: string,
+      type: LogEntry['type'] = 'info'
+    ) => {
+      addLog(overseerId, overseer.name, buildNarrativeMessage(phase, decision, action, outcome), type);
+    };
+    logOverseer('PHASE 0: INIT', 'start run', 'initialize providers + taxonomy', `topic "${topic}"`, 'action');
 
     try {
       if (provider === 'openai') {
@@ -853,10 +855,13 @@ export const useOverseer = () => {
         hintVerticalIds: hintVerticals
       });
       let classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
-      addLog(
-        overseerId,
-        overseer.name,
-        `PHASE 0: VERTICAL CLASSIFICATION - Candidates: ${formatWeightedVerticals(classification.verticals)} (confidence ${classification.confidence.toFixed(2)}).`,
+      const weightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
+      const selectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
+      logOverseer(
+        'PHASE 0: VERTICAL CLASSIFICATION',
+        `select ${selectedSummary}${classification.isUncertain ? ' (uncertain)' : ''}`,
+        `weights ${weightSummary}`,
+        `confidence ${classification.confidence.toFixed(2)}`,
         'action'
       );
 
@@ -866,7 +871,13 @@ export const useOverseer = () => {
         const discoveryQueries = uniqueList(expanded.map(e => e.query)).slice(0, Math.min(2, maxMethodAgents));
 
         if (discoveryQueries.length > 0) {
-          addLog(overseerId, overseer.name, `PHASE 0B: GENERAL DISCOVERY - Running ${discoveryQueries.length} quick scouts to reduce uncertainty.`, 'action');
+          logOverseer(
+            'PHASE 0B: GENERAL DISCOVERY',
+            'reduce classification uncertainty',
+            `spawn ${discoveryQueries.length} scouts`,
+            `queries ${discoveryQueries.join(' | ')}`,
+            'action'
+          );
           const discoveryTexts: string[] = [];
           for (let i = 0; i < discoveryQueries.length; i++) {
             const query = discoveryQueries[i];
@@ -909,10 +920,13 @@ export const useOverseer = () => {
               contextText
             });
             classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
-            addLog(
-              overseerId,
-              overseer.name,
-              `PHASE 0B: RECLASSIFY - Candidates: ${formatWeightedVerticals(classification.verticals)} (confidence ${classification.confidence.toFixed(2)}).`,
+            const reweightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
+            const reselectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
+            logOverseer(
+              'PHASE 0B: RECLASSIFY',
+              `select ${reselectedSummary}${classification.isUncertain ? ' (uncertain)' : ''}`,
+              `weights ${reweightSummary}`,
+              `confidence ${classification.confidence.toFixed(2)}`,
               'action'
             );
           }
@@ -932,18 +946,36 @@ export const useOverseer = () => {
       });
 
       if (selectedVerticals.length > 1) {
-        addLog(overseerId, overseer.name, `HYBRID BRANCHING: ${selectedVerticalIds.join(' + ')} selected.`, 'action');
+        logOverseer(
+          'PHASE 0: HYBRID BRANCHING',
+          'multiple verticals selected',
+          'prepare parallel subtopic packs',
+          `verticals ${selectedVerticalIds.join(' + ')}`,
+          'action'
+        );
       }
 
       if (blueprintSelections.length > 0) {
         const blueprintSummary = blueprintSelections
           .map(b => `${b.label}: ${b.fields.join(', ') || 'no fields'}`)
           .join(' | ');
-        addLog(overseerId, overseer.name, `PHASE 0: BLUEPRINT - ${blueprintSummary}`, 'info');
+        logOverseer(
+          'PHASE 0: BLUEPRINT',
+          'load expected fields',
+          `fields ${blueprintSummary}`,
+          `verticals ${selectedVerticalIds.join(', ') || 'none'}`,
+          'info'
+        );
       }
 
       if (nameVariants.length > 0) {
-        addLog(overseerId, overseer.name, `NAME VARIANTS: ${nameVariants.join(' | ')}`, 'info');
+        logOverseer(
+          'PHASE 0: NAME VARIANTS',
+          'expand person aliases',
+          'generate search variants',
+          `variants ${nameVariants.join(' | ')}`,
+          'info'
+        );
       }
 
       const slotValues = buildSlotValues(topic, nameVariants, isAddressLike(topic));
@@ -955,6 +987,80 @@ export const useOverseer = () => {
       const subtopicSeedQueries = uniqueList(
         tacticPacks.map(pack => pack.expanded[0]?.query).filter(Boolean) as string[]
       );
+      const subtopicLabelMap = new Map<string, string>();
+      const methodLabelMap = new Map<string, string>();
+      tacticPacks.forEach(pack => {
+        subtopicLabelMap.set(`${pack.verticalId}:${pack.subtopicId}`, pack.subtopicLabel);
+        methodLabelMap.set(`${pack.verticalId}:${pack.subtopicId}:${pack.methodId}`, pack.methodLabel);
+      });
+
+      const uniqueTemplates = uniqueList(expandedTactics.map(t => t.template));
+      const coverageByVertical = new Map<string, { subtopics: number; tactics: number }>();
+      tacticPacks.forEach(pack => {
+        const entry = coverageByVertical.get(pack.verticalId) || { subtopics: 0, tactics: 0 };
+        entry.subtopics += 1;
+        entry.tactics += pack.expanded.length;
+        coverageByVertical.set(pack.verticalId, entry);
+      });
+      const coverageSummary = Array.from(coverageByVertical.entries()).map(([id, stats]) => {
+        const label = verticalLabels.get(id) || id;
+        return `${label}: ${stats.subtopics} subtopics, ${stats.tactics} tactics`;
+      }).join(' | ') || 'none';
+      logOverseer(
+        'PHASE 0.7: COVERAGE',
+        `select ${selectedVerticalIds.length} verticals`,
+        `tactic packs ${tacticPacks.length}, tactics ${expandedTactics.length}`,
+        coverageSummary,
+        'info'
+      );
+
+      tacticPacks.forEach(pack => {
+        const templates = uniqueList(pack.expanded.map(t => t.template));
+        logOverseer(
+          'PHASE 0.7: TACTIC PACK',
+          `select ${pack.verticalLabel} · ${pack.subtopicLabel}`,
+          `templates ${templates.join(' | ')}`,
+          `expanded ${pack.expanded.length} queries`,
+          'info'
+        );
+      });
+
+      const selectedTaxonomySummary = taxonomySummary.filter(v => selectedVerticalIds.includes(v.id));
+      const taxonomySummaryText = selectedTaxonomySummary
+        .map(v => `${v.label} (${v.id}): ${v.subtopics.map(s => `${s.label} (${s.id})`).join(', ')}`)
+        .join(' | ');
+      const blueprintSummaryText = blueprintSelections
+        .map(b => `${b.label} (${b.id}): ${b.fields.join(', ') || 'none'}`)
+        .join(' | ');
+      const templateLimit = 40;
+      const limitedTemplates = uniqueTemplates.slice(0, templateLimit);
+      const templateContextText = limitedTemplates.join(' | ')
+        + (uniqueTemplates.length > templateLimit ? ` | +${uniqueTemplates.length - templateLimit} more` : '');
+      const researchContextText = [
+        `Selected Verticals: ${selectedVerticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none'}`,
+        `Blueprint Fields: ${blueprintSummaryText || 'none'}`,
+        `Taxonomy Subtopics: ${taxonomySummaryText || 'none'}`,
+        `Tactic Templates: ${templateContextText || 'none'}`
+      ].join('\n').substring(0, 8000);
+
+      const buildPackLabelForQuery = (query: string) => {
+        const meta = methodQueryMeta.get(query);
+        if (!meta?.verticalId) return '';
+        const verticalLabel = verticalLabels.get(meta.verticalId) || meta.verticalId;
+        const subtopicLabel = meta.subtopicId
+          ? (subtopicLabelMap.get(`${meta.verticalId}:${meta.subtopicId}`) || meta.subtopicId)
+          : '';
+        const methodLabel = meta.methodId
+          ? (methodLabelMap.get(`${meta.verticalId}:${meta.subtopicId}:${meta.methodId}`) || meta.methodId)
+          : '';
+        return [verticalLabel, subtopicLabel, methodLabel].filter(Boolean).join(' · ');
+      };
+
+      const buildAgentNameForQuery = (base: string, query: string, index: number) => {
+        const packLabel = buildPackLabelForQuery(query);
+        const ordinal = index + 1;
+        return packLabel ? `${base} · ${packLabel} #${ordinal}` : `${base} ${ordinal}`;
+      };
 
       for (const tactic of expandedTactics) {
         registerMethodQuery(tactic.query, {
@@ -991,12 +1097,36 @@ export const useOverseer = () => {
               note: `focus:${context.focus}`
             });
             if (vetResult.accepted > 0) {
-              addLog(overseerId, overseer.name, `TAXONOMY GROWTH: Accepted ${vetResult.accepted} additions from ${context.agentName}.`, 'success');
-            } else if (vetResult.rejected > 0) {
-              addLog(overseerId, overseer.name, `TAXONOMY GROWTH: Rejected ${vetResult.rejected} proposals from ${context.agentName}.`, 'warning');
+              const acceptedPreview = vetResult.acceptedItems.slice(0, 5).join(' | ');
+              logOverseer(
+                'PHASE 2: TAXONOMY GROWTH',
+                `accept ${vetResult.accepted} proposals`,
+                `templates ${acceptedPreview || 'none'}`,
+                `provenance agent=${context.agentName} focus=${context.focus}`,
+                'success'
+              );
+            }
+            if (vetResult.rejected > 0) {
+              const rejectedPreview = vetResult.rejectedItems
+                .slice(0, 5)
+                .map(item => `${item.item} (${item.reason})`)
+                .join(' | ');
+              logOverseer(
+                'PHASE 2: TAXONOMY GROWTH',
+                `reject ${vetResult.rejected} proposals`,
+                `templates ${rejectedPreview || 'none'}`,
+                `provenance agent=${context.agentName} focus=${context.focus}`,
+                'warning'
+              );
             }
           } catch (e: any) {
-            addLog(overseerId, overseer.name, `TAXONOMY GROWTH ERROR: ${e?.message || 'Unknown error'}`, 'warning');
+            logOverseer(
+              'PHASE 2: TAXONOMY GROWTH',
+              'error while vetting proposals',
+              'skip persistence',
+              e?.message || 'Unknown error',
+              'warning'
+            );
           }
         });
       };
@@ -1022,13 +1152,19 @@ export const useOverseer = () => {
       ]).slice(0, Math.min(6, maxMethodAgents));
       discoveryTemplateQueries.forEach(q => registerMethodQuery(q, { source: 'method_discovery_template' }));
       if (discoveryQueries.length > 0) {
-        addLog(overseerId, overseer.name, `PHASE 0.5: METHOD DISCOVERY - Spawning ${discoveryQueries.length} scouts to learn how to research the topic.`, 'action');
+        logOverseer(
+          'PHASE 0.5: METHOD DISCOVERY',
+          'collect method candidates',
+          `spawn ${discoveryQueries.length} scouts`,
+          `queries ${discoveryQueries.join(' | ')}`,
+          'action'
+        );
         const discoveryPromises = discoveryQueries.map(async (query: string, index: number) => {
           await new Promise(resolve => setTimeout(resolve, index * 600));
           const agentId = generateId();
           const agent: Agent = {
             id: agentId,
-            name: `Method Discovery ${index + 1}`,
+            name: buildAgentNameForQuery('Method Discovery', query, index),
             type: AgentType.RESEARCHER,
             status: AgentStatus.SEARCHING,
             task: 'Discover research methods',
@@ -1059,7 +1195,7 @@ export const useOverseer = () => {
           });
           addLog(agentId, agent.name, `Method Discovery Complete. Sources Vetted: ${result.sources.length}`, 'success');
 
-          const methods = await extractResearchMethods(topic, result.text);
+          const methods = await extractResearchMethods(topic, result.text, researchContextText);
           const extracted = Array.isArray(methods?.methods) ? methods.methods : [];
           const extractedQueries = extracted.map((m: any) => m?.query).filter(Boolean);
           extractedQueries.forEach((q: string) => registerMethodQuery(q, { source: 'llm_method_discovery' }));
@@ -1071,8 +1207,14 @@ export const useOverseer = () => {
       }
 
       // --- PHASE 1: DIMENSIONAL MAPPING (SECTORS) ---
-      addLog(overseerId, overseer.name, 'PHASE 1: DIMENSIONAL MAPPING - Splitting topic into sectors.', 'action');
-      const sectorPlan = await generateSectorAnalysis(topic, skills);
+      logOverseer(
+        'PHASE 1: DIMENSIONAL MAPPING',
+        'derive sector plan',
+        'request sector analysis with taxonomy + blueprint context',
+        undefined,
+        'action'
+      );
+      const sectorPlan = await generateSectorAnalysis(topic, skills, researchContextText);
       const rawSectors = sectorPlan && Array.isArray(sectorPlan.sectors) ? sectorPlan.sectors : [];
       const weightMap = new Map(selectedVerticals.map(v => [v.id, v.weight]));
       const orderedPacks = [...tacticPacks].sort((a, b) => {
@@ -1137,7 +1279,7 @@ export const useOverseer = () => {
         for (let i = 0; i < needed; i++) {
           const fallbackQuery = templates[i % templates.length] || topic;
           sectors.push({
-            name: `Method Scout ${i + 1}`,
+            name: buildAgentNameForQuery('Method Scout', fallbackQuery, i),
             focus: 'Method-based deep search',
             initialQuery: fallbackQuery
           });
@@ -1146,7 +1288,13 @@ export const useOverseer = () => {
       if (sectors.length > maxAgents) {
         const trimmed = sectors.slice(0, maxAgents);
         if (subtopicSectors.length > maxAgents) {
-          addLog(overseerId, overseer.name, 'PHASE 1 WARNING: Subtopic packs exceed agent cap; some taxonomy subtopics will be skipped.', 'warning');
+          logOverseer(
+            'PHASE 1: AGENT CAP',
+            'subtopic packs exceed cap',
+            'trim sector list',
+            `cap ${maxAgents}, packs ${subtopicSectors.length}`,
+            'warning'
+          );
         }
         sectors = trimmed;
       }
@@ -1172,6 +1320,14 @@ export const useOverseer = () => {
         ...methodCandidateQueries
       ]).slice(0, Math.max(maxMethodAgents, maxMethodAgents * maxRounds));
 
+      logOverseer(
+        'PHASE 2: LOOP CONFIG',
+        forceExhaustion ? 'forceExhaustion enabled' : 'forceExhaustion disabled',
+        `minRounds ${minRounds}, maxRounds ${maxRounds}`,
+        `thresholds diminish>=${earlyStopDiminishingScore.toFixed(2)} novelty<=${earlyStopNoveltyRatio.toFixed(2)} newDomains<=${earlyStopNewDomains} newSources<=${earlyStopNewSources}`,
+        'info'
+      );
+
       const shouldStopAfterRound = (round: number, metrics: ExhaustionMetrics) => {
         if (forceExhaustion) return false;
         if (round < minRounds) return false;
@@ -1182,13 +1338,23 @@ export const useOverseer = () => {
         return lowNovelty || (lowSources && lowDomains);
       };
 
+      let loopStopReason: string | null = null;
+      let loopStopDetail: string | null = null;
+      let loopStopRound: number | null = null;
+
       for (let round = 1; round <= maxRounds; round += 1) {
         const roundQueries: string[] = [];
         const roundSources: string[] = [];
         const roundSectors = round === 1 ? sectors : [];
 
         if (roundSectors.length > 0) {
-          addLog(overseerId, overseer.name, `PHASE 2: DEEP DRILL (ROUND ${round}/${maxRounds}) - Spawning ${roundSectors.length} agents for recursive analysis.`, 'action');
+          logOverseer(
+            `PHASE 2: DEEP DRILL (ROUND ${round}/${maxRounds})`,
+            'run recursive analysis',
+            `spawn ${roundSectors.length} agents`,
+            `queries ${roundSectors.map(s => s.initialQuery).join(' | ')}`,
+            'action'
+          );
           roundSectors.forEach((s: any) => roundQueries.push(s.initialQuery));
           const agentPromises = roundSectors.map(async (sector: any, index: number) => {
             // Stagger starts slightly to avoid instant rate limit hits (though unlikely with client-side)
@@ -1254,13 +1420,19 @@ export const useOverseer = () => {
         });
 
         if (methodQueriesToRun.length > 0) {
-          addLog(overseerId, overseer.name, `PHASE 2B: METHOD AUDIT (ROUND ${round}/${maxRounds}) - Spawning ${methodQueriesToRun.length} independent search agents.`, 'action');
+          logOverseer(
+            `PHASE 2B: METHOD AUDIT (ROUND ${round}/${maxRounds})`,
+            'expand coverage with independent queries',
+            `spawn ${methodQueriesToRun.length} agents`,
+            `queries ${methodQueriesToRun.join(' | ')}`,
+            'action'
+          );
           const methodAgentPromises = methodQueriesToRun.map(async (query: string, index: number) => {
             await new Promise(resolve => setTimeout(resolve, index * 700));
             const agentId = generateId();
             const agent: Agent = {
               id: agentId,
-              name: round === 1 ? `Method Audit ${index + 1}` : `Method Audit R${round}-${index + 1}`,
+              name: buildAgentNameForQuery(round === 1 ? 'Method Audit' : `Method Audit R${round}`, query, index),
               type: AgentType.RESEARCHER,
               status: AgentStatus.SEARCHING,
               task: 'Independent method audit',
@@ -1305,14 +1477,30 @@ export const useOverseer = () => {
 
           await Promise.all(methodAgentPromises);
         } else if (round === 1) {
-          addLog(overseerId, overseer.name, 'PHASE 2B: METHOD AUDIT - Skipped (agent cap reached).', 'warning');
+          logOverseer(
+            'PHASE 2B: METHOD AUDIT',
+            'agent cap reached',
+            'skip method audit',
+            `cap ${maxAgents}`,
+            'warning'
+          );
         }
 
         if (roundQueries.length === 0) {
+          loopStopReason = 'no queries remaining';
+          loopStopDetail = 'no sector or method queries available';
+          loopStopRound = round;
           break;
         }
 
         const metrics = recordExhaustionRound(exhaustionTracker, `round_${round}`, roundQueries, roundSources);
+        logOverseer(
+          `PHASE 2: EXHAUSTION METRICS (ROUND ${round}/${maxRounds})`,
+          'evaluate stop thresholds',
+          `novelty ${metrics.queryNoveltyRatio.toFixed(2)} newDomains ${metrics.newDomains}/${metrics.totalDomains} newSources ${metrics.newSources}/${metrics.totalSources}`,
+          `diminishing ${metrics.diminishingReturnsScore.toFixed(2)} queries ${metrics.uniqueQueries}/${metrics.totalQueries}`,
+          'info'
+        );
         const baseStop = shouldStopAfterRound(round, metrics);
         if (baseStop) {
           const verticalGate = evaluateVerticalExhaustion({
@@ -1326,30 +1514,62 @@ export const useOverseer = () => {
             brandDomainHint
           });
           if (verticalGate.blockEarlyStop) {
-            addLog(
-              overseerId,
-              overseer.name,
-              `EXHAUSTION GATE: ${verticalGate.reasons.join(' | ')} Continuing search.`,
+            logOverseer(
+              'PHASE 2: EXHAUSTION GATE',
+              'override early stop',
+              'continue search',
+              verticalGate.reasons.join(' | '),
               'info'
             );
           } else {
+            loopStopReason = 'early stop thresholds met';
+            loopStopDetail = `round ${round} met novelty/domains/sources thresholds`;
+            loopStopRound = round;
             break;
           }
         }
       }
 
+      if (!loopStopReason) {
+        loopStopReason = 'max rounds reached';
+        loopStopDetail = `completed ${maxRounds} rounds`;
+        loopStopRound = maxRounds;
+      }
+      if (loopStopReason) {
+        const detail = loopStopRound ? `${loopStopDetail || ''} (round ${loopStopRound})`.trim() : (loopStopDetail || undefined);
+        logOverseer(
+          'PHASE 2: LOOP EXIT',
+          loopStopReason,
+          'halt additional rounds',
+          detail,
+          'info'
+        );
+      }
+
       // --- PHASE 3: CROSS-EXAMINATION (GAP FILL) ---
       updateAgent(overseerId, { status: AgentStatus.ANALYZING });
-      addLog(overseerId, overseer.name, 'PHASE 3: RED TEAM - Analyzing aggregate data for contradictions.', 'action');
+      logOverseer(
+        'PHASE 3: RED TEAM',
+        'audit for contradictions + gaps',
+        'analyze aggregate findings with taxonomy context',
+        undefined,
+        'action'
+      );
       
       const allFindingsText = findingsRef.current.map(f => f.content).join('\n');
-      const critique = await critiqueAndFindGaps(topic, allFindingsText);
+      const critique = await critiqueAndFindGaps(topic, allFindingsText, researchContextText);
       const latestMetrics = exhaustionTracker.rounds[exhaustionTracker.rounds.length - 1];
       const exhaustionScore = latestMetrics ? computeExhaustionScore(latestMetrics) : 0;
       const isExhausted = latestMetrics ? exhaustionScore >= earlyStopDiminishingScore : false;
 
       if ((forceExhaustion || !isExhausted) && critique.newMethod) {
-         addLog(overseerId, overseer.name, `CRITIQUE: Major Blindspot - ${critique.gapAnalysis}`, 'warning');
+         logOverseer(
+           'PHASE 3: RED TEAM',
+           'gap detected',
+           'spawn gap-fill agent',
+           critique.gapAnalysis || 'gap identified',
+           'warning'
+         );
          
          const gapAgentId = generateId();
          const gapAgent: Agent = {
@@ -1396,14 +1616,21 @@ export const useOverseer = () => {
            gapSources
          );
       } else if (critique.newMethod) {
-        addLog(
-          overseerId,
-          overseer.name,
-          'CRITIQUE: Blindspot noted, but exhaustion score is high; skipping gap fill.',
+        logOverseer(
+          'PHASE 3: RED TEAM',
+          'gap detected but exhaustion high',
+          'skip gap-fill agent',
+          `exhaustionScore ${exhaustionScore.toFixed(2)}`,
           'info'
         );
       } else {
-        addLog(overseerId, overseer.name, 'Red Team Assessment: Sufficient data density achieved.', 'success');
+        logOverseer(
+          'PHASE 3: RED TEAM',
+          'no critical gaps detected',
+          'proceed to exhaustion test',
+          `exhaustionScore ${exhaustionScore.toFixed(2)}`,
+          'success'
+        );
       }
 
       // --- PHASE 3B: EXHAUSTION TEST (INDEPENDENT SEARCH) ---
@@ -1427,14 +1654,20 @@ export const useOverseer = () => {
           .slice(0, Math.min(remainingCapacity, maxMethodAgents));
 
         if (exhaustQueries.length > 0) {
-          addLog(overseerId, overseer.name, `PHASE 3B: EXHAUSTION TEST - Spawning ${exhaustQueries.length} additional scouts.`, 'action');
+          logOverseer(
+            'PHASE 3B: EXHAUSTION TEST',
+            'validate completeness',
+            `spawn ${exhaustQueries.length} scouts`,
+            `queries ${exhaustQueries.join(' | ')}`,
+            'action'
+          );
           const phase3BSources: string[] = [];
           const exhaustPromises = exhaustQueries.map(async (query: string, index: number) => {
             await new Promise(resolve => setTimeout(resolve, index * 700));
             const agentId = generateId();
             const agent: Agent = {
               id: agentId,
-              name: `Exhaustion Scout ${index + 1}`,
+              name: buildAgentNameForQuery('Exhaustion Scout', query, index),
               type: AgentType.RESEARCHER,
               status: AgentStatus.SEARCHING,
               task: 'Exhaustion test',
@@ -1481,13 +1714,25 @@ export const useOverseer = () => {
           await Promise.all(exhaustPromises);
           recordExhaustionRound(exhaustionTracker, 'exhaustion_test', exhaustQueries, phase3BSources);
         } else {
-          addLog(overseerId, overseer.name, 'PHASE 3B: EXHAUSTION TEST - No remaining unique methods.', 'warning');
+          logOverseer(
+            'PHASE 3B: EXHAUSTION TEST',
+            'no remaining unique methods',
+            'skip exhaustion scouts',
+            undefined,
+            'warning'
+          );
         }
       }
 
       // --- PHASE 4: GRAND SYNTHESIS ---
       updateAgent(overseerId, { status: AgentStatus.THINKING });
-      addLog(overseerId, overseer.name, 'PHASE 4: GRAND SYNTHESIS - Compiling "Deep Dive" Report...', 'info');
+      logOverseer(
+        'PHASE 4: GRAND SYNTHESIS',
+        'compile report',
+        'synthesize findings with citations',
+        undefined,
+        'info'
+      );
 
       const allRawSources = findingsRef.current.flatMap((f: any) => f.rawSources || []);
       const allowedSources = uniqueList(allRawSources.map((s: any) => s.uri).filter(Boolean));
@@ -1495,10 +1740,11 @@ export const useOverseer = () => {
       const rawText = (finalReportData as any)?.__rawText;
       if (rawText) {
         const providerLabel = provider === 'openai' ? 'openai' : 'gemini';
-        addLog(
-          overseerId,
-          overseer.name,
-          `SYNTHESIS WARNING: Non-JSON output. Raw stored in sessionStorage keys "overseer_synthesis_raw_${providerLabel}_initial" and "_retry". Displaying raw output section.`,
+        logOverseer(
+          'PHASE 4: SYNTHESIS',
+          'non-JSON output',
+          'persist raw output to sessionStorage',
+          `keys overseer_synthesis_raw_${providerLabel}_initial/_retry`,
           'warning'
         );
       }
@@ -1516,7 +1762,13 @@ export const useOverseer = () => {
         return { ...section, sources };
       });
       if (filteredOutCount > 0) {
-        addLog(overseerId, overseer.name, `SOURCE FILTER: Removed ${filteredOutCount} non-grounded links from bibliography.`, 'warning');
+        logOverseer(
+          'PHASE 4: SOURCE FILTER',
+          'remove non-grounded links',
+          `filtered ${filteredOutCount} sources`,
+          'bibliography pruned',
+          'warning'
+        );
       }
       let summary = (finalReportData as any)?.summary || "Summary generation failed.";
       if (rawText) {
@@ -1534,7 +1786,13 @@ export const useOverseer = () => {
           summary = "Synthesis returned unstructured output. See raw output section.";
         }
       } else if (sections.length === 0) {
-        addLog(overseerId, overseer.name, 'SYNTHESIS WARNING: No structured sections returned.', 'warning');
+        logOverseer(
+          'PHASE 4: SYNTHESIS',
+          'missing structured sections',
+          'inject fallback section',
+          undefined,
+          'warning'
+        );
         sections = [{
           title: "Synthesis Incomplete",
           content: "The model did not return a structured report. Try a smaller topic, or re-run with more sources.",
@@ -1557,7 +1815,13 @@ export const useOverseer = () => {
       const isValid = validation?.isValid === true;
       if (!isValid) {
         const issues = Array.isArray(validation?.issues) ? validation.issues : [];
-        addLog(overseerId, overseer.name, `VALIDATION FAILED: ${issues.slice(0, 3).join(' | ') || 'Unspecified issues.'}`, 'warning');
+        logOverseer(
+          'PHASE 4: VALIDATION',
+          'report failed validation',
+          'append issues to report',
+          issues.slice(0, 3).join(' | ') || 'Unspecified issues',
+          'warning'
+        );
         sections = [
           ...sections,
           {
@@ -1586,17 +1850,35 @@ export const useOverseer = () => {
           lastUpdated: Date.now()
         });
       } else {
-        addLog(overseerId, overseer.name, 'KNOWLEDGE BASE: Update skipped due to validation failure.', 'warning');
+        logOverseer(
+          'PHASE 4: KNOWLEDGE BASE',
+          'skip update',
+          'validation failed',
+          undefined,
+          'warning'
+        );
       }
 
       setReport(reportCandidate);
       
       updateAgent(overseerId, { status: AgentStatus.COMPLETE });
-      addLog(overseerId, overseer.name, 'Protocol Complete. Report Ready.', 'success');
+      logOverseer(
+        'PHASE 4: COMPLETE',
+        'final report ready',
+        'deliver report to UI',
+        undefined,
+        'success'
+      );
 
     } catch (e: any) {
       console.error(e);
-      addLog(overseerId, overseer.name, `SYSTEM FAILURE: ${e.message}`, 'error');
+      logOverseer(
+        'PHASE 4: FAILURE',
+        'system error',
+        'abort run',
+        e.message,
+        'error'
+      );
       updateAgent(overseerId, { status: AgentStatus.FAILED });
       if (e.message && (e.message.toLowerCase().includes("api key") || e.message.includes("401"))) {
         setIsRunning(false);

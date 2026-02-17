@@ -209,14 +209,18 @@ export const classifyResearchVertical = async (input: {
   }
 };
 
-export const extractResearchMethods = async (topic: string, sourceText: string) => {
+export const extractResearchMethods = async (topic: string, sourceText: string, contextText?: string) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
   const prompt = `
     Topic: "${topic}"
+    Research Context (taxonomy + blueprint):
+    ${contextText || "none"}
+
     SOURCE TEXT:
     ${sourceText.substring(0, 8000)}
 
     Extract multiple distinct research methods and concrete search queries that would help research the topic.
+    Use the context to avoid duplicating existing tactic templates and to cover blueprint fields.
     Return JSON.
   `;
   try {
@@ -323,19 +327,22 @@ const jsonRequestWithRaw = async (model: string, prompt: string) => {
 };
 
 // --- PHASE 1: SECTOR ANALYSIS ---
-export const generateSectorAnalysis = async (topic: string, skills: Skill[] = []) => {
+export const generateSectorAnalysis = async (topic: string, skills: Skill[] = [], contextText?: string) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
   const currentDate = new Date().toDateString();
 
   const prompt = `
     Topic: "${topic}"
     Current Date: ${currentDate}
+    Research Context (taxonomy + blueprint):
+    ${contextText || "none"}
 
     You are the Research Director. We need a 360-degree view of this topic.
     Break this topic down into 8-12 DISTINCT SECTORS or DIMENSIONS that require separate investigation.
     Examples: "Economic Impact", "Technical Architecture", "Competitor Landscape", "Historical Context", "Future Risks".
 
     Do NOT just give generic names. Make the tasks specific and include a concrete initialQuery for each sector.
+    Ensure sectors collectively cover blueprint fields and key taxonomy subtopics.
 
     Return JSON.
   `;
@@ -437,13 +444,15 @@ export const performDeepResearch = async (agentName: string, focus: string, init
 };
 
 // --- PHASE 3: CRITIQUE ---
-export const critiqueAndFindGaps = async (topic: string, currentFindings: string) => {
+export const critiqueAndFindGaps = async (topic: string, currentFindings: string, contextText?: string) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
 
   const currentDate = new Date().toDateString();
   const prompt = `
     Topic: ${topic}
     Current Date: ${currentDate}
+    Research Context (taxonomy + blueprint):
+    ${contextText || "none"}
     Current Findings Summary: ${currentFindings.substring(0, 15000)}...
 
     You are the "Red Team" Critic.
@@ -454,6 +463,7 @@ export const critiqueAndFindGaps = async (topic: string, currentFindings: string
     1. Are there conflicting numbers?
     2. Did we only find positive news? (We need the negatives).
     3. Is there a "Competitor" or "Alternative" we completely missed?
+    4. Are any blueprint fields or taxonomy subtopics still missing?
 
     If MAJOR gaps, propose a specific gap-fill search.
 
