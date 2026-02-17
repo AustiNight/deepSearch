@@ -2,3 +2,22 @@ name = "deepsearch-proxy"
 main = "workers/worker.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
+
+# KV namespace binding for Cloudflare Access allowlist sync.
+# Replace the placeholder IDs below with real namespace IDs:
+# `wrangler kv namespace create ACCESS_ALLOWLIST_KV` (and --preview for preview_id).
+kv_namespaces = [
+  { binding = "ACCESS_ALLOWLIST_KV", id = "dev-access-allowlist-kv-id", preview_id = "dev-access-allowlist-kv-preview-id" }
+]
+
+[env.stage]
+# Stage namespace for allowlist sync.
+kv_namespaces = [
+  { binding = "ACCESS_ALLOWLIST_KV", id = "stage-access-allowlist-kv-id", preview_id = "stage-access-allowlist-kv-preview-id" }
+]
+
+[env.prod]
+# Production namespace for allowlist sync.
+kv_namespaces = [
+  { binding = "ACCESS_ALLOWLIST_KV", id = "prod-access-allowlist-kv-id", preview_id = "prod-access-allowlist-kv-preview-id" }
+]

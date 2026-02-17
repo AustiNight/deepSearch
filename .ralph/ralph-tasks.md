@@ -70,23 +70,23 @@
   - [x] Add acceptance check: query “Jonathan Aulson of Dallas Texas”triggers Dallas CAD first and then expands to the full DFW CAD or Tax Assessor-Collector website or online data tool as outlined above, including 2023 purchase visibility in Dallas CAD
   - [x] Add acceptance check: query expansion uses the defined heuristic tiers and CAD/Tax Assessor-Collector prioritization logic without relying on external data availability
 
-- [ ] Epic: Immediate Cloudflare Access allowlist sync via Worker + KV
-  - [ ] Add a KV binding for allowlist storage (name it `ACCESS_ALLOWLIST_KV`) in `wrangler.toml`, and include it in the Worker `Env` interface in `workers/worker.ts`
-  - [ ] Add per-environment KV namespace scaffolding (dev/stage/prod) and document the required `wrangler` bindings and namespace IDs in repo docs/config comments
-  - [ ] Implement allowlist normalization in the Worker (trim, lowercase, de-dup, basic email validation) matching the UI logic in `App.tsx`, with a safe cap (e.g., 500 entries) and clear validation errors
-  - [ ] Add a new Worker endpoint `/api/access/allowlist` with:
-    - [ ] `GET` to return the stored list and metadata (updated timestamp, count)
-    - [ ] `PUT` or `POST` to accept `{ entries: string[] }`, normalize/validate, persist to KV, then update Cloudflare Access policy
-  - [ ] Gate the endpoint using Cloudflare Access auth (verify `Cf-Access-Jwt-Assertion` or enforce Access-protected routes) and `Cf-Access-Authenticated-User-Email`, plus optional admin allowlist env var (e.g., `ALLOWLIST_ADMIN_EMAILS`); return 403 if unauthenticated/unauthorized
-  - [ ] Add optimistic concurrency: `GET` returns `updatedAt`/`version`, `PUT` requires `expectedUpdatedAt` (or `If-Match`) and returns 409 on stale writes
-  - [ ] Implement Cloudflare Access policy update flow in the Worker using secrets:
-    - [ ] `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ACCESS_APP_ID`, `CF_ACCESS_POLICY_ID`
-    - [ ] Fetch the current policy, locate or create the email-include rule, preserve all other include/exclude/require blocks, and avoid reordering unrelated policy rules
-    - [ ] Handle Cloudflare API errors, rate limits, and retries (bounded), and never log secrets
-  - [ ] Return a structured response `{ entries, updatedAt, updatedBy, policyUpdated }` and error messages that are safe for the UI
-  - [ ] Add server-side logging for success/failure (no PII beyond counts and domain summaries) and store `updatedBy`/`updatedAt` metadata in KV
-  - [ ] Define CORS expectations and request size limits for browser-originated calls (align with `ALLOWED_ORIGINS` in the Worker)
-  - [ ] Acceptance: POSTing a valid list updates KV and the Access policy; GET returns the same list and updated timestamp
+- [x] Epic: Immediate Cloudflare Access allowlist sync via Worker + KV
+  - [x] Add a KV binding for allowlist storage (name it `ACCESS_ALLOWLIST_KV`) in `wrangler.toml`, and include it in the Worker `Env` interface in `workers/worker.ts`
+  - [x] Add per-environment KV namespace scaffolding (dev/stage/prod) and document the required `wrangler` bindings and namespace IDs in repo docs/config comments
+  - [x] Implement allowlist normalization in the Worker (trim, lowercase, de-dup, basic email validation) matching the UI logic in `App.tsx`, with a safe cap (e.g., 500 entries) and clear validation errors
+  - [x] Add a new Worker endpoint `/api/access/allowlist` with:
+    - [x] `GET` to return the stored list and metadata (updated timestamp, count)
+    - [x] `PUT` or `POST` to accept `{ entries: string[] }`, normalize/validate, persist to KV, then update Cloudflare Access policy
+  - [x] Gate the endpoint using Cloudflare Access auth (verify `Cf-Access-Jwt-Assertion` or enforce Access-protected routes) and `Cf-Access-Authenticated-User-Email`, plus optional admin allowlist env var (e.g., `ALLOWLIST_ADMIN_EMAILS`); return 403 if unauthenticated/unauthorized
+  - [x] Add optimistic concurrency: `GET` returns `updatedAt`/`version`, `PUT` requires `expectedUpdatedAt` (or `If-Match`) and returns 409 on stale writes
+  - [x] Implement Cloudflare Access policy update flow in the Worker using secrets:
+    - [x] `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ACCESS_APP_ID`, `CF_ACCESS_POLICY_ID`
+    - [x] Fetch the current policy, locate or create the email-include rule, preserve all other include/exclude/require blocks, and avoid reordering unrelated policy rules
+    - [x] Handle Cloudflare API errors, rate limits, and retries (bounded), and never log secrets
+  - [x] Return a structured response `{ entries, updatedAt, updatedBy, policyUpdated }` and error messages that are safe for the UI
+  - [x] Add server-side logging for success/failure (no PII beyond counts and domain summaries) and store `updatedBy`/`updatedAt` metadata in KV
+  - [x] Define CORS expectations and request size limits for browser-originated calls (align with `ALLOWED_ORIGINS` in the Worker)
+  - [x] Acceptance: POSTing a valid list updates KV and the Access policy; GET returns the same list and updated timestamp
 
 - [ ] Epic: Wire Settings UI to immediate allowlist sync
   - [ ] Add a small API helper that targets the proxy base URL (same approach as `PROXY_BASE_URL` in `services/*Service.ts`) for `/api/access/allowlist`
