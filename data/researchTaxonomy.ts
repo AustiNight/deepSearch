@@ -169,6 +169,9 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'employment',
         'affiliations',
         'publicRecords',
+        'professionalLicenses',
+        'courtRecords',
+        'publicSafetyRecords',
         'assets',
         'propertyOwnershipRecords',
         'appraisalDistrictSearch',
@@ -203,6 +206,18 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           ],
           'Use public record sources only (appraisal/assessor, recorder, parcel/GIS). Avoid sensitive data; focus on ownership and assessment history.'
         ),
+        subtopic(
+          'records_licensing',
+          'Records & Licensing',
+          [
+            tactic('individual-records-license-lookup', '"{name}" "license lookup" {state}'),
+            tactic('individual-records-professional-license', '"{name}" "professional license" {state}'),
+            tactic('individual-records-court-search', '"{name}" "case search" "{countyPrimary}"'),
+            tactic('individual-records-court-docket', '"{name}" "court docket" "{state}"'),
+            tactic('individual-records-public-records', '"{name}" "public records" "{city}"')
+          ],
+          'Public records only. Avoid sensitive or private data; summarize at a high level without doxxing.'
+        ),
         subtopic('news', 'News', [
           tactic('individual-news-newspapers', 'site:newspapers.com {name}'),
           tactic('individual-news-gazette', '"{hometown} Gazette" {name}')
@@ -229,12 +244,22 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'subsidiaries',
         'products',
         'customers',
+        'registrations',
+        'licensesPermits',
         'regulatory',
         'litigation',
         'culture',
         'strategy'
       ],
       [
+        subtopic('registrations_licenses', 'Registrations & Licenses', [
+          tactic('corp-registrations-entity-search', '"{company}" "business entity search" {state}'),
+          tactic('corp-registrations-sos', '"{company}" "secretary of state" {state}'),
+          tactic('corp-registrations-registry', '"{company}" "business registry" {state}'),
+          tactic('corp-licenses-professional', '"{company}" "professional license" {state}'),
+          tactic('corp-licenses-contractor', '"{company}" "contractor license" {state}'),
+          tactic('corp-registrations-ucc', '"{company}" "UCC search" {state}')
+        ]),
         subtopic('financials_funding', 'Financials & Funding', [
           tactic('corp-financials-sec', 'site:sec.gov "{company}" 10-K'),
           tactic('corp-financials-crunchbase', 'site:crunchbase.com "{company}"'),
@@ -280,6 +305,8 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'specifications',
         'variants',
         'pricing',
+        'marketplaceListings',
+        'resaleSignals',
         'supportStatus',
         'knownIssues',
         'security',
@@ -303,6 +330,13 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('product-pricing-alternative', '"{product}" alternative'),
           tactic('product-pricing-alternative-oss', '"{product}" alternative open source')
         ]),
+        subtopic('marketplaces_resale', 'Marketplaces & Resale', [
+          tactic('product-marketplace-amazon', 'site:amazon.com "{product}"'),
+          tactic('product-marketplace-ebay', 'site:ebay.com "{product}"'),
+          tactic('product-marketplace-walmart', 'site:walmart.com "{product}"'),
+          tactic('product-marketplace-facebook', 'site:facebook.com/marketplace "{product}"'),
+          tactic('product-marketplace-shopgoodwill', 'site:shopgoodwill.com "{product}"')
+        ]),
         subtopic('support_issues', 'Support/Issues', [
           tactic('product-support-error', '"{product}" error code'),
           tactic('product-support-firmware', '"{product}" firmware release notes'),
@@ -324,12 +358,20 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'population',
         'governance',
         'budget',
+        'openDataPortals',
         'zoning',
         'development',
         'propertyRecords',
         'crimeStats',
+        'publicSafetyData',
+        'permitsInspections',
+        'codeViolations',
+        'gisLayers',
         'economy',
         'majorEmployers',
+        'educationRecords',
+        'transportationData',
+        'environmentalHealth',
         'community'
       ],
       [
@@ -340,6 +382,19 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('location-governance-zoning', '"{city}" zoning map filetype:pdf'),
           tactic('location-governance-master-plan', '"{city}" master plan')
         ]),
+        subtopic('open_data_portals', 'Open Data & GIS', [
+          tactic('location-open-data-portal-city', '"{city}" "open data" portal'),
+          tactic('location-open-data-portal-county', '"{countyPrimary}" "open data" portal'),
+          tactic('location-open-data-311', '"{city}" 311 data'),
+          tactic('location-open-data-911', '"{city}" 911 calls dataset'),
+          tactic('location-open-data-ems', '"{city}" EMS calls dataset'),
+          tactic('location-open-data-fire', '"{city}" fire incidents dataset'),
+          tactic('location-open-data-code-violations', '"{city}" code violations dataset'),
+          tactic('location-open-data-permits', '"{city}" building permits dataset'),
+          tactic('location-open-data-inspections', '"{city}" inspection results dataset'),
+          tactic('location-open-data-gis', '"{city}" GIS open data'),
+          tactic('location-open-data-parcel-gis', '"{city}" parcel GIS data')
+        ], 'Use official municipal/county open data portals and GIS sources. Avoid personally identifying data; prefer aggregated datasets.'),
         subtopic('development_land', 'Development/Land', [
           tactic('location-development-master-plan', '"{city}" master plan filetype:pdf'),
           tactic('location-development-zoning', '"{city}" zoning map'),
@@ -364,8 +419,32 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         subtopic('crime_safety', 'Crime/Safety', [
           tactic('location-crime-citydata', 'site:city-data.com "{city}"'),
           tactic('location-crime-blotter', '"{city}" police blotter'),
+          tactic('location-crime-arrest-log', '"{city}" arrest log'),
+          tactic('location-crime-jail-roster', '"{countyPrimary}" jail roster'),
+          tactic('location-crime-incident-dashboard', '"{city}" incident dashboard'),
           tactic('location-crime-stats', '"{city}" crime statistics {year}')
         ]),
+        subtopic('education_institutions', 'Education & Institutions', [
+          tactic('location-education-board-minutes', '"{city}" school board minutes'),
+          tactic('location-education-district-budget', '"{city}" school district budget'),
+          tactic('location-education-clery', '"{city}" Clery report'),
+          tactic('location-education-campus-crime', '"{city}" campus crime log')
+        ]),
+        subtopic('transportation_infrastructure', 'Transportation & Infrastructure', [
+          tactic('location-transportation-transit-ridership', '"{city}" transit ridership data'),
+          tactic('location-transportation-traffic-incidents', '"{city}" traffic incidents dashboard'),
+          tactic('location-transportation-road-work', '"{city}" road work map'),
+          tactic('location-transportation-airport', '"{city}" airport statistics'),
+          tactic('location-transportation-port', '"{city}" port authority statistics'),
+          tactic('location-transportation-rail', '"{city}" rail ridership data')
+        ]),
+        subtopic('health_environment', 'Health & Environment', [
+          tactic('location-health-public-dashboard', '"{city}" public health dashboard'),
+          tactic('location-health-restaurant-inspections', '"{city}" restaurant inspections'),
+          tactic('location-health-air-quality', '"{city}" air quality data'),
+          tactic('location-health-water-quality', '"{city}" water quality report'),
+          tactic('location-health-environmental-agency', '"{state}" environmental agency "{city}"')
+        ], 'Prefer public health and environmental agencies; summarize at the community level.'),
         subtopic('economy', 'Economy', [
           tactic('location-economy-employers', '"{city}" major employers'),
           tactic('location-economy-chamber', '"{city}" chamber of commerce directory'),
@@ -376,7 +455,8 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('location-community-facebook', 'site:facebook.com "residents of {city}"'),
           tactic('location-community-news', '"{city}" local news archive')
         ])
-      ]
+      ],
+      'Use official sources, aggregated datasets, and public records. Avoid personal data or doxxing.'
     ),
     vertical(
       'event',
@@ -388,6 +468,8 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'participants',
         'timeline',
         'primarySources',
+        'incidentLogs',
+        'afterActionReports',
         'coverage',
         'impact',
         'controversy'
@@ -397,6 +479,13 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('event-primary-transcript', '"{event}" full transcript'),
           tactic('event-primary-report', '"{event}" official report filetype:pdf'),
           tactic('event-primary-archive', 'site:archive.org "{event}"')
+        ]),
+        subtopic('incident_records', 'Incident Records', [
+          tactic('event-incident-report', '"{event}" incident report'),
+          tactic('event-incident-after-action', '"{event}" after action report'),
+          tactic('event-incident-dashboard', '"{event}" incident dashboard'),
+          tactic('event-incident-911', '"{event}" 911 calls'),
+          tactic('event-incident-dispatch', '"{event}" dispatch log')
         ]),
         subtopic('timeline', 'Timeline', [
           tactic('event-timeline-overview', 'timeline of "{event}"'),
@@ -436,7 +525,10 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'benchmarks',
         'vulnerabilities',
         'bestPractices',
-        'comparisons'
+        'comparisons',
+        'osintTooling',
+        'searchOperators',
+        'domainIntel'
       ],
       [
         subtopic('implementation', 'Implementation', [
@@ -465,6 +557,13 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         subtopic('comparison', 'Comparison', [
           tactic('tech-compare-vs', '"{concept}" vs {alternative}'),
           tactic('tech-compare-benchmark', '"{concept}" performance benchmarks')
+        ]),
+        subtopic('osint_tooling', 'OSINT Tooling', [
+          tactic('tech-osint-tools', '"{concept}" OSINT tool'),
+          tactic('tech-osint-search-operators', '"{concept}" "search operators"'),
+          tactic('tech-osint-reverse-image', '"{concept}" "reverse image search"'),
+          tactic('tech-osint-domain-intel', '"{concept}" "domain intelligence"'),
+          tactic('tech-osint-host-intel', '"{concept}" "host intelligence"')
         ])
       ]
     ),
@@ -563,6 +662,9 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'treatment',
         'guidelines',
         'statistics',
+        'publicHealthData',
+        'environmentalData',
+        'inspectionData',
         'studies',
         'patientExperience',
         'risks'
@@ -591,6 +693,13 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         subtopic('statistics', 'Statistics', [
           tactic('medical-stats-prevalence', '"{condition}" prevalence statistics'),
           tactic('medical-stats-mortality', '"{condition}" mortality rate')
+        ]),
+        subtopic('public_health_environment', 'Public Health & Environment', [
+          tactic('medical-public-health-dashboard', '"{condition}" public health dashboard {state}'),
+          tactic('medical-public-health-surveillance', '"{condition}" surveillance data {state}'),
+          tactic('medical-public-health-inspections', '"{city}" health inspections'),
+          tactic('medical-public-health-restaurant', '"{city}" restaurant inspection scores'),
+          tactic('medical-public-health-environment', '"{state}" environmental health data')
         ])
       ]
     ),
@@ -604,7 +713,12 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'interpretations',
         'procedure',
         'forms',
-        'precedent'
+        'precedent',
+        'courtRecords',
+        'bankruptcy',
+        'liensJudgments',
+        'recordsRequests',
+        'enforcementActions'
       ],
       [
         subtopic('statutory_text', 'Statutory Text', [
@@ -629,6 +743,21 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         subtopic('forms_procedure', 'Forms/Procedure', [
           tactic('legal-forms-action', '"{legalAction}" form filetype:pdf'),
           tactic('legal-forms-howto', '"how to file" {legalAction} {state}')
+        ]),
+        subtopic('court_records', 'Court Records', [
+          tactic('legal-court-docket', '"{caseName}" docket'),
+          tactic('legal-court-calendar', '"{caseName}" court calendar'),
+          tactic('legal-court-case-search', '"{caseName}" case search'),
+          tactic('legal-court-bankruptcy', '"{caseName}" bankruptcy'),
+          tactic('legal-court-lien', '"{caseName}" lien'),
+          tactic('legal-court-judgment', '"{caseName}" judgment')
+        ]),
+        subtopic('records_requests', 'Records Requests (FOIA/Open Records)', [
+          tactic('legal-foia-request', '"{law}" FOIA request'),
+          tactic('legal-public-records-request', '"{law}" "public records request"'),
+          tactic('legal-public-records-portal', '"{state}" "public records request" portal'),
+          tactic('legal-sunshine-law', '"{state}" sunshine law request'),
+          tactic('legal-open-records', '"{state}" "open records" request')
         ])
       ]
     ),
@@ -640,7 +769,10 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         'likelyVerticals',
         'keyEntities',
         'timeRange',
-        'sourceTypes'
+        'sourceTypes',
+        'openDataSources',
+        'osintTechniques',
+        'recordsRequestOptions'
       ],
       [
         subtopic('general_discovery', 'General Discovery', [
@@ -649,8 +781,21 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('general-discovery-primary', '{topic} primary sources'),
           tactic('general-discovery-controversy', '{topic} controversy'),
           tactic('general-discovery-latest', '{topic} latest news')
-        ])
-      ]
+        ]),
+        subtopic('osint_methods', 'OSINT & Open Data Methods', [
+          tactic('general-osint-site-gov', '{topic} site:gov filetype:pdf'),
+          tactic('general-osint-open-data', '"{topic}" "open data" portal'),
+          tactic('general-osint-public-records-search', '"{topic}" "public records" search'),
+          tactic('general-osint-public-records', '"{topic}" "public records request"'),
+          tactic('general-osint-foia', '"{topic}" FOIA'),
+          tactic('general-osint-incident-dashboard', '"{topic}" "incident dashboard"'),
+          tactic('general-osint-gis', '"{topic}" "GIS data"'),
+          tactic('general-osint-reverse-image', '"{topic}" "reverse image search"'),
+          tactic('general-osint-whois', '"{topic}" WHOIS'),
+          tactic('general-osint-domain-history', '"{topic}" "domain history"')
+        ], 'Use public sources only; avoid personal data and doxxing. Prefer official portals and aggregated datasets.')
+      ],
+      'Fallback discovery using public sources only. Avoid sensitive data; prefer official portals and aggregated datasets.'
     )
   ]
 };

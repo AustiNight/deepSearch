@@ -130,7 +130,7 @@
   - [x] Add a visualization test fixture (static report mock) that exercises chart + image rendering in light/dark and print views across mobile/tablet/desktop breakpoints
   - [x] Acceptance: when the model includes visualization data, the final report renders charts/images using the selected components and remains responsive across mobile/tablet/desktop
 
-- [ ] Epic: Map the full public-info surface area (OSINT / OpenData / PI techniques) and wire it into vertical search
+- [x] Epic: Map the full public-info surface area (OSINT / OpenData / PI techniques) and wire it into vertical search
   - [ ] Define scope boundaries and phased delivery for the catalog (e.g., Phase 1: US public sources with max N items per category; Phase 2: expand internationally), and document the limits in the catalog output
   - [ ] Build a comprehensive catalog of public internet-accessible information resources and techniques, including (but not limited to):
     - [ ] Government Open Data portals (city/county/state/federal), including 911/311 call datasets, incident logs, EMS/fire calls, code violations, permits, inspections, budgets, and open GIS layers
