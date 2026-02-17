@@ -1,8 +1,25 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider } from '../types';
-import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini } from '../services/geminiService';
-import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI } from '../services/openaiService';
-import { INITIAL_OVERSEER_ID, METHOD_TEMPLATES_GENERAL, METHOD_TEMPLATES_ADDRESS, METHOD_DISCOVERY_TEMPLATES_GENERAL, METHOD_DISCOVERY_TEMPLATES_PERSON, METHOD_DISCOVERY_TEMPLATES_ADDRESS, MIN_AGENT_COUNT, MAX_AGENT_COUNT, MAX_METHOD_AGENTS } from '../constants';
+import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
+import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
+import {
+  INITIAL_OVERSEER_ID,
+  METHOD_TEMPLATES_GENERAL,
+  METHOD_TEMPLATES_ADDRESS,
+  METHOD_DISCOVERY_TEMPLATES_GENERAL,
+  METHOD_DISCOVERY_TEMPLATES_PERSON,
+  METHOD_DISCOVERY_TEMPLATES_ADDRESS,
+  MIN_AGENT_COUNT,
+  MAX_AGENT_COUNT,
+  MAX_METHOD_AGENTS,
+  MIN_SEARCH_ROUNDS,
+  MAX_SEARCH_ROUNDS,
+  EARLY_STOP_DIMINISHING_SCORE,
+  EARLY_STOP_NOVELTY_RATIO,
+  EARLY_STOP_NEW_DOMAINS,
+  EARLY_STOP_NEW_SOURCES
+} from '../constants';
+import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -32,6 +49,353 @@ const isPersonLike = (topic: string) => {
 };
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const inferVerticalHints = (topic: string) => {
+  const hints: string[] = [];
+  const lower = topic.toLowerCase();
+  if (isPersonLike(topic)) hints.push('individual');
+  if (isAddressLike(topic)) hints.push('location');
+  if (/\b(inc|llc|ltd|corp|corporation|company|co\\.)\b/i.test(topic)) hints.push('corporation');
+  if (/\b(product|device|software|app|platform|tool|service)\b/i.test(lower)) hints.push('product');
+  if (/\b(city|county|state|province|region|district)\b/i.test(lower)) hints.push('location');
+  if (/\b(event|incident|summit|conference|protest)\b/i.test(lower)) hints.push('event');
+  if (/\b(law|statute|regulation|act|code|v\\.)\b/i.test(lower)) hints.push('legal_matter');
+  if (/\b(disease|condition|syndrome|drug|medication|anatomy)\b/i.test(lower)) hints.push('medical_subject');
+  if (/\b(film|movie|book|novel|album|song|painting)\b/i.test(lower)) hints.push('creative_work');
+  if (/\b(algorithm|protocol|framework|library|api|system)\b/i.test(lower)) hints.push('technical_concept');
+  if (/\b(theory|movement|ideology|philosophy)\b/i.test(lower)) hints.push('nontechnical_concept');
+  if (hints.length === 0) hints.push('general_discovery');
+  return uniqueList(hints);
+};
+
+type WeightedVertical = { id: string; weight: number; reason?: string };
+type TacticPackEntry = {
+  verticalId: string;
+  verticalLabel: string;
+  subtopicId: string;
+  subtopicLabel: string;
+  methodId: string;
+  methodLabel: string;
+  expanded: Array<{
+    id: string;
+    template: string;
+    query: string;
+    slots: Record<string, string>;
+    unresolvedSlots: string[];
+    verticalId: string;
+    subtopicId: string;
+    methodId: string;
+    provenance?: any[];
+    verticalLabel: string;
+    subtopicLabel: string;
+    methodLabel: string;
+  }>;
+};
+
+type ClassificationSummary = {
+  verticals: WeightedVertical[];
+  selected: WeightedVertical[];
+  confidence: number;
+  isUncertain: boolean;
+  notes?: string;
+};
+
+type ExhaustionMetrics = {
+  round: number;
+  label: string;
+  totalQueries: number;
+  uniqueQueries: number;
+  queryNoveltyRatio: number;
+  newDomains: number;
+  totalDomains: number;
+  newSources: number;
+  totalSources: number;
+  diminishingReturnsScore: number;
+};
+
+type ExhaustionTracker = {
+  rounds: ExhaustionMetrics[];
+  seenQueries: Set<string>;
+  seenSources: Set<string>;
+  seenDomains: Set<string>;
+};
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const recordExhaustionRound = (
+  tracker: ExhaustionTracker,
+  label: string,
+  queries: string[],
+  sources: string[]
+) => {
+  const uniqueQueries = uniqueList(queries);
+  const newQueries = uniqueQueries.filter(q => !tracker.seenQueries.has(q));
+  const queryNoveltyRatio = newQueries.length / Math.max(1, uniqueQueries.length);
+
+  const uniqueSources = uniqueList(sources);
+  const newSources = uniqueSources.filter(s => !tracker.seenSources.has(s));
+  const uniqueDomains = uniqueList(uniqueSources.map(src => normalizeDomain(src)).filter(Boolean));
+  const newDomains = uniqueDomains.filter(d => !tracker.seenDomains.has(d));
+
+  const domainGain = newDomains.length / Math.max(1, uniqueDomains.length);
+  const sourceGain = newSources.length / Math.max(1, uniqueSources.length);
+  const diminishingReturnsScore = clamp(
+    1 - (0.4 * domainGain + 0.3 * sourceGain + 0.3 * clamp(queryNoveltyRatio, 0, 1)),
+    0,
+    1
+  );
+
+  const metrics: ExhaustionMetrics = {
+    round: tracker.rounds.length + 1,
+    label,
+    totalQueries: queries.length,
+    uniqueQueries: uniqueQueries.length,
+    queryNoveltyRatio,
+    newDomains: newDomains.length,
+    totalDomains: tracker.seenDomains.size + newDomains.length,
+    newSources: newSources.length,
+    totalSources: tracker.seenSources.size + newSources.length,
+    diminishingReturnsScore
+  };
+
+  newQueries.forEach(q => tracker.seenQueries.add(q));
+  newSources.forEach(s => tracker.seenSources.add(s));
+  newDomains.forEach(d => tracker.seenDomains.add(d));
+  tracker.rounds.push(metrics);
+
+  return metrics;
+};
+
+const formatWeightedVerticals = (verticals: WeightedVertical[]) => {
+  return verticals.map(v => `${v.id} (${v.weight.toFixed(2)})`).join(', ');
+};
+
+const buildNameVariants = (topic: string) => {
+  const cleaned = topic.replace(/\s+/g, ' ').trim();
+  const parts = cleaned.split(' ').filter(Boolean);
+  if (parts.length < 2) return [];
+  const suffixes = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
+  const rawLast = parts[parts.length - 1];
+  const rawSuffix = suffixes.has(rawLast.toLowerCase()) ? rawLast : '';
+  const baseParts = rawSuffix ? parts.slice(0, -1) : parts.slice();
+  if (baseParts.length < 2) return [];
+  const first = baseParts[0];
+  const last = baseParts[baseParts.length - 1];
+  const middleParts = baseParts.slice(1, -1);
+  const middle = middleParts.join(' ');
+  const middleInitials = middleParts.map(p => p[0]).join(' ');
+  const suffix = rawSuffix ? ` ${rawSuffix}` : '';
+
+  const variants = [
+    `${first} ${last}${suffix}`.trim(),
+    `${last}, ${first}${suffix}`.trim(),
+    `${first} ${middle} ${last}${suffix}`.trim(),
+    `${first} ${middleInitials} ${last}${suffix}`.trim(),
+    `${first[0]}. ${last}${suffix}`.trim(),
+    `${first} ${last}`.trim(),
+    `${last} ${first}`.trim()
+  ];
+
+  return uniqueList(variants.filter(v => v.replace(/\s+/g, '').length >= 4));
+};
+
+const extractDomainFromTopic = (topic: string) => {
+  const match = topic.match(/([a-z0-9-]+\.)+[a-z]{2,}/i);
+  if (!match) return '';
+  const raw = match[0].toLowerCase();
+  return raw.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+};
+
+const extractCityFromTopic = (topic: string) => {
+  const parts = topic.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 2) return parts[0];
+  return '';
+};
+
+const extractCountyFromTopic = (topic: string) => {
+  const match = topic.match(/([a-zA-Z\\s]+)\\s+county\\b/i);
+  return match ? match[0].trim() : '';
+};
+
+const extractStateFromTopic = (topic: string) => {
+  const match = topic.match(/,\\s*([A-Z]{2})\\b/);
+  if (match) return match[1];
+  const matchEnd = topic.match(/\\b([A-Z]{2})\\b$/);
+  return matchEnd ? matchEnd[1] : '';
+};
+
+const normalizeHandle = (topic: string) => {
+  const cleaned = topic.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return cleaned.length >= 3 ? cleaned.slice(0, 24) : '';
+};
+
+const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boolean) => {
+  const cleaned = topic.trim();
+  const domain = extractDomainFromTopic(cleaned);
+  const city = extractCityFromTopic(cleaned);
+  const county = extractCountyFromTopic(cleaned);
+  const state = extractStateFromTopic(cleaned);
+  const handle = normalizeHandle(cleaned);
+  const names = nameVariants.length > 0 ? nameVariants : [cleaned];
+
+  return {
+    topic: [cleaned],
+    name: names,
+    handle: handle ? [handle] : [],
+    hometown: city ? [city] : [],
+    company: [cleaned],
+    companyDomain: domain ? [domain] : [],
+    product: [cleaned],
+    brandDomain: domain ? [domain] : [],
+    city: city ? [city] : [cleaned],
+    county: county ? [county] : (addressLike ? [city || cleaned] : []),
+    address: addressLike ? [cleaned] : [],
+    event: [cleaned],
+    concept: [cleaned],
+    alternative: [],
+    opposingConcept: [],
+    title: [cleaned],
+    condition: [cleaned],
+    drug: [],
+    law: [cleaned],
+    statuteCitation: [],
+    billName: [],
+    caseName: [cleaned],
+    opposing: [],
+    legalAction: [],
+    state: state ? [state] : [],
+    stateOrCountry: state ? [state] : []
+  };
+};
+
+const buildTacticPacks = (
+  taxonomy: { verticals: any[] },
+  selectedVerticalIds: string[],
+  slots: Record<string, unknown>
+) => {
+  const packs: TacticPackEntry[] = [];
+  const expandedAll: TacticPackEntry['expanded'] = [];
+
+  for (const vertical of taxonomy.verticals || []) {
+    if (!selectedVerticalIds.includes(vertical.id)) continue;
+    for (const subtopic of vertical.subtopics || []) {
+      const expandedForSubtopic: TacticPackEntry['expanded'] = [];
+      for (const method of subtopic.methods || []) {
+        const expanded = expandTacticTemplates(method.tactics || [], slots, { allowUnresolved: false });
+        const hydrated = expanded.map((item) => ({
+          ...item,
+          verticalId: vertical.id,
+          subtopicId: subtopic.id,
+          methodId: method.id,
+          verticalLabel: vertical.label,
+          subtopicLabel: subtopic.label,
+          methodLabel: method.label || method.id
+        }));
+        expandedForSubtopic.push(...hydrated);
+      }
+      if (expandedForSubtopic.length > 0) {
+        const entry: TacticPackEntry = {
+          verticalId: vertical.id,
+          verticalLabel: vertical.label,
+          subtopicId: subtopic.id,
+          subtopicLabel: subtopic.label,
+          methodId: expandedForSubtopic[0].methodId,
+          methodLabel: expandedForSubtopic[0].methodLabel,
+          expanded: expandedForSubtopic
+        };
+        packs.push(entry);
+        expandedAll.push(...expandedForSubtopic);
+      }
+    }
+  }
+
+  return { packs, expandedAll };
+};
+
+const normalizeClassification = (
+  raw: any,
+  validIds: Set<string>,
+  fallbackHints: string[]
+): ClassificationSummary => {
+  const rawVerticals = Array.isArray(raw?.verticals) ? raw.verticals : [];
+  let verticals: WeightedVertical[] = rawVerticals
+    .map((entry: any) => ({
+      id: String(entry?.id || '').trim(),
+      weight: Number(entry?.weight),
+      reason: typeof entry?.reason === 'string' ? entry.reason : undefined
+    }))
+    .filter(v => v.id && validIds.has(v.id));
+
+  if (verticals.length === 0) {
+    const fallback = fallbackHints.filter(id => validIds.has(id));
+    verticals = fallback.length > 0
+      ? fallback.map(id => ({ id, weight: 1 / fallback.length }))
+      : [{ id: 'general_discovery', weight: 1 }];
+  }
+
+  const sum = verticals.reduce((acc, v) => acc + (Number.isFinite(v.weight) ? v.weight : 0), 0);
+  if (sum <= 0) {
+    const uniform = 1 / verticals.length;
+    verticals = verticals.map(v => ({ ...v, weight: uniform }));
+  } else {
+    verticals = verticals.map(v => ({ ...v, weight: v.weight / sum }));
+  }
+
+  verticals.sort((a, b) => b.weight - a.weight);
+
+  const top = verticals[0];
+  const second = verticals[1];
+  const confidence = clamp(
+    typeof raw?.confidence === 'number' ? raw.confidence : top.weight,
+    0,
+    1
+  );
+  const isUncertain =
+    raw?.isUncertain === true ||
+    confidence < 0.6 ||
+    top.weight < 0.5 ||
+    (second ? top.weight - second.weight < 0.1 : false);
+
+  let selected = verticals.filter(v => v.weight >= 0.25 || (top && top.weight - v.weight <= 0.15 && v.weight >= 0.1));
+  if (selected.length === 0) selected = [top];
+  if (selected.length > 1) selected = selected.filter(v => v.id !== 'general_discovery');
+  if (selected.length === 0) selected = [top];
+
+  return {
+    verticals,
+    selected,
+    confidence,
+    isUncertain,
+    notes: typeof raw?.notes === 'string' ? raw.notes : undefined
+  };
+};
+
+const VERTICAL_SEED_QUERIES: Record<string, string> = {
+  individual: '"{topic}" biography',
+  corporation: '"{topic}" company profile',
+  product: '"{topic}" specifications',
+  location: '"{topic}" demographics',
+  event: '"{topic}" timeline',
+  technical_concept: '"{topic}" implementation',
+  nontechnical_concept: '"{topic}" definition',
+  creative_work: '"{topic}" review',
+  medical_subject: '"{topic}" overview',
+  legal_matter: '"{topic}" summary',
+  general_discovery: '{topic} overview'
+};
+
+const buildVerticalSeedSectors = (selected: WeightedVertical[], verticalLabels: Map<string, string>, topic: string) => {
+  return selected.map((vertical) => {
+    const label = verticalLabels.get(vertical.id) || vertical.id;
+    const queryTemplate = VERTICAL_SEED_QUERIES[vertical.id] || '{topic} overview';
+    const initialQuery = queryTemplate.replace('{topic}', topic);
+    return {
+      name: `Vertical: ${label}`,
+      focus: `Vertical branch: ${label}`,
+      initialQuery
+    };
+  });
+};
 
 const dedupeParagraphs = (text: string) => {
   const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
@@ -117,7 +481,18 @@ export const useOverseer = () => {
     setAgents(prev => [...prev, agent]);
   };
 
-  const startResearch = useCallback(async (topic: string, provider: LLMProvider, apiKey: string, runConfig?: { minAgents?: number; maxAgents?: number; maxMethodAgents?: number; forceExhaustion?: boolean }) => {
+  const startResearch = useCallback(async (topic: string, provider: LLMProvider, apiKey: string, runConfig?: {
+    minAgents?: number;
+    maxAgents?: number;
+    maxMethodAgents?: number;
+    forceExhaustion?: boolean;
+    minRounds?: number;
+    maxRounds?: number;
+    earlyStopDiminishingScore?: number;
+    earlyStopNoveltyRatio?: number;
+    earlyStopNewDomains?: number;
+    earlyStopNewSources?: number;
+  }) => {
     setIsRunning(true);
     setAgents([]);
     setLogs([]);
@@ -137,10 +512,56 @@ export const useOverseer = () => {
     const maxAgents = Math.max(minAgents, resolveNumber(runConfig?.maxAgents, envMax));
     const maxMethodAgents = Math.max(1, resolveNumber(runConfig?.maxMethodAgents, envMaxMethod));
     const forceExhaustion = runConfig?.forceExhaustion === true;
+    const minRounds = Math.max(1, resolveNumber(runConfig?.minRounds, MIN_SEARCH_ROUNDS));
+    const maxRounds = Math.max(minRounds, resolveNumber(runConfig?.maxRounds, MAX_SEARCH_ROUNDS));
+    const earlyStopDiminishingScore = clamp(
+      Number.isFinite(Number(runConfig?.earlyStopDiminishingScore))
+        ? Number(runConfig?.earlyStopDiminishingScore)
+        : EARLY_STOP_DIMINISHING_SCORE,
+      0,
+      1
+    );
+    const earlyStopNoveltyRatio = clamp(
+      Number.isFinite(Number(runConfig?.earlyStopNoveltyRatio))
+        ? Number(runConfig?.earlyStopNoveltyRatio)
+        : EARLY_STOP_NOVELTY_RATIO,
+      0,
+      1
+    );
+    const earlyStopNewDomains = Math.max(0, resolveNumber(runConfig?.earlyStopNewDomains, EARLY_STOP_NEW_DOMAINS));
+    const earlyStopNewSources = Math.max(0, resolveNumber(runConfig?.earlyStopNewSources, EARLY_STOP_NEW_SOURCES));
     const knowledgeBase = loadKnowledgeBase();
     const usedQueries = new Set<string>();
     const methodCandidateQueries: string[] = [];
     const methodQuerySources = new Map<string, string[]>();
+    const methodQueryMeta = new Map<string, { source: string; verticalId?: string; subtopicId?: string; methodId?: string; tacticId?: string; template?: string }>();
+    const exhaustionTracker: ExhaustionTracker = {
+      rounds: [],
+      seenQueries: new Set<string>(),
+      seenSources: new Set<string>(),
+      seenDomains: new Set<string>()
+    };
+    const taxonomy = getResearchTaxonomy();
+    const taxonomySummary = summarizeTaxonomy(taxonomy);
+    const taxonomySummaryForClassifier = taxonomy.verticals.map(v => ({
+      id: v.id,
+      label: v.label,
+      blueprintFields: v.blueprintFields
+    }));
+    const verticalLabels = new Map(taxonomy.verticals.map(v => [v.id, v.label]));
+    let taxonomyProposalBudget = Math.min(4, maxAgents);
+    let taxonomyGrowthQueue = Promise.resolve();
+
+    const registerMethodQuery = (
+      query: string,
+      meta: { source: string; verticalId?: string; subtopicId?: string; methodId?: string; tacticId?: string; template?: string }
+    ) => {
+      const trimmed = query.trim();
+      if (!trimmed) return;
+      if (!methodQueryMeta.has(trimmed)) {
+        methodQueryMeta.set(trimmed, meta);
+      }
+    };
     
     // --- 0. INITIALIZATION ---
     const overseerId = INITIAL_OVERSEER_ID;
@@ -169,12 +590,182 @@ export const useOverseer = () => {
       const synthesizeGrandReport = provider === 'openai' ? synthesizeGrandReportOpenAI : synthesizeGrandReportGemini;
       const extractResearchMethods = provider === 'openai' ? extractResearchMethodsOpenAI : extractResearchMethodsGemini;
       const validateReport = provider === 'openai' ? validateReportOpenAI : validateReportGemini;
+      const proposeTaxonomyGrowth = provider === 'openai' ? proposeTaxonomyGrowthOpenAI : proposeTaxonomyGrowthGemini;
+      const classifyResearchVertical = provider === 'openai' ? classifyResearchVerticalOpenAI : classifyResearchVerticalGemini;
+
+      const validVerticalIds = new Set(taxonomy.verticals.map(v => v.id));
+      const hintVerticals = inferVerticalHints(topic);
+      let classificationRaw = await classifyResearchVertical({
+        topic,
+        taxonomySummary: taxonomySummaryForClassifier,
+        hintVerticalIds: hintVerticals
+      });
+      let classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
+      addLog(
+        overseerId,
+        overseer.name,
+        `PHASE 0: VERTICAL CLASSIFICATION - Candidates: ${formatWeightedVerticals(classification.verticals)} (confidence ${classification.confidence.toFixed(2)}).`,
+        'action'
+      );
+
+      if (classification.isUncertain) {
+        const generalTemplates = listTacticsForVertical(taxonomy, 'general_discovery');
+        const expanded = expandTacticTemplates(generalTemplates, { topic }, { allowUnresolved: false });
+        const discoveryQueries = uniqueList(expanded.map(e => e.query)).slice(0, Math.min(2, maxMethodAgents));
+
+        if (discoveryQueries.length > 0) {
+          addLog(overseerId, overseer.name, `PHASE 0B: GENERAL DISCOVERY - Running ${discoveryQueries.length} quick scouts to reduce uncertainty.`, 'action');
+          const discoveryTexts: string[] = [];
+          for (let i = 0; i < discoveryQueries.length; i++) {
+            const query = discoveryQueries[i];
+            const agentId = generateId();
+            const agent: Agent = {
+              id: agentId,
+              name: `General Discovery ${i + 1}`,
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: 'General discovery',
+              reasoning: [`Discovery query: ${query}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
+
+            const result = await performDeepResearch(
+              agent.name,
+              'General discovery',
+              query,
+              (msg) => addLog(agentId, agent.name, msg, 'info')
+            );
+
+            updateAgent(agentId, {
+              status: AgentStatus.COMPLETE,
+              reasoning: [`Indexed ${result.sources.length} sources`, `Data Volume: ${result.text.length} chars`]
+            });
+            addLog(agentId, agent.name, `General Discovery Complete. Sources Vetted: ${result.sources.length}`, 'success');
+            usedQueries.add(query);
+            if (result.text) discoveryTexts.push(result.text);
+          }
+
+          const contextText = discoveryTexts.join('\n').substring(0, 12000);
+          if (contextText.trim()) {
+            classificationRaw = await classifyResearchVertical({
+              topic,
+              taxonomySummary: taxonomySummaryForClassifier,
+              hintVerticalIds: hintVerticals,
+              contextText
+            });
+            classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
+            addLog(
+              overseerId,
+              overseer.name,
+              `PHASE 0B: RECLASSIFY - Candidates: ${formatWeightedVerticals(classification.verticals)} (confidence ${classification.confidence.toFixed(2)}).`,
+              'action'
+            );
+          }
+        }
+      }
+
+      const selectedVerticals = classification.selected;
+      const selectedVerticalIds = selectedVerticals.map(v => v.id);
+      const nameVariants = selectedVerticalIds.includes('individual') ? buildNameVariants(topic) : [];
+      const blueprintSelections = selectedVerticalIds.map(id => {
+        const vertical = taxonomy.verticals.find(v => v.id === id);
+        return {
+          id,
+          label: vertical?.label || id,
+          fields: vertical?.blueprintFields || []
+        };
+      });
+
+      if (selectedVerticals.length > 1) {
+        addLog(overseerId, overseer.name, `HYBRID BRANCHING: ${selectedVerticalIds.join(' + ')} selected.`, 'action');
+      }
+
+      if (blueprintSelections.length > 0) {
+        const blueprintSummary = blueprintSelections
+          .map(b => `${b.label}: ${b.fields.join(', ') || 'no fields'}`)
+          .join(' | ');
+        addLog(overseerId, overseer.name, `PHASE 0: BLUEPRINT - ${blueprintSummary}`, 'info');
+      }
+
+      if (nameVariants.length > 0) {
+        addLog(overseerId, overseer.name, `NAME VARIANTS: ${nameVariants.join(' | ')}`, 'info');
+      }
+
+      const slotValues = buildSlotValues(topic, nameVariants, isAddressLike(topic));
+      const { packs: tacticPacks, expandedAll: expandedTactics } = buildTacticPacks(taxonomy, selectedVerticalIds, slotValues);
+      const tacticPackQueries = uniqueList(expandedTactics.map(t => t.query));
+      const subtopicSeedQueries = uniqueList(
+        tacticPacks.map(pack => pack.expanded[0]?.query).filter(Boolean) as string[]
+      );
+
+      for (const tactic of expandedTactics) {
+        registerMethodQuery(tactic.query, {
+          source: 'taxonomy',
+          verticalId: tactic.verticalId,
+          subtopicId: tactic.subtopicId,
+          methodId: tactic.methodId,
+          tacticId: tactic.id,
+          template: tactic.template
+        });
+      }
+
+      const enqueueTaxonomyGrowth = (context: { agentId: string; agentName: string; focus: string; resultText: string }) => {
+        if (taxonomyProposalBudget <= 0) return;
+        if (!context.resultText || context.resultText.length < 400) return;
+        taxonomyProposalBudget -= 1;
+        const hintVerticals = selectedVerticalIds.length > 0 ? selectedVerticalIds : inferVerticalHints(topic);
+        const snippet = context.resultText.substring(0, 8000);
+
+        taxonomyGrowthQueue = taxonomyGrowthQueue.then(async () => {
+          try {
+            const proposals = await proposeTaxonomyGrowth({
+              topic,
+              agentName: context.agentName,
+              agentFocus: context.focus,
+              findingsText: snippet,
+              taxonomySummary,
+              hintVerticalIds: hintVerticals
+            });
+            const vetResult = vetAndPersistTaxonomyProposals(proposals, {
+              topic,
+              agentId: context.agentId,
+              agentName: context.agentName,
+              note: `focus:${context.focus}`
+            });
+            if (vetResult.accepted > 0) {
+              addLog(overseerId, overseer.name, `TAXONOMY GROWTH: Accepted ${vetResult.accepted} additions from ${context.agentName}.`, 'success');
+            } else if (vetResult.rejected > 0) {
+              addLog(overseerId, overseer.name, `TAXONOMY GROWTH: Rejected ${vetResult.rejected} proposals from ${context.agentName}.`, 'warning');
+            }
+          } catch (e: any) {
+            addLog(overseerId, overseer.name, `TAXONOMY GROWTH ERROR: ${e?.message || 'Unknown error'}`, 'warning');
+          }
+        });
+      };
 
       // --- PHASE 0.5: METHOD DISCOVERY (HOW TO RESEARCH THE TOPIC) ---
-      const discoveryTemplates = isAddressLike(topic)
+      const discoveryTemplates = (selectedVerticalIds.includes('location') && isAddressLike(topic))
         ? METHOD_DISCOVERY_TEMPLATES_ADDRESS
-        : (isPersonLike(topic) ? METHOD_DISCOVERY_TEMPLATES_PERSON : METHOD_DISCOVERY_TEMPLATES_GENERAL);
-      const discoveryQueries = uniqueList(discoveryTemplates.map(t => t.replace('{topic}', topic))).slice(0, Math.min(3, maxMethodAgents));
+        : (selectedVerticalIds.includes('individual') ? METHOD_DISCOVERY_TEMPLATES_PERSON : METHOD_DISCOVERY_TEMPLATES_GENERAL);
+      const discoveryTopics = nameVariants.length > 0 ? nameVariants : [topic];
+      const discoveryTemplateQueries = uniqueList(
+        discoveryTemplates.flatMap(t => discoveryTopics.map(name => t.replace('{topic}', name)))
+      );
+      const tacticDiscoveryQueries = uniqueList(
+        tacticPacks.flatMap(pack => pack.expanded.slice(1, 3).map(t => t.query))
+      );
+      const forcedDiscoveryQueries = discoveryTemplateQueries
+        .filter(q => q.toLowerCase().includes('public records'))
+        .slice(0, 1);
+      const discoveryQueries = uniqueList([
+        ...forcedDiscoveryQueries,
+        ...(tacticDiscoveryQueries.length > 0 ? tacticDiscoveryQueries : subtopicSeedQueries),
+        ...discoveryTemplateQueries
+      ]).slice(0, Math.min(6, maxMethodAgents));
+      discoveryTemplateQueries.forEach(q => registerMethodQuery(q, { source: 'method_discovery_template' }));
       if (discoveryQueries.length > 0) {
         addLog(overseerId, overseer.name, `PHASE 0.5: METHOD DISCOVERY - Spawning ${discoveryQueries.length} scouts to learn how to research the topic.`, 'action');
         const discoveryPromises = discoveryQueries.map(async (query: string, index: number) => {
@@ -200,6 +791,13 @@ export const useOverseer = () => {
             (msg) => addLog(agentId, agent.name, msg, 'info')
           );
 
+          enqueueTaxonomyGrowth({
+            agentId,
+            agentName: agent.name,
+            focus: 'Method discovery',
+            resultText: result.text || ''
+          });
+
           updateAgent(agentId, {
             status: AgentStatus.COMPLETE,
             reasoning: [`Indexed ${result.sources.length} sources`, `Data Volume: ${result.text.length} chars`]
@@ -209,6 +807,7 @@ export const useOverseer = () => {
           const methods = await extractResearchMethods(topic, result.text);
           const extracted = Array.isArray(methods?.methods) ? methods.methods : [];
           const extractedQueries = extracted.map((m: any) => m?.query).filter(Boolean);
+          extractedQueries.forEach((q: string) => registerMethodQuery(q, { source: 'llm_method_discovery' }));
           methodCandidateQueries.push(...extractedQueries);
           usedQueries.add(query);
         });
@@ -220,11 +819,52 @@ export const useOverseer = () => {
       addLog(overseerId, overseer.name, 'PHASE 1: DIMENSIONAL MAPPING - Splitting topic into sectors.', 'action');
       const sectorPlan = await generateSectorAnalysis(topic, skills);
       const rawSectors = sectorPlan && Array.isArray(sectorPlan.sectors) ? sectorPlan.sectors : [];
-      let sectors = rawSectors.map((sector: any, index: number) => {
+      const weightMap = new Map(selectedVerticals.map(v => [v.id, v.weight]));
+      const orderedPacks = [...tacticPacks].sort((a, b) => {
+        return (weightMap.get(b.verticalId) || 0) - (weightMap.get(a.verticalId) || 0);
+      });
+      const subtopicSectors = orderedPacks
+        .flatMap((pack) => {
+          const templateSeeds: typeof pack.expanded = [];
+          const seenTemplates = new Set<string>();
+          for (const tactic of pack.expanded) {
+            const key = tactic.template;
+            if (seenTemplates.has(key)) continue;
+            seenTemplates.add(key);
+            templateSeeds.push(tactic);
+          }
+          const seeds = (pack.verticalId === 'individual' && pack.subtopicId === 'assets')
+            ? templateSeeds.slice(0, 2)
+            : templateSeeds.slice(0, 1);
+          return seeds.map((seed, index) => ({
+            name: index === 0
+              ? `${pack.verticalLabel} · ${pack.subtopicLabel}`
+              : `${pack.verticalLabel} · ${pack.subtopicLabel} ${index + 1}`,
+            focus: `${pack.verticalLabel} / ${pack.subtopicLabel}`,
+            initialQuery: seed.query
+          }));
+        })
+        .filter((sector) => Boolean(sector?.initialQuery)) as Array<{ name: string; focus: string; initialQuery: string }>;
+      const verticalSeeds = subtopicSectors.length > 0
+        ? []
+        : buildVerticalSeedSectors(selectedVerticals, verticalLabels, topic);
+      let sectors = [
+        ...subtopicSectors,
+        ...verticalSeeds,
+        ...rawSectors.map((sector: any, index: number) => {
         const name = sector?.name || sector?.title || `Researcher ${index + 1}`;
         const focus = sector?.focus || sector?.dimension || name || "General Research";
         const initialQuery = sector?.initialQuery || sector?.initial_query || `${topic} ${focus}`;
         return { ...sector, name, focus, initialQuery };
+        })
+      ];
+
+      const sectorSeen = new Set<string>();
+      sectors = sectors.filter((sector) => {
+        const key = `${sector.name}|${sector.initialQuery}`;
+        if (sectorSeen.has(key)) return false;
+        sectorSeen.add(key);
+        return true;
       });
 
       updateAgent(overseerId, { 
@@ -234,8 +874,10 @@ export const useOverseer = () => {
 
       if (sectors.length === 0) sectors.push({ name: "General Researcher", focus: "Overview", initialQuery: topic });
       if (sectors.length < minAgents) {
-        const templates = (isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL)
-          .map(t => t.replace('{topic}', topic));
+        const templates = tacticPackQueries.length > 0
+          ? tacticPackQueries
+          : (isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL)
+            .map(t => t.replace('{topic}', topic));
         const needed = minAgents - sectors.length;
         for (let i = 0; i < needed; i++) {
           const fallbackQuery = templates[i % templates.length] || topic;
@@ -247,120 +889,178 @@ export const useOverseer = () => {
         }
       }
       if (sectors.length > maxAgents) {
-        sectors = sectors.slice(0, maxAgents);
+        const trimmed = sectors.slice(0, maxAgents);
+        if (subtopicSectors.length > maxAgents) {
+          addLog(overseerId, overseer.name, 'PHASE 1 WARNING: Subtopic packs exceed agent cap; some taxonomy subtopics will be skipped.', 'warning');
+        }
+        sectors = trimmed;
       }
       sectors.forEach((s: any) => usedQueries.add(s.initialQuery));
 
-      // --- PHASE 2: PARALLEL RECURSIVE SEARCH ---
-      addLog(overseerId, overseer.name, `PHASE 2: DEEP DRILL - Spawning ${sectors.length} agents for recursive analysis.`, 'action');
-      
-      const agentPromises = sectors.map(async (sector: any, index: number) => {
-          // Stagger starts slightly to avoid instant rate limit hits (though unlikely with client-side)
-          await new Promise(resolve => setTimeout(resolve, index * 1000));
-
-          const agentId = generateId();
-          const agent: Agent = {
-            id: agentId,
-            name: sector.name,
-            type: AgentType.RESEARCHER,
-            status: AgentStatus.SEARCHING,
-            task: sector.focus,
-            reasoning: [`Starting Level 1 Search: ${sector.initialQuery}`],
-            findings: [],
-            parentId: overseerId
-          };
-          addAgent(agent);
-          addLog(agentId, agent.name, `Deployed for: ${sector.focus}`, 'info');
-
-          // The "10x" Loop: Broad -> Analyze -> verify -> verification searches
-          const result = await performDeepResearch(
-              agent.name, 
-              sector.focus, 
-              sector.initialQuery, 
-              (msg) => addLog(agentId, agent.name, msg, 'info')
-          );
-          
-          const newFinding: Finding = {
-            source: agent.name,
-            content: result.text,
-            confidence: 0.9,
-            url: result.sources.map(s => s.uri).join(', ') // Store all URLs
-          };
-          
-          updateAgent(agentId, { 
-            status: AgentStatus.COMPLETE,
-            findings: [newFinding],
-            reasoning: [`Indexed ${result.sources.length} sources`, `Data Volume: ${result.text.length} chars`]
-          });
-          
-          addLog(agentId, agent.name, `Sector Analysis Complete. Sources Vetted: ${result.sources.length}`, 'success');
-          findingsRef.current.push({ ...newFinding, ...{ rawSources: result.sources } } as any);
-      });
-
-      await Promise.all(agentPromises);
-
-      // --- PHASE 2B: METHOD AUDIT (INDEPENDENT SEARCH) ---
+      // --- PHASE 2: MULTI-ROUND SEARCH LOOP ---
       const methodTemplates = isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL;
-      const methodQueriesBase = methodTemplates.map(t => t.replace('{topic}', topic));
+      const methodQueriesBase = tacticPackQueries.length > 0
+        ? tacticPackQueries
+        : methodTemplates.map(t => t.replace('{topic}', topic));
+      if (tacticPackQueries.length === 0) {
+        methodQueriesBase.forEach(q => registerMethodQuery(q, { source: 'method_template_fallback' }));
+      }
       const methodQueriesFromKB = knowledgeBase.domains.map(d => `site:${d} ${topic}`);
       const methodQueriesFromKBMethods = (knowledgeBase.methods || []).map((q) => q.includes('{topic}') ? q.replace('{topic}', topic) : q);
+      methodQueriesFromKB.forEach(q => registerMethodQuery(q, { source: 'knowledge_base_domain' }));
+      methodQueriesFromKBMethods.forEach(q => registerMethodQuery(q, { source: 'knowledge_base_method' }));
+      methodCandidateQueries.forEach(q => registerMethodQuery(q, { source: 'llm_method_discovery' }));
       const methodQueries = uniqueList([
         ...methodQueriesBase,
         ...methodQueriesFromKB,
         ...methodQueriesFromKBMethods,
         ...methodCandidateQueries
-      ]).slice(0, maxMethodAgents);
+      ]).slice(0, Math.max(maxMethodAgents, maxMethodAgents * maxRounds));
 
-      const maxAdditionalAgents = Math.max(0, maxAgents - sectors.length);
-      const methodQueriesToRun = methodQueries.filter(q => !usedQueries.has(q)).slice(0, maxAdditionalAgents);
-      methodQueriesToRun.forEach(q => usedQueries.add(q));
+      const shouldStopAfterRound = (round: number, metrics: ExhaustionMetrics) => {
+        if (forceExhaustion) return false;
+        if (round < minRounds) return false;
+        if (metrics.diminishingReturnsScore < earlyStopDiminishingScore) return false;
+        const lowNovelty = metrics.queryNoveltyRatio <= earlyStopNoveltyRatio;
+        const lowSources = metrics.newSources <= earlyStopNewSources;
+        const lowDomains = metrics.newDomains <= earlyStopNewDomains;
+        return lowNovelty || (lowSources && lowDomains);
+      };
 
-      if (methodQueriesToRun.length > 0) {
-        addLog(overseerId, overseer.name, `PHASE 2B: METHOD AUDIT - Spawning ${methodQueriesToRun.length} independent search agents.`, 'action');
-        const methodAgentPromises = methodQueriesToRun.map(async (query: string, index: number) => {
-          await new Promise(resolve => setTimeout(resolve, index * 700));
-          const agentId = generateId();
-          const agent: Agent = {
-            id: agentId,
-            name: `Method Audit ${index + 1}`,
-            type: AgentType.RESEARCHER,
-            status: AgentStatus.SEARCHING,
-            task: 'Independent method audit',
-            reasoning: [`Independent query: ${query}`],
-            findings: [],
-            parentId: overseerId
-          };
-          addAgent(agent);
-          addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
+      for (let round = 1; round <= maxRounds; round += 1) {
+        const roundQueries: string[] = [];
+        const roundSources: string[] = [];
+        const roundSectors = round === 1 ? sectors : [];
 
-          const result = await performDeepResearch(
-            agent.name,
-            'Independent method audit',
-            query,
-            (msg) => addLog(agentId, agent.name, msg, 'info')
-          );
-          methodQuerySources.set(query, result.sources.map(s => s.uri));
+        if (roundSectors.length > 0) {
+          addLog(overseerId, overseer.name, `PHASE 2: DEEP DRILL (ROUND ${round}/${maxRounds}) - Spawning ${roundSectors.length} agents for recursive analysis.`, 'action');
+          roundSectors.forEach((s: any) => roundQueries.push(s.initialQuery));
+          const agentPromises = roundSectors.map(async (sector: any, index: number) => {
+            // Stagger starts slightly to avoid instant rate limit hits (though unlikely with client-side)
+            await new Promise(resolve => setTimeout(resolve, index * 1000));
 
-          const newFinding: Finding = {
-            source: agent.name,
-            content: result.text,
-            confidence: 0.85,
-            url: result.sources.map(s => s.uri).join(', ')
-          };
+            const agentId = generateId();
+            const agent: Agent = {
+              id: agentId,
+              name: sector.name,
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: sector.focus,
+              reasoning: [`Starting Level 1 Search: ${sector.initialQuery}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            addLog(agentId, agent.name, `Deployed for: ${sector.focus}`, 'info');
 
-          updateAgent(agentId, {
-            status: AgentStatus.COMPLETE,
-            findings: [newFinding],
-            reasoning: [`Indexed ${result.sources.length} sources`, `Data Volume: ${result.text.length} chars`]
+            // The "10x" Loop: Broad -> Analyze -> verify -> verification searches
+            const result = await performDeepResearch(
+              agent.name,
+              sector.focus,
+              sector.initialQuery,
+              (msg) => addLog(agentId, agent.name, msg, 'info')
+            );
+            roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
+
+            enqueueTaxonomyGrowth({
+              agentId,
+              agentName: agent.name,
+              focus: sector.focus,
+              resultText: result.text || ''
+            });
+
+            const newFinding: Finding = {
+              source: agent.name,
+              content: result.text,
+              confidence: 0.9,
+              url: result.sources.map(s => s.uri).join(', ') // Store all URLs
+            };
+
+            updateAgent(agentId, {
+              status: AgentStatus.COMPLETE,
+              findings: [newFinding],
+              reasoning: [`Indexed ${result.sources.length} sources`, `Data Volume: ${result.text.length} chars`]
+            });
+
+            addLog(agentId, agent.name, `Sector Analysis Complete. Sources Vetted: ${result.sources.length}`, 'success');
+            findingsRef.current.push({ ...newFinding, ...{ rawSources: result.sources } } as any);
           });
 
-          addLog(agentId, agent.name, `Method Audit Complete. Sources Vetted: ${result.sources.length}`, 'success');
-          findingsRef.current.push({ ...newFinding, ...{ rawSources: result.sources } } as any);
+          await Promise.all(agentPromises);
+        }
+
+        const maxAdditionalAgents = Math.max(0, maxAgents - roundSectors.length);
+        const methodQueriesToRun = methodQueries
+          .filter(q => !usedQueries.has(q))
+          .slice(0, Math.min(maxAdditionalAgents, maxMethodAgents));
+        methodQueriesToRun.forEach(q => {
+          usedQueries.add(q);
+          roundQueries.push(q);
         });
 
-        await Promise.all(methodAgentPromises);
-      } else {
-        addLog(overseerId, overseer.name, 'PHASE 2B: METHOD AUDIT - Skipped (agent cap reached).', 'warning');
+        if (methodQueriesToRun.length > 0) {
+          addLog(overseerId, overseer.name, `PHASE 2B: METHOD AUDIT (ROUND ${round}/${maxRounds}) - Spawning ${methodQueriesToRun.length} independent search agents.`, 'action');
+          const methodAgentPromises = methodQueriesToRun.map(async (query: string, index: number) => {
+            await new Promise(resolve => setTimeout(resolve, index * 700));
+            const agentId = generateId();
+            const agent: Agent = {
+              id: agentId,
+              name: round === 1 ? `Method Audit ${index + 1}` : `Method Audit R${round}-${index + 1}`,
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: 'Independent method audit',
+              reasoning: [`Independent query: ${query}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
+
+            const result = await performDeepResearch(
+              agent.name,
+              'Independent method audit',
+              query,
+              (msg) => addLog(agentId, agent.name, msg, 'info')
+            );
+            roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
+            enqueueTaxonomyGrowth({
+              agentId,
+              agentName: agent.name,
+              focus: 'Independent method audit',
+              resultText: result.text || ''
+            });
+            methodQuerySources.set(query, result.sources.map(s => s.uri));
+
+            const newFinding: Finding = {
+              source: agent.name,
+              content: result.text,
+              confidence: 0.85,
+              url: result.sources.map(s => s.uri).join(', ')
+            };
+
+            updateAgent(agentId, {
+              status: AgentStatus.COMPLETE,
+              findings: [newFinding],
+              reasoning: [`Indexed ${result.sources.length} sources`, `Data Volume: ${result.text.length} chars`]
+            });
+
+            addLog(agentId, agent.name, `Method Audit Complete. Sources Vetted: ${result.sources.length}`, 'success');
+            findingsRef.current.push({ ...newFinding, ...{ rawSources: result.sources } } as any);
+          });
+
+          await Promise.all(methodAgentPromises);
+        } else if (round === 1) {
+          addLog(overseerId, overseer.name, 'PHASE 2B: METHOD AUDIT - Skipped (agent cap reached).', 'warning');
+        }
+
+        if (roundQueries.length === 0) {
+          break;
+        }
+
+        const metrics = recordExhaustionRound(exhaustionTracker, `round_${round}`, roundQueries, roundSources);
+        if (shouldStopAfterRound(round, metrics)) {
+          break;
+        }
       }
 
       // --- PHASE 3: CROSS-EXAMINATION (GAP FILL) ---
@@ -386,6 +1086,7 @@ export const useOverseer = () => {
          };
          addAgent(gapAgent);
          
+         const gapSources: string[] = [];
          // Use Deep Research even for the gap fill
          const gapResult = await performDeepResearch(
              gapAgent.name, 
@@ -393,6 +1094,14 @@ export const useOverseer = () => {
              critique.newMethod.query, 
              (msg) => addLog(gapAgentId, gapAgent.name, msg, 'info')
          );
+         gapSources.push(...gapResult.sources.map(s => s.uri).filter(Boolean));
+
+         enqueueTaxonomyGrowth({
+           agentId: gapAgentId,
+           agentName: gapAgent.name,
+           focus: critique.newMethod.task,
+           resultText: gapResult.text || ''
+         });
 
          const gapFinding = {
              source: gapAgent.name,
@@ -402,6 +1111,12 @@ export const useOverseer = () => {
          };
          updateAgent(gapAgentId, { status: AgentStatus.COMPLETE });
          findingsRef.current.push(gapFinding as any);
+         recordExhaustionRound(
+           exhaustionTracker,
+           'gap_fill',
+           [critique.newMethod.query],
+           gapSources
+         );
       } else {
         addLog(overseerId, overseer.name, 'Red Team Assessment: Sufficient data density achieved.', 'success');
       }
@@ -417,7 +1132,9 @@ export const useOverseer = () => {
       if (shouldExhaust) {
         const remainingCapacity = Math.max(0, maxAgents - findingsRef.current.length);
         const exhaustTemplates = isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL;
-        const exhaustBase = exhaustTemplates.map(t => t.replace('{topic}', topic));
+        const exhaustBase = tacticPackQueries.length > 0
+          ? tacticPackQueries
+          : exhaustTemplates.map(t => t.replace('{topic}', topic));
         const exhaustFromDomains = knowledgeBase.domains.map(d => `site:${d} ${topic}`);
         const exhaustFromMethods = (knowledgeBase.methods || []).map((q) => q.includes('{topic}') ? q.replace('{topic}', topic) : q);
         const exhaustQueries = uniqueList([...exhaustBase, ...exhaustFromDomains, ...exhaustFromMethods])
@@ -426,6 +1143,7 @@ export const useOverseer = () => {
 
         if (exhaustQueries.length > 0) {
           addLog(overseerId, overseer.name, `PHASE 3B: EXHAUSTION TEST - Spawning ${exhaustQueries.length} additional scouts.`, 'action');
+          const phase3BSources: string[] = [];
           const exhaustPromises = exhaustQueries.map(async (query: string, index: number) => {
             await new Promise(resolve => setTimeout(resolve, index * 700));
             const agentId = generateId();
@@ -448,6 +1166,13 @@ export const useOverseer = () => {
               query,
               (msg) => addLog(agentId, agent.name, msg, 'info')
             );
+            phase3BSources.push(...result.sources.map(s => s.uri).filter(Boolean));
+            enqueueTaxonomyGrowth({
+              agentId,
+              agentName: agent.name,
+              focus: 'Exhaustion test',
+              resultText: result.text || ''
+            });
             methodQuerySources.set(query, result.sources.map(s => s.uri));
 
             const newFinding: Finding = {
@@ -469,6 +1194,7 @@ export const useOverseer = () => {
           });
 
           await Promise.all(exhaustPromises);
+          recordExhaustionRound(exhaustionTracker, 'exhaustion_test', exhaustQueries, phase3BSources);
         } else {
           addLog(overseerId, overseer.name, 'PHASE 3B: EXHAUSTION TEST - No remaining unique methods.', 'warning');
         }

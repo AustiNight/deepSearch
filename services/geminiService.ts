@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GEMINI_MODEL_FAST, GEMINI_MODEL_REASONING } from "../constants";
 import { Skill } from "../types";
+import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
 
 const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
@@ -43,6 +44,77 @@ const storeRawSynthesis = (raw: string, attempt: "initial" | "retry") => {
   console.warn(`[SYNTHESIS RAW gemini ${attempt}]`, raw);
 };
 
+export const classifyResearchVertical = async (input: {
+  topic: string;
+  taxonomySummary: Array<{ id: string; label: string; blueprintFields?: string[] }>;
+  hintVerticalIds?: string[];
+  contextText?: string;
+}) => {
+  const summaryLines = input.taxonomySummary.map((v) => {
+    const fields = Array.isArray(v.blueprintFields) && v.blueprintFields.length > 0
+      ? ` fields: ${v.blueprintFields.join(", ")}`
+      : "";
+    return `${v.id} (${v.label})${fields}`;
+  }).join("\n");
+  const hints = Array.isArray(input.hintVerticalIds) && input.hintVerticalIds.length > 0
+    ? input.hintVerticalIds.join(", ")
+    : "none";
+  const contextSnippet = input.contextText ? input.contextText.substring(0, 6000) : "";
+
+  const prompt = `
+    Topic: "${input.topic}"
+    Vertical Hints: ${hints}
+
+    Available Verticals:
+    ${summaryLines}
+
+    Optional Context:
+    ${contextSnippet || "none"}
+
+    Task: Classify the topic into one or more verticals from the list above.
+    Return JSON with:
+    - verticals: [{ id, weight, reason }]
+    - isUncertain: boolean
+    - confidence: number (0-1)
+    Notes:
+    - Weights must sum to 1.
+    - Include multiple verticals if the topic spans them (hybrid).
+    - If unsure, set isUncertain true and lower confidence.
+  `;
+
+  try {
+    const response = await callGemini({
+      model: GEMINI_MODEL_FAST,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            verticals: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  weight: { type: Type.NUMBER },
+                  reason: { type: Type.STRING }
+                }
+              }
+            },
+            isUncertain: { type: Type.BOOLEAN },
+            confidence: { type: Type.NUMBER },
+            notes: { type: Type.STRING }
+          }
+        }
+      }
+    });
+    return parseJsonFromText(response.text || "{}");
+  } catch (error) {
+    return { verticals: [], isUncertain: true, confidence: 0 };
+  }
+};
+
 export const extractResearchMethods = async (topic: string, sourceText: string) => {
   const prompt = `
     Topic: "${topic}"
@@ -79,6 +151,133 @@ export const extractResearchMethods = async (topic: string, sourceText: string) 
     return parseJsonFromText(response.text || "{}");
   } catch (error) {
     return { methods: [] };
+  }
+};
+
+export const proposeTaxonomyGrowth = async (input: {
+  topic: string;
+  agentName: string;
+  agentFocus: string;
+  findingsText: string;
+  taxonomySummary: Array<{ id: string; label: string; subtopics: Array<{ id: string; label: string }> }>;
+  hintVerticalIds?: string[];
+}): Promise<TaxonomyProposalBundle> => {
+  const summaryLines = input.taxonomySummary.map((v) => {
+    const subs = v.subtopics.map(s => `${s.id} (${s.label})`).join(", ");
+    return `${v.id} (${v.label}): ${subs}`;
+  }).join("\n");
+  const hints = Array.isArray(input.hintVerticalIds) && input.hintVerticalIds.length > 0
+    ? input.hintVerticalIds.join(", ")
+    : "none";
+
+  const prompt = `
+    Topic: "${input.topic}"
+    Agent: ${input.agentName}
+    Focus: ${input.agentFocus}
+    Vertical Hints: ${hints}
+
+    Existing Taxonomy (verticals and subtopics):
+    ${summaryLines}
+
+    Findings Snippet:
+    ${input.findingsText.substring(0, 8000)}
+
+    Propose taxonomy growth for future research. Focus on NEW search query templates (tactics) that are not already in the taxonomy.
+    Use placeholders like {topic}, {name}, {company}, {companyDomain}, {product}, {brandDomain}, {city}, {county}, {address}, {year}, {event}, {concept}, {title}, {condition}, {drug}, {law}, {statuteCitation}, {billName}.
+    Prefer adding tactics to existing subtopics. Only propose a new subtopic or vertical if the taxonomy clearly lacks coverage.
+
+    Return JSON with:
+    - tactics: [{ verticalId, subtopicId, template, notes? }]
+    - subtopics: [{ verticalId, id?, label, description?, tactics: [{ template, notes? }] }]
+    - verticals: [{ id?, label, description?, blueprintFields, subtopics: [{ id?, label, tactics: [{ template, notes? }] }] }]
+
+    Limits: max 5 tactics, max 1 subtopic, max 1 vertical. If nothing useful, return empty arrays.
+  `;
+
+  try {
+    const response = await callGemini({
+      model: GEMINI_MODEL_FAST,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            tactics: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  verticalId: { type: Type.STRING },
+                  subtopicId: { type: Type.STRING },
+                  methodId: { type: Type.STRING },
+                  template: { type: Type.STRING },
+                  notes: { type: Type.STRING }
+                }
+              }
+            },
+            subtopics: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  verticalId: { type: Type.STRING },
+                  id: { type: Type.STRING },
+                  label: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  tactics: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        template: { type: Type.STRING },
+                        notes: { type: Type.STRING }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            verticals: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  label: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  blueprintFields: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  subtopics: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        label: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        tactics: {
+                          type: Type.ARRAY,
+                          items: {
+                            type: Type.OBJECT,
+                            properties: {
+                              template: { type: Type.STRING },
+                              notes: { type: Type.STRING }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    return parseJsonFromText(response.text || "{}");
+  } catch (error) {
+    return { tactics: [], subtopics: [], verticals: [] };
   }
 };
 

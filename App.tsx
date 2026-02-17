@@ -5,7 +5,17 @@ import { AgentGraph } from './components/AgentGraph';
 import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
 import { LLMProvider } from './types';
-import { MIN_AGENT_COUNT, MAX_AGENT_COUNT, MAX_METHOD_AGENTS } from './constants';
+import {
+  MIN_AGENT_COUNT,
+  MAX_AGENT_COUNT,
+  MAX_METHOD_AGENTS,
+  MIN_SEARCH_ROUNDS,
+  MAX_SEARCH_ROUNDS,
+  EARLY_STOP_DIMINISHING_SCORE,
+  EARLY_STOP_NOVELTY_RATIO,
+  EARLY_STOP_NEW_DOMAINS,
+  EARLY_STOP_NEW_SOURCES
+} from './constants';
 
 const ENV_GEMINI_KEY = (process.env.GEMINI_API_KEY || '').trim();
 const ENV_OPENAI_KEY = (process.env.OPENAI_API_KEY || '').trim();
@@ -20,27 +30,72 @@ const parseEnvNumber = (value: string | undefined, fallback: number) => {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 };
+const parseEnvFloat = (value: string | undefined, fallback: number, min = 0, max = 1) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+};
 const ENV_MIN_AGENTS = parseEnvNumber(process.env.MIN_AGENT_COUNT, MIN_AGENT_COUNT);
 const ENV_MAX_AGENTS = parseEnvNumber(process.env.MAX_AGENT_COUNT, MAX_AGENT_COUNT);
 const ENV_MAX_METHOD_AGENTS = parseEnvNumber(process.env.MAX_METHOD_AGENTS, MAX_METHOD_AGENTS);
+const ENV_MIN_ROUNDS = parseEnvNumber(process.env.MIN_SEARCH_ROUNDS, MIN_SEARCH_ROUNDS);
+const ENV_MAX_ROUNDS = parseEnvNumber(process.env.MAX_SEARCH_ROUNDS, MAX_SEARCH_ROUNDS);
+const ENV_EARLY_STOP_DIMINISHING = parseEnvFloat(process.env.EARLY_STOP_DIMINISHING_SCORE, EARLY_STOP_DIMINISHING_SCORE);
+const ENV_EARLY_STOP_NOVELTY = parseEnvFloat(process.env.EARLY_STOP_NOVELTY_RATIO, EARLY_STOP_NOVELTY_RATIO);
+const ENV_EARLY_STOP_NEW_DOMAINS = parseEnvNumber(process.env.EARLY_STOP_NEW_DOMAINS, EARLY_STOP_NEW_DOMAINS);
+const ENV_EARLY_STOP_NEW_SOURCES = parseEnvNumber(process.env.EARLY_STOP_NEW_SOURCES, EARLY_STOP_NEW_SOURCES);
 
 const App: React.FC = () => {
   const [topic, setTopic] = useState('');
   const [provider, setProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
   const [keyOverrides, setKeyOverrides] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
-  const [runConfig, setRunConfig] = useState<{ minAgents: number; maxAgents: number; maxMethodAgents: number; forceExhaustion: boolean }>({
+  const [runConfig, setRunConfig] = useState<{
+    minAgents: number;
+    maxAgents: number;
+    maxMethodAgents: number;
+    forceExhaustion: boolean;
+    minRounds: number;
+    maxRounds: number;
+    earlyStopDiminishingScore: number;
+    earlyStopNoveltyRatio: number;
+    earlyStopNewDomains: number;
+    earlyStopNewSources: number;
+  }>({
     minAgents: ENV_MIN_AGENTS,
     maxAgents: ENV_MAX_AGENTS,
     maxMethodAgents: ENV_MAX_METHOD_AGENTS,
-    forceExhaustion: false
+    forceExhaustion: false,
+    minRounds: ENV_MIN_ROUNDS,
+    maxRounds: ENV_MAX_ROUNDS,
+    earlyStopDiminishingScore: ENV_EARLY_STOP_DIMINISHING,
+    earlyStopNoveltyRatio: ENV_EARLY_STOP_NOVELTY,
+    earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
+    earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
   });
   const [draftProvider, setDraftProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
   const [draftKeys, setDraftKeys] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
-  const [draftRunConfig, setDraftRunConfig] = useState<{ minAgents: number; maxAgents: number; maxMethodAgents: number; forceExhaustion: boolean }>({
+  const [draftRunConfig, setDraftRunConfig] = useState<{
+    minAgents: number;
+    maxAgents: number;
+    maxMethodAgents: number;
+    forceExhaustion: boolean;
+    minRounds: number;
+    maxRounds: number;
+    earlyStopDiminishingScore: number;
+    earlyStopNoveltyRatio: number;
+    earlyStopNewDomains: number;
+    earlyStopNewSources: number;
+  }>({
     minAgents: ENV_MIN_AGENTS,
     maxAgents: ENV_MAX_AGENTS,
     maxMethodAgents: ENV_MAX_METHOD_AGENTS,
-    forceExhaustion: false
+    forceExhaustion: false,
+    minRounds: ENV_MIN_ROUNDS,
+    maxRounds: ENV_MAX_ROUNDS,
+    earlyStopDiminishingScore: ENV_EARLY_STOP_DIMINISHING,
+    earlyStopNoveltyRatio: ENV_EARLY_STOP_NOVELTY,
+    earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
+    earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
   });
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
@@ -67,7 +122,24 @@ const App: React.FC = () => {
         const maxAgents = parseEnvNumber(parsed?.maxAgents?.toString(), ENV_MAX_AGENTS);
         const maxMethodAgents = parseEnvNumber(parsed?.maxMethodAgents?.toString(), ENV_MAX_METHOD_AGENTS);
         const forceExhaustion = parsed?.forceExhaustion === true;
-        setRunConfig({ minAgents, maxAgents: Math.max(minAgents, maxAgents), maxMethodAgents, forceExhaustion });
+        const minRounds = parseEnvNumber(parsed?.minRounds?.toString(), ENV_MIN_ROUNDS);
+        const maxRounds = parseEnvNumber(parsed?.maxRounds?.toString(), ENV_MAX_ROUNDS);
+        const earlyStopDiminishingScore = parseEnvFloat(parsed?.earlyStopDiminishingScore?.toString(), ENV_EARLY_STOP_DIMINISHING);
+        const earlyStopNoveltyRatio = parseEnvFloat(parsed?.earlyStopNoveltyRatio?.toString(), ENV_EARLY_STOP_NOVELTY);
+        const earlyStopNewDomains = parseEnvNumber(parsed?.earlyStopNewDomains?.toString(), ENV_EARLY_STOP_NEW_DOMAINS);
+        const earlyStopNewSources = parseEnvNumber(parsed?.earlyStopNewSources?.toString(), ENV_EARLY_STOP_NEW_SOURCES);
+        setRunConfig({
+          minAgents,
+          maxAgents: Math.max(minAgents, maxAgents),
+          maxMethodAgents,
+          forceExhaustion,
+          minRounds,
+          maxRounds: Math.max(minRounds, maxRounds),
+          earlyStopDiminishingScore,
+          earlyStopNoveltyRatio,
+          earlyStopNewDomains,
+          earlyStopNewSources
+        });
       }
     } catch (_) {
       // ignore
@@ -90,11 +162,27 @@ const App: React.FC = () => {
     const minAgents = Math.max(1, Math.floor(Number(draftRunConfig.minAgents) || ENV_MIN_AGENTS));
     const maxAgents = Math.max(minAgents, Math.floor(Number(draftRunConfig.maxAgents) || ENV_MAX_AGENTS));
     const maxMethodAgents = Math.max(1, Math.floor(Number(draftRunConfig.maxMethodAgents) || ENV_MAX_METHOD_AGENTS));
+    const minRounds = Math.max(1, Math.floor(Number(draftRunConfig.minRounds) || ENV_MIN_ROUNDS));
+    const maxRounds = Math.max(minRounds, Math.floor(Number(draftRunConfig.maxRounds) || ENV_MAX_ROUNDS));
+    const rawDiminishing = Number(draftRunConfig.earlyStopDiminishingScore);
+    const rawNovelty = Number(draftRunConfig.earlyStopNoveltyRatio);
+    const rawNewDomains = Number(draftRunConfig.earlyStopNewDomains);
+    const rawNewSources = Number(draftRunConfig.earlyStopNewSources);
+    const earlyStopDiminishingScore = Math.max(0, Math.min(1, Number.isFinite(rawDiminishing) ? rawDiminishing : ENV_EARLY_STOP_DIMINISHING));
+    const earlyStopNoveltyRatio = Math.max(0, Math.min(1, Number.isFinite(rawNovelty) ? rawNovelty : ENV_EARLY_STOP_NOVELTY));
+    const earlyStopNewDomains = Math.max(0, Math.floor(Number.isFinite(rawNewDomains) ? rawNewDomains : ENV_EARLY_STOP_NEW_DOMAINS));
+    const earlyStopNewSources = Math.max(0, Math.floor(Number.isFinite(rawNewSources) ? rawNewSources : ENV_EARLY_STOP_NEW_SOURCES));
     const nextRunConfig = {
       minAgents,
       maxAgents,
       maxMethodAgents,
-      forceExhaustion: draftRunConfig.forceExhaustion
+      forceExhaustion: draftRunConfig.forceExhaustion,
+      minRounds,
+      maxRounds,
+      earlyStopDiminishingScore,
+      earlyStopNoveltyRatio,
+      earlyStopNewDomains,
+      earlyStopNewSources
     };
 
     setProvider(draftProvider);
@@ -373,6 +461,79 @@ const App: React.FC = () => {
                 </label>
                 <p className="text-[10px] text-gray-500 mt-1">
                   When enabled, the Overseer always runs the exhaustion test and spawns extra scouts up to the max cap.
+                </p>
+                <label className="block text-xs font-mono text-gray-400 mt-4 mb-2">ROUND CONTROL</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">MIN_ROUNDS</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={draftRunConfig.minRounds}
+                      onChange={(e) => setDraftRunConfig(prev => ({ ...prev, minRounds: Number(e.target.value) }))}
+                      className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">MAX_ROUNDS</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={draftRunConfig.maxRounds}
+                      onChange={(e) => setDraftRunConfig(prev => ({ ...prev, maxRounds: Number(e.target.value) }))}
+                      className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    />
+                  </div>
+                </div>
+                <label className="block text-xs font-mono text-gray-400 mt-4 mb-2">EARLY STOP THRESHOLDS</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">DIMINISHING</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={draftRunConfig.earlyStopDiminishingScore}
+                      onChange={(e) => setDraftRunConfig(prev => ({ ...prev, earlyStopDiminishingScore: Number(e.target.value) }))}
+                      className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">NOVELTY</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={draftRunConfig.earlyStopNoveltyRatio}
+                      onChange={(e) => setDraftRunConfig(prev => ({ ...prev, earlyStopNoveltyRatio: Number(e.target.value) }))}
+                      className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">NEW DOMAINS</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={draftRunConfig.earlyStopNewDomains}
+                      onChange={(e) => setDraftRunConfig(prev => ({ ...prev, earlyStopNewDomains: Number(e.target.value) }))}
+                      className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">NEW SOURCES</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={draftRunConfig.earlyStopNewSources}
+                      onChange={(e) => setDraftRunConfig(prev => ({ ...prev, earlyStopNewSources: Number(e.target.value) }))}
+                      className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Early stop triggers when diminishing returns are high and novelty or new-source counts fall below thresholds.
                 </p>
               </div>
 

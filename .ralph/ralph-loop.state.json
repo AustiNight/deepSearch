@@ -1,0 +1,13 @@
+{
+  "active": true,
+  "iteration": 1,
+  "minIterations": 1,
+  "maxIterations": 0,
+  "completionPromise": "COMPLETE",
+  "tasksMode": true,
+  "taskPromise": "READY_FOR_NEXT_TASK",
+  "prompt": "Refactor the approach to research.  Notify only when all tasks are done.",
+  "startedAt": "2026-02-16T23:59:21.726Z",
+  "model": "gpt-5.2-codex",
+  "agent": "codex"
+}

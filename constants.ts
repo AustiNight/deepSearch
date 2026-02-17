@@ -8,6 +8,12 @@ export const DEFAULT_LLM_PROVIDER = 'google';
 export const MIN_AGENT_COUNT = 8;
 export const MAX_AGENT_COUNT = 20;
 export const MAX_METHOD_AGENTS = 8;
+export const MIN_SEARCH_ROUNDS = 1;
+export const MAX_SEARCH_ROUNDS = 2;
+export const EARLY_STOP_DIMINISHING_SCORE = 0.75;
+export const EARLY_STOP_NOVELTY_RATIO = 0.25;
+export const EARLY_STOP_NEW_DOMAINS = 1;
+export const EARLY_STOP_NEW_SOURCES = 3;
 
 export const METHOD_TEMPLATES_GENERAL = [
   '{topic} official documentation',
