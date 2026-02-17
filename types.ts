@@ -47,14 +47,54 @@ export interface ReportSection {
   sources: string[];
 }
 
+export type VisualizationType = 'bar' | 'line' | 'area' | 'image';
+
+export interface ChartSeries {
+  name: string;
+  data: number[];
+  color?: string;
+}
+
+export interface ChartData {
+  labels: string[];
+  series: ChartSeries[];
+  unit?: string;
+}
+
+export interface VisualizationBase {
+  type: VisualizationType;
+  title: string;
+  caption?: string;
+  sources?: string[];
+}
+
+export interface ChartVisualization extends VisualizationBase {
+  type: 'bar' | 'line' | 'area';
+  data: ChartData;
+}
+
+export interface ImageVisualization extends VisualizationBase {
+  type: 'image';
+  data: {
+    url: string;
+    alt?: string;
+    width?: number;
+    height?: number;
+  };
+}
+
+export type Visualization = ChartVisualization | ImageVisualization;
+
 export interface FinalReport {
   title: string;
   summary: string;
   sections: ReportSection[];
+  visualizations?: Visualization[];
   provenance: {
     totalSources: number;
     methodAudit: string;
   };
+  schemaVersion?: number;
 }
 
 export type TaxonomyProvenanceSource = 'seed' | 'agent_proposal' | 'overseer_vet' | 'manual';

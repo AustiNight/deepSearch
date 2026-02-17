@@ -2,6 +2,7 @@ import React from 'react';
 import { FinalReport } from '../types';
 import ReactMarkdown from 'react-markdown';
 import { Download, ShieldCheck, ExternalLink } from 'lucide-react';
+import { ReportVisualizations } from './ReportVisualizations';
 
 interface Props {
   report: FinalReport;
@@ -182,6 +183,8 @@ export const ReportView: React.FC<Props> = ({ report }) => {
           <h3 className="text-cyber-blue mt-0">Executive Summary</h3>
           <p className="text-gray-300 leading-relaxed">{report.summary}</p>
         </div>
+
+        <ReportVisualizations visualizations={report.visualizations || []} />
 
         {report.sections.map((section, idx) => (
           <div key={idx} className="mb-8">

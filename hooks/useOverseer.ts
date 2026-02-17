@@ -2102,6 +2102,15 @@ export const useOverseer = () => {
         filteredOutCount += Math.max(0, removed);
         return { ...section, sources };
       });
+      const parsedVisualizations = Array.isArray((normalizedReport as any)?.visualizations)
+        ? (normalizedReport as any).visualizations
+        : [];
+      const visualizations = parsedVisualizations.map((viz: any) => {
+        const sources = Array.isArray(viz?.sources) ? viz.sources.filter((s: string) => allowedSet.has(s)) : [];
+        const removed = Array.isArray(viz?.sources) ? viz.sources.length - sources.length : 0;
+        filteredOutCount += Math.max(0, removed);
+        return { ...viz, sources };
+      });
       if (filteredOutCount > 0) {
         logOverseer(
           'PHASE 4: SOURCE FILTER',
@@ -2135,10 +2144,12 @@ export const useOverseer = () => {
         title: reportTitle,
         summary,
         sections,
+        visualizations,
         provenance: {
           totalSources: uniqueSourceCount,
           methodAudit: normalizedReport.provenance?.methodAudit || DEFAULT_METHOD_AUDIT
-        }
+        },
+        schemaVersion: typeof (normalizedReport as any)?.schemaVersion === 'number' ? (normalizedReport as any).schemaVersion : 1
       };
 
       const validation = await validateReport(topic, reportCandidate, allowedSources, modelOverrides);

@@ -1,7 +1,27 @@
-import type { FinalReport, ReportSection } from "../types";
+import type {
+  FinalReport,
+  ReportSection,
+  Visualization,
+  ChartVisualization,
+  ImageVisualization,
+  ChartData,
+  ChartSeries
+} from "../types";
 import { tryParseJsonFromText } from "./jsonUtils";
 
 const DEFAULT_METHOD_AUDIT = "Deep Drill Protocol: 3-Stage Recursive Verification.";
+const DEFAULT_SCHEMA_VERSION = 1;
+
+const MAX_VISUALIZATIONS = 6;
+const MAX_SERIES = 4;
+const MAX_POINTS = 24;
+const MAX_TABLE_ROWS = MAX_POINTS;
+const MAX_LABEL_LENGTH = 40;
+const MAX_TITLE_LENGTH = 80;
+const MAX_CAPTION_LENGTH = 280;
+const MAX_SOURCE_COUNT = 10;
+const MAX_URL_LENGTH = 800;
+const IMAGE_HOST_ALLOWLIST: string[] = [];
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -15,6 +35,26 @@ const toTitleCase = (input: string) => {
     .trim();
   if (!spaced) return "Section";
   return spaced.replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const clampText = (value: string, max: number) => {
+  if (value.length <= max) return value;
+  return value.slice(0, max).trim();
+};
+
+const normalizeStringList = (value: unknown, limit: number) => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+    if (out.length >= limit) break;
+  }
+  return out;
 };
 
 const isPrimitive = (value: unknown) => {
@@ -127,10 +167,7 @@ const formatValueToMarkdown = (value: unknown, depth = 0): string => {
   return String(value);
 };
 
-const normalizeSources = (value: unknown) => {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry) => typeof entry === "string");
-};
+const normalizeSources = (value: unknown) => normalizeStringList(value, MAX_SOURCE_COUNT);
 
 const normalizeSection = (input: unknown, fallbackTitle: string): ReportSection => {
   if (typeof input === "string") {
@@ -154,7 +191,7 @@ const normalizeSection = (input: unknown, fallbackTitle: string): ReportSection 
 };
 
 const buildSectionsFromObject = (data: Record<string, unknown>) => {
-  const skipKeys = new Set(["title", "summary", "provenance"]);
+  const skipKeys = new Set(["title", "summary", "provenance", "visualizations", "schemaVersion"]);
   const priority = [
     "executiveBrief",
     "executive_summary",
@@ -187,6 +224,135 @@ const buildSectionsFromObject = (data: Record<string, unknown>) => {
     content: formatValueToMarkdown(value) || "No content provided.",
     sources: []
   }));
+};
+
+const sanitizeChartData = (input: any): ChartData | null => {
+  if (!isPlainObject(input)) return null;
+  const rawLabels = Array.isArray(input.labels) ? input.labels : [];
+  const labels = rawLabels
+    .map((label) => (typeof label === "string" ? label.trim() : String(label ?? "").trim()))
+    .filter(Boolean)
+    .map((label) => clampText(label, MAX_LABEL_LENGTH))
+    .slice(0, MAX_TABLE_ROWS);
+  if (labels.length === 0) return null;
+
+  const rawSeries = Array.isArray(input.series) ? input.series : [];
+  const series: ChartSeries[] = [];
+  for (const entry of rawSeries) {
+    if (!isPlainObject(entry)) continue;
+    const name =
+      typeof entry.name === "string" && entry.name.trim().length > 0
+        ? clampText(entry.name.trim(), MAX_LABEL_LENGTH)
+        : "Series";
+    const dataValues = Array.isArray(entry.data) ? entry.data : [];
+    const numericValues = dataValues
+      .map((val) => (Number.isFinite(Number(val)) ? Number(val) : null))
+      .filter((val): val is number => val !== null);
+    if (numericValues.length === 0) continue;
+    series.push({ name, data: numericValues.slice(0, MAX_TABLE_ROWS) });
+    if (series.length >= MAX_SERIES) break;
+  }
+
+  if (series.length === 0) return null;
+  const pointCount = Math.min(labels.length, ...series.map((s) => s.data.length));
+  if (!Number.isFinite(pointCount) || pointCount <= 0) return null;
+
+  const alignedLabels = labels.slice(0, pointCount);
+  const alignedSeries = series
+    .map((s) => ({ ...s, data: s.data.slice(0, pointCount) }))
+    .filter((s) => s.data.length === pointCount);
+  if (alignedSeries.length === 0) return null;
+
+  const unit =
+    typeof input.unit === "string" && input.unit.trim().length > 0
+      ? clampText(input.unit.trim(), 16)
+      : undefined;
+
+  return {
+    labels: alignedLabels,
+    series: alignedSeries,
+    unit
+  };
+};
+
+const isSafeImageUrl = (value: string) => {
+  if (value.length > MAX_URL_LENGTH) return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    if (IMAGE_HOST_ALLOWLIST.length > 0 && !IMAGE_HOST_ALLOWLIST.includes(url.hostname)) {
+      return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
+const sanitizeVisualization = (input: any): Visualization | null => {
+  if (!isPlainObject(input)) return null;
+  const type = typeof input.type === "string" ? input.type.trim().toLowerCase() : "";
+  const title =
+    typeof input.title === "string" && input.title.trim().length > 0
+      ? clampText(input.title.trim(), MAX_TITLE_LENGTH)
+      : "Visualization";
+  const caption =
+    typeof input.caption === "string" && input.caption.trim().length > 0
+      ? clampText(input.caption.trim(), MAX_CAPTION_LENGTH)
+      : undefined;
+  const sources = normalizeSources(input.sources);
+
+  if (type === "image") {
+    const data = isPlainObject(input.data) ? input.data : null;
+    const url = typeof data?.url === "string" ? data.url.trim() : "";
+    if (!url || !isSafeImageUrl(url)) return null;
+    const alt =
+      typeof data?.alt === "string" && data.alt.trim().length > 0
+        ? clampText(data.alt.trim(), MAX_LABEL_LENGTH)
+        : title;
+    const width = Number.isFinite(Number(data?.width)) ? Number(data?.width) : undefined;
+    const height = Number.isFinite(Number(data?.height)) ? Number(data?.height) : undefined;
+    const imageViz: ImageVisualization = {
+      type: "image",
+      title,
+      caption,
+      sources,
+      data: {
+        url,
+        alt,
+        width,
+        height
+      }
+    };
+    return imageViz;
+  }
+
+  if (type === "bar" || type === "line" || type === "area") {
+    const chartData = sanitizeChartData(input.data);
+    if (!chartData) return null;
+    const chartViz: ChartVisualization = {
+      type: type as ChartVisualization["type"],
+      title,
+      caption,
+      sources,
+      data: chartData
+    };
+    return chartViz;
+  }
+
+  return null;
+};
+
+const normalizeVisualizations = (value: unknown): Visualization[] => {
+  if (!Array.isArray(value)) return [];
+  const out: Visualization[] = [];
+  for (const entry of value) {
+    const normalized = sanitizeVisualization(entry);
+    if (!normalized) continue;
+    out.push(normalized);
+    if (out.length >= MAX_VISUALIZATIONS) break;
+  }
+  return out;
 };
 
 export const coerceReportData = (input: any, topic: string): FinalReport => {
@@ -223,6 +389,7 @@ export const coerceReportData = (input: any, topic: string): FinalReport => {
     title,
     summary,
     sections,
+    visualizations: normalizeVisualizations(input?.visualizations),
     provenance: {
       totalSources:
         typeof input?.provenance?.totalSources === "number" ? input.provenance.totalSources : 0,
@@ -230,7 +397,11 @@ export const coerceReportData = (input: any, topic: string): FinalReport => {
         typeof input?.provenance?.methodAudit === "string"
           ? input.provenance.methodAudit
           : DEFAULT_METHOD_AUDIT
-    }
+    },
+    schemaVersion:
+      typeof input?.schemaVersion === "number" && Number.isFinite(input.schemaVersion)
+        ? input.schemaVersion
+        : DEFAULT_SCHEMA_VERSION
   };
 };
 

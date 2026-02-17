@@ -120,15 +120,15 @@
   - [ ] Add a small test fixture or story (static report mock) that includes a markdown table and verify rendering on mobile/tablet/desktop breakpoints
   - [ ] Acceptance: when a report section includes a markdown table, the UI renders it as a responsive data table that prints legibly and adapts to light/dark modes
 
-- [ ] Epic: Add visualization components + prompt guidance for charts/media
-  - [ ] Survey and select chart/media components that are efficient and well supported by the current stack (e.g., multi-series charts, bar/line/area/pie, images, simple embeds), documenting tradeoffs and bundle size impact
-  - [ ] Extend the report schema to include a `visualizations` array with `type`, `title`, `data`, `caption`, and `sources`, add schema versioning (or robust fallback) in `types.ts`, and update report rendering to display them
-  - [ ] Define size limits and safety constraints for visualization data (max series/points, max table rows, image URL validation and length caps, optional allowlist or proxy for external images)
-  - [ ] Add renderers for at least 3 chart types (e.g., bar/line/area) and 1 media type (image with caption + source attribution), with responsive layouts and light/dark styles
-  - [ ] Update synthesis prompt(s) to encourage a visualization when the data is best communicated visually, and to emit the correct `visualizations` objects for the chosen components (after schema/rendering are stable)
-  - [ ] Ensure validations and fallbacks gracefully handle missing or malformed visualization data and unknown types
-  - [ ] Add a visualization test fixture (static report mock) that exercises chart + image rendering in light/dark and print views across mobile/tablet/desktop breakpoints
-  - [ ] Acceptance: when the model includes visualization data, the final report renders charts/images using the selected components and remains responsive across mobile/tablet/desktop
+- [x] Epic: Add visualization components + prompt guidance for charts/media
+  - [x] Survey and select chart/media components that are efficient and well supported by the current stack (e.g., multi-series charts, bar/line/area/pie, images, simple embeds), documenting tradeoffs and bundle size impact
+  - [x] Extend the report schema to include a `visualizations` array with `type`, `title`, `data`, `caption`, and `sources`, add schema versioning (or robust fallback) in `types.ts`, and update report rendering to display them
+  - [x] Define size limits and safety constraints for visualization data (max series/points, max table rows, image URL validation and length caps, optional allowlist or proxy for external images)
+  - [x] Add renderers for at least 3 chart types (e.g., bar/line/area) and 1 media type (image with caption + source attribution), with responsive layouts and light/dark styles
+  - [x] Update synthesis prompt(s) to encourage a visualization when the data is best communicated visually, and to emit the correct `visualizations` objects for the chosen components (after schema/rendering are stable)
+  - [x] Ensure validations and fallbacks gracefully handle missing or malformed visualization data and unknown types
+  - [x] Add a visualization test fixture (static report mock) that exercises chart + image rendering in light/dark and print views across mobile/tablet/desktop breakpoints
+  - [x] Acceptance: when the model includes visualization data, the final report renders charts/images using the selected components and remains responsive across mobile/tablet/desktop
 
 - [ ] Epic: Map the full public-info surface area (OSINT / OpenData / PI techniques) and wire it into vertical search
   - [ ] Define scope boundaries and phased delivery for the catalog (e.g., Phase 1: US public sources with max N items per category; Phase 2: expand internationally), and document the limits in the catalog output

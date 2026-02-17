@@ -122,6 +122,7 @@ const supportsJsonSchema = (model: string) => {
 const REPORT_SCHEMA = {
   type: "object",
   properties: {
+    schemaVersion: { type: "number" },
     title: { type: "string" },
     summary: { type: "string" },
     sections: {
@@ -134,6 +135,21 @@ const REPORT_SCHEMA = {
           sources: { type: "array", items: { type: "string" } }
         },
         required: ["title", "content", "sources"],
+        additionalProperties: false
+      }
+    },
+    visualizations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          title: { type: "string" },
+          caption: { type: "string" },
+          sources: { type: "array", items: { type: "string" } },
+          data: { type: "object" }
+        },
+        required: ["type", "title", "data"],
         additionalProperties: false
       }
     },
@@ -162,6 +178,7 @@ const isValidReportData = (data: any) => {
     if (typeof section.content !== "string") return false;
     if (!Array.isArray(section.sources)) return false;
   }
+  if (data.visualizations !== undefined && !Array.isArray(data.visualizations)) return false;
   return true;
 };
 
@@ -557,6 +574,13 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
     - **Sector Analysis**: Deep dive into the dimensions found (Economic, Technical, etc).
     - **Consensus & Conflicts**: What do sources agree on? Where do they disagree?
     - **Master Bibliography**: List of distinct URLs referenced.
+    - **Visualizations (optional)**: If a chart or image would clarify the data, include a \`visualizations\` array.
+      Chart schema: { type: "bar"|"line"|"area", title, caption?, sources: [urls], data: { labels: string[], series: [{ name, data: number[] }], unit? } }.
+      Image schema: { type: "image", title, caption?, sources: [urls], data: { url, alt?, width?, height? } }.
+      Keep charts to max 4 series and max 24 points. If no visualization is needed, return \`visualizations: []\`.
+
+    OUTPUT JSON FIELDS:
+    { schemaVersion: 1, title, summary, sections, visualizations, provenance }
 
     Tone: Academic, rigorous, exhausted.
 
@@ -567,7 +591,7 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
   const initial = await jsonRequestWithRaw(model, initialPrompt);
   const initialParsed = initial.parsed.data;
   if (initialParsed && isValidReportData(initialParsed) && initialParsed.sections.length > 0) {
-    return initialParsed;
+    return coerceReportData(initialParsed, topic);
   }
   if (initial.raw) storeRawSynthesis(initial.raw, "initial");
   const initialFallback = initialParsed ? coerceReportData(initialParsed, topic) : null;
@@ -576,7 +600,7 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
   const retry = await jsonRequestWithRaw(model, retryPrompt);
   const retryParsed = retry.parsed.data;
   if (retryParsed && isValidReportData(retryParsed) && retryParsed.sections.length > 0) {
-    return retryParsed;
+    return coerceReportData(retryParsed, topic);
   }
   if (retry.raw) storeRawSynthesis(retry.raw, "retry");
   if (retryParsed) {

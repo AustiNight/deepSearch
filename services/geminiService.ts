@@ -571,6 +571,13 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
     - **Sector Analysis**: Deep dive into the dimensions found (Economic, Technical, etc).
     - **Consensus & Conflicts**: What do sources agree on? Where do they disagree?
     - **Master Bibliography**: List of distinct URLs referenced.
+    - **Visualizations (optional)**: If a chart or image would clarify the data, include a \`visualizations\` array.
+      Chart schema: { type: "bar"|"line"|"area", title, caption?, sources: [urls], data: { labels: string[], series: [{ name, data: number[] }], unit? } }.
+      Image schema: { type: "image", title, caption?, sources: [urls], data: { url, alt?, width?, height? } }.
+      Keep charts to max 4 series and max 24 points. If no visualization is needed, return \`visualizations: []\`.
+
+    OUTPUT JSON FIELDS:
+    { schemaVersion: 1, title, summary, sections, visualizations, provenance }
 
     Tone: Academic, rigorous, exhausted.
     ${strict ? "Return ONLY a valid JSON object. Do not include markdown, code fences, or extra text." : "Return JSON."}
@@ -585,6 +592,7 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            schemaVersion: { type: Type.NUMBER },
             title: { type: Type.STRING },
             summary: { type: Type.STRING },
             sections: {
@@ -603,6 +611,19 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
               properties: {
                 totalSources: { type: Type.NUMBER },
                 methodAudit: { type: Type.STRING }
+              }
+            },
+            visualizations: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  type: { type: Type.STRING },
+                  title: { type: Type.STRING },
+                  caption: { type: Type.STRING },
+                  sources: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  data: { type: Type.OBJECT }
+                }
               }
             }
           }
