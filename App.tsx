@@ -49,6 +49,9 @@ const ENV_EARLY_STOP_NEW_SOURCES = parseEnvNumber(process.env.EARLY_STOP_NEW_SOU
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const isModelNameValid = (value: string) => MODEL_NAME_PATTERN.test(value.trim());
 
+const ACCESS_ALLOWLIST_STORAGE_KEY = 'overseer_access_allowlist';
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const OPENAI_MODEL_SUGGESTIONS = [
   'gpt-5-codex',
   'gpt-4.1',
@@ -80,6 +83,25 @@ const sanitizeModelOverrideDraft = (overrides: ModelOverrides): ModelOverrides =
     }
   }
   return sanitized;
+};
+
+const parseAllowlistText = (text: string) => {
+  const entries: string[] = [];
+  const invalid: string[] = [];
+  const seen = new Set<string>();
+  const chunks = text.split(/[\n,]+/);
+  for (const chunk of chunks) {
+    const value = chunk.trim().toLowerCase();
+    if (!value) continue;
+    if (!EMAIL_PATTERN.test(value)) {
+      invalid.push(value);
+      continue;
+    }
+    if (seen.has(value)) continue;
+    seen.add(value);
+    entries.push(value);
+  }
+  return { entries, invalid };
 };
 
 const App: React.FC = () => {
@@ -137,6 +159,11 @@ const App: React.FC = () => {
   });
   const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
   const [bulkModelValue, setBulkModelValue] = useState('');
+  const [accessAllowlist, setAccessAllowlist] = useState<string[]>([]);
+  const [draftAllowlistText, setDraftAllowlistText] = useState('');
+  const [allowlistInput, setAllowlistInput] = useState('');
+  const [allowlistInputError, setAllowlistInputError] = useState('');
+  const [allowlistCopyStatus, setAllowlistCopyStatus] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(!REQUIRES_PASSWORD);
@@ -186,6 +213,24 @@ const App: React.FC = () => {
     }
     const storedOverrides = sanitizeModelOverrideDraft(loadModelOverrides());
     setModelOverrides(storedOverrides);
+    try {
+      const storedAllowlist = localStorage.getItem(ACCESS_ALLOWLIST_STORAGE_KEY);
+      if (storedAllowlist) {
+        try {
+          const parsed = JSON.parse(storedAllowlist);
+          if (Array.isArray(parsed)) {
+            const entries = parseAllowlistText(parsed.join('\n')).entries;
+            setAccessAllowlist(entries);
+          } else if (typeof parsed === 'string') {
+            setAccessAllowlist(parseAllowlistText(parsed).entries);
+          }
+        } catch (_) {
+          setAccessAllowlist(parseAllowlistText(storedAllowlist).entries);
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
     if (REQUIRES_PASSWORD) {
       try {
         const unlocked = sessionStorage.getItem('overseer_unlocked') === 'true';
@@ -248,6 +293,10 @@ const App: React.FC = () => {
     setModelOverrides(sanitizedOverrides);
     saveModelOverrides(sanitizedOverrides);
 
+    const sanitizedAllowlist = parseAllowlistText(draftAllowlistText).entries;
+    setAccessAllowlist(sanitizedAllowlist);
+    localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(sanitizedAllowlist));
+
     setShowSettings(false);
   };
 
@@ -261,6 +310,10 @@ const App: React.FC = () => {
     setDraftRunConfig(runConfig);
     setDraftModelOverrides(modelOverrides);
     setBulkModelValue('');
+    setDraftAllowlistText(accessAllowlist.join('\n'));
+    setAllowlistInput('');
+    setAllowlistInputError('');
+    setAllowlistCopyStatus('');
     setShowSettings(true);
   };
 
@@ -279,6 +332,44 @@ const App: React.FC = () => {
   const handleResetModelOverrides = () => {
     setDraftModelOverrides({});
     setBulkModelValue('');
+  };
+
+  const { entries: draftAllowlistEntries, invalid: draftAllowlistInvalid } = parseAllowlistText(draftAllowlistText);
+
+  const handleAddAllowlistEntry = () => {
+    const value = allowlistInput.trim().toLowerCase();
+    if (!value) return;
+    if (!EMAIL_PATTERN.test(value)) {
+      setAllowlistInputError('Invalid email format.');
+      return;
+    }
+    setAllowlistInputError('');
+    const nextEntries = draftAllowlistEntries.includes(value)
+      ? draftAllowlistEntries
+      : [...draftAllowlistEntries, value];
+    setDraftAllowlistText(nextEntries.join('\n'));
+    setAllowlistInput('');
+  };
+
+  const handleRemoveAllowlistEntry = () => {
+    const value = allowlistInput.trim().toLowerCase();
+    if (!value) return;
+    setAllowlistInputError('');
+    const nextEntries = draftAllowlistEntries.filter(entry => entry !== value);
+    setDraftAllowlistText(nextEntries.join('\n'));
+    setAllowlistInput('');
+  };
+
+  const handleCopyAllowlist = async () => {
+    const payload = draftAllowlistEntries.join('\n');
+    if (!payload) return;
+    try {
+      await navigator.clipboard.writeText(payload);
+      setAllowlistCopyStatus('COPIED');
+    } catch (_) {
+      setAllowlistCopyStatus('COPY FAILED');
+    }
+    window.setTimeout(() => setAllowlistCopyStatus(''), 2000);
   };
 
   const { agents, logs, report, isRunning, startResearch, skills } = useOverseer();
@@ -549,6 +640,73 @@ const App: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-mono text-gray-400">CLOUDFLARE ACCESS ALLOWLIST</label>
+                  <div className="flex items-center gap-2">
+                    {allowlistCopyStatus && (
+                      <span className="text-[10px] font-mono text-gray-500">{allowlistCopyStatus}</span>
+                    )}
+                    <button
+                      onClick={handleCopyAllowlist}
+                      className="text-[10px] font-mono text-gray-400 hover:text-white transition-colors"
+                    >
+                      COPY ALLOWLIST
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  rows={4}
+                  value={draftAllowlistText}
+                  onChange={(e) => setDraftAllowlistText(e.target.value)}
+                  placeholder="user@example.com&#10;teammate@company.com"
+                  className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={allowlistInput}
+                    onChange={(e) => {
+                      setAllowlistInput(e.target.value);
+                      if (allowlistInputError) setAllowlistInputError('');
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddAllowlistEntry()}
+                    placeholder="person@domain.com"
+                    className="flex-1 bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  />
+                  <button
+                    onClick={handleAddAllowlistEntry}
+                    className="px-3 py-2 text-xs font-mono border border-gray-700 rounded text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+                  >
+                    ADD
+                  </button>
+                  <button
+                    onClick={handleRemoveAllowlistEntry}
+                    className="px-3 py-2 text-xs font-mono border border-gray-700 rounded text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+                  >
+                    REMOVE
+                  </button>
+                </div>
+                {allowlistInputError && (
+                  <p className="text-[10px] text-red-500 font-mono">{allowlistInputError}</p>
+                )}
+                {draftAllowlistInvalid.length > 0 && (
+                  <p className="text-[10px] text-yellow-500 font-mono">
+                    Invalid entries ignored: {draftAllowlistInvalid.slice(0, 3).join(', ')}
+                    {draftAllowlistInvalid.length > 3 ? '…' : ''}
+                  </p>
+                )}
+                <p className="text-[10px] text-gray-500">
+                  This helper only prepares an Access policy allowlist; it does not secure the client app.
+                </p>
+                <pre className="text-[10px] text-gray-500 bg-black/60 border border-gray-800 rounded p-2 whitespace-pre-wrap font-mono">
+{`Include
+  Emails in
+    user@example.com
+    teammate@company.com`}
+                </pre>
+              </div>
 
               <div>
                 <label className="block text-xs font-mono text-gray-400 mb-2">SEARCH LIMITS</label>

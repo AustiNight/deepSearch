@@ -23,13 +23,13 @@
   - [ ] Add minimal logging to confirm resolved model per role at runtime (guarded to avoid noisy logs)
   - [ ] Validate that switching a role model in UI changes the model used in the next run (acceptance criteria)
 
-- [ ] Epic: Add email allowlist management controls to Settings dialog
-  - [ ] Add a “Cloudflare Access Allowlist” section to the settings UI with a multi‑line textarea and add/remove controls
-  - [ ] Normalize and validate email entries (trim, lowercase, remove duplicates; basic email format check)
-  - [ ] Persist allowlist to localStorage (e.g., `overseer_access_allowlist`)
-  - [ ] Add “Copy allowlist” button to export a newline‑separated list for Cloudflare Access policy entry
-  - [ ] Add help text clarifying this is for Access policy configuration (does not enforce client‑side security), with a short example policy snippet
-  - [ ] Validate that the allowlist is retained across reloads and can be exported cleanly (acceptance criteria)
+- [x] Epic: Add email allowlist management controls to Settings dialog
+  - [x] Add a “Cloudflare Access Allowlist” section to the settings UI with a multi‑line textarea and add/remove controls
+  - [x] Normalize and validate email entries (trim, lowercase, remove duplicates; basic email format check)
+  - [x] Persist allowlist to localStorage (e.g., `overseer_access_allowlist`)
+  - [x] Add “Copy allowlist” button to export a newline‑separated list for Cloudflare Access policy entry
+  - [x] Add help text clarifying this is for Access policy configuration (does not enforce client‑side security), with a short example policy snippet
+  - [x] Validate that the allowlist is retained across reloads and can be exported cleanly (acceptance criteria)
 
 - [ ] Epic: Expand help text for all settings with concrete examples
   - [ ] Add inline help text for provider selection, agent caps, exhaustion settings, and the new model/allowlist controls
