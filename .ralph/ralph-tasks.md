@@ -1,5 +1,5 @@
 # Ralph Tasks
- - [/] Epic: Refactor search strategy and user authentication
+ - [x] Epic: Refactor search strategy and user authentication
   - [x] Feature: Map current Overseer workflow and target architecture
     - [x] Review `hooks/useOverseer.ts`, `services/openaiService.ts`, `services/geminiService.ts`, and   `constants.ts` to document current phases, agent spawning points, and loop boundaries
     - [x] Identify insertion points for vertical classification, taxonomy-based tactics, hybrid branching,   and probabilistic exhaustion heuristics
@@ -124,10 +124,10 @@
     - [x] Ensure `SYSTEM_INSTRUCTION_OVERSEER` reflects vertical classification + exhaustion-first reasoning
     - [x] Validate the app completes a run and displays the new telemetry logs (acceptance criteria)
   
-  - [ ] Feature: Prepare GitHub Pages deployment for Cloudflare Access protection
-    - [ ] Add a `CNAME` file at repo root with `deepsearches.app` to support custom domain on GitHub Pages
-    - [ ] Ensure Vite build assets resolve from `/` (custom domain) and not a repo subpath; adjust `vite.  config.ts` `base` if needed
-    - [ ] Add a lightweight `security.md` or `docs/cloudflare-access.md` with Access setup expectations (Zero   Trust app, email allowlist policy, One-time PIN email auth) for future deployment
-    - [ ] Define the email allowlist source of truth (doc section + update process) and note how to add/  remove authorized emails
-    - [ ] Add headers guidance in `wrangler.toml` or deployment notes for caching and CSP compatibility with   Cloudflare Access
-    - [ ] Verify build output still serves correctly under the custom domain path (acceptance criteria)
+  - [x] Feature: Prepare GitHub Pages deployment for Cloudflare Access protection
+    - [x] Add a `CNAME` file at repo root with `deepsearches.app` to support custom domain on GitHub Pages
+    - [x] Ensure Vite build assets resolve from `/` (custom domain) and not a repo subpath; adjust `vite.config.ts` `base` if needed
+    - [x] Add a lightweight `security.md` or `docs/cloudflare-access.md` with Access setup expectations (Zero Trust app, email allowlist policy, One-time PIN email auth) for future deployment
+    - [x] Define the email allowlist source of truth (doc section + update process) and note how to add/remove authorized emails
+    - [x] Add headers guidance in `wrangler.toml` or deployment notes for caching and CSP compatibility with Cloudflare Access
+    - [x] Verify build output still serves correctly under the custom domain path (acceptance criteria)
