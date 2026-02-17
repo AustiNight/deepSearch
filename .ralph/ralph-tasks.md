@@ -97,11 +97,11 @@
   - [ ] Update allowlist copy text to reflect “synced to Cloudflare Access on Save” and surface Worker failure messages
   - [ ] Acceptance: saving the allowlist immediately updates Cloudflare Access and the UI shows a synced status without manual copy/paste
 
-- [ ] Epic: CI/CD reconciliation from KV (no secrets in repo)
-  - [ ] Update `.ralph/CICD.sh` to fetch the allowlist from KV (via Worker `GET /api/access/allowlist`) and use it as the single input for Access policy updates
-  - [ ] Keep the curl call stubbed with TODOs (no real endpoints or payloads); document required env vars and access assumptions
-  - [ ] Add a safe diff/summary output (counts + domain summaries) and exit non-zero on stale KV or Access update failures
-  - [ ] Acceptance: CI/CD script can retrieve the current allowlist from KV and is ready for a safe policy update implementation
+- [x] Epic: CI/CD reconciliation from KV (no secrets in repo)
+  - [x] Update `.ralph/CICD.sh` to fetch the allowlist from KV (via Worker `GET /api/access/allowlist`) and use it as the single input for Access policy updates
+  - [x] Keep the curl call stubbed with TODOs (no real endpoints or payloads); document required env vars and access assumptions
+  - [x] Add a safe diff/summary output (counts + domain summaries) and exit non-zero on stale KV or Access update failures
+  - [x] Acceptance: CI/CD script can retrieve the current allowlist from KV and is ready for a safe policy update implementation
 
 - [ ] Epic: Documentation for immediate sync + KV source of truth
   - [ ] Update `docs/cloudflare-access.md` to describe: UI Save → Worker → KV → Access policy, plus required Worker secrets and KV binding
