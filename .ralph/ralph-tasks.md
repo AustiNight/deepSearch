@@ -103,7 +103,7 @@
   - [x] Add a safe diff/summary output (counts + domain summaries) and exit non-zero on stale KV or Access update failures
   - [x] Acceptance: CI/CD script can retrieve the current allowlist from KV and is ready for a safe policy update implementation
 
-- [ ] Epic: Documentation for immediate sync + KV source of truth
+- [x] Epic: Documentation for immediate sync + KV source of truth
   - [ ] Update `docs/cloudflare-access.md` to describe: UI Save → Worker → KV → Access policy, plus required Worker secrets and KV binding
   - [ ] Update `docs/settings.md` to note that allowlist is now synced server-side on Save and reconciled by CI/CD
   - [ ] Update `README.md` Settings section to reference the new sync flow and the KV-backed source of truth

@@ -8,18 +8,38 @@ This project is intended to be served at `https://deepsearches.app` (GitHub Page
 - Authentication method: One-time PIN via email.
 - Policy: email allowlist (no public access).
 
-## Allowlist Workflow
-The Settings modal provides a **CLOUDFLARE ACCESS ALLOWLIST** helper that stores entries in localStorage (`overseer_access_allowlist`) and formats them for Cloudflare Access.
+## Allowlist Sync Workflow (UI → Worker → KV → Access Policy)
+The Settings modal provides a **CLOUDFLARE ACCESS ALLOWLIST** section and syncs it on Save when the Worker proxy is configured.
 
-1. Open **SYSTEM_CONFIG** in the app and add emails under **CLOUDFLARE ACCESS ALLOWLIST**.
-2. Click **COPY ALLOWLIST** to copy the normalized list.
-3. In Cloudflare Zero Trust → Access → Applications → `deepsearches.app` → Policies, add or update:
-   - Include → Emails in → paste the list.
-4. Save the policy.
+1. Open **SYSTEM_CONFIG** and add emails under **CLOUDFLARE ACCESS ALLOWLIST**.
+2. Click **SAVE**. The app calls the Worker endpoint `POST /api/access/allowlist` (relative to `PROXY_BASE_URL`).
+3. The Worker normalizes and stores the list in KV (`ACCESS_ALLOWLIST_KV`) and updates the Cloudflare Access policy.
+4. A successful response includes the updated list and timestamp.
 
 Notes:
 - The allowlist helper is a convenience for policy entry; it does not secure the client app.
-- If you update the Access policy directly in Cloudflare, also update the Settings allowlist so the UI stays in sync.
+- The KV list is the source of truth. CI/CD reconciliation reads from KV and applies policy updates.
+- Manual fallback: **COPY ALLOWLIST** still formats the list for Cloudflare Access → Include → Emails in.
+
+## Worker Endpoint Contract
+The Worker endpoint is guarded by Cloudflare Access. Requests must include Access headers (`Cf-Access-Jwt-Assertion` and `Cf-Access-Authenticated-User-Email`).
+
+- `GET /api/access/allowlist` returns `{ entries, updatedAt, updatedBy, version, count }` plus `ETag: <updatedAt>`.
+- `POST`/`PUT /api/access/allowlist` accepts `{ entries, expectedUpdatedAt }`.
+  - If `expectedUpdatedAt` (or `If-Match`) is missing and the KV list already exists, the Worker responds with `428`.
+  - If `expectedUpdatedAt` is stale, the Worker responds with `409` and the current list/metadata.
+
+## Required Worker Bindings and Secrets
+Configure these in `wrangler.toml` and the Worker environment:
+
+- KV binding: `ACCESS_ALLOWLIST_KV`
+- Optional admin allowlist: `ALLOWLIST_ADMIN_EMAILS` (comma-separated emails)
+- Access policy update secrets:
+  - `CF_API_TOKEN`
+  - `CF_ACCOUNT_ID`
+  - `CF_ACCESS_APP_ID`
+  - `CF_ACCESS_POLICY_ID`
+- CORS: ensure the UI origin is included in `ALLOWED_ORIGINS`.
 
 ## Headers Guidance (Caching + CSP Compatibility)
 If Cloudflare is fronting GitHub Pages, configure headers in Cloudflare (or via a Worker/Pages custom headers if you add one later). Suggested guidance:

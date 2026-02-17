@@ -13,6 +13,7 @@ The Settings modal persists configuration to localStorage. Keys are shown here s
 | Search limits + round control | `overseer_run_config` | JSON object |
 | OpenAI model overrides | `overseer_model_overrides` | JSON object keyed by role |
 | Cloudflare Access allowlist | `overseer_access_allowlist` | JSON array of emails |
+| Cloudflare Access allowlist updated at | `overseer_access_allowlist_updated_at` | ISO timestamp |
 
 ## LLM Provider
 - **LLM PROVIDER**: chooses between Google Gemini and OpenAI. Persisted in `overseer_provider`. If `LLM_PROVIDER` is set in `.env.local`, it is used as the initial default.
@@ -42,8 +43,10 @@ Visible only when **LLM PROVIDER** is set to OpenAI.
 | Validation | `validation` | Reasoning | `OPENAI_MODEL_REASONING` |
 
 ## Cloudflare Access Allowlist
-- **CLOUDFLARE ACCESS ALLOWLIST**: normalized, de-duplicated email list stored in `overseer_access_allowlist`.
-- **COPY ALLOWLIST**: formats the list for Cloudflare Access → Include → Emails in.
+- **CLOUDFLARE ACCESS ALLOWLIST**: normalized, de-duplicated email list stored in `overseer_access_allowlist` (with `overseer_access_allowlist_updated_at` as the last sync timestamp).
+- **SAVE**: syncs the list to the Worker (`/api/access/allowlist`), which persists to KV and updates the Cloudflare Access policy.
+- **REFRESH**: fetches the KV-backed list and updates the local cache.
+- **COPY ALLOWLIST**: formats the list for Cloudflare Access → Include → Emails in (manual fallback).
 - This helper does not secure the client app; Cloudflare Access policy does.
 
 See `docs/cloudflare-access.md` for the end-to-end workflow.

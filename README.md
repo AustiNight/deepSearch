@@ -29,7 +29,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/15nbWFNEYh8ec84B_f70xPi
 Open the **SYSTEM_CONFIG** modal (gear icon) to adjust runtime settings.
 
 - OpenAI model overrides: set **OPENAI MODEL PER AGENT ROLE** (only visible when `LLM_PROVIDER=openai`) to customize models per role. Overrides are stored in `overseer_model_overrides` and take precedence over `OPENAI_MODEL_FAST/OPENAI_MODEL_REASONING`.
-- Cloudflare Access allowlist: manage **CLOUDFLARE ACCESS ALLOWLIST** entries and use **COPY ALLOWLIST** to paste into Cloudflare Access → Include → Emails in. Stored in `overseer_access_allowlist`. This helper does not secure the client; Access policy does.
+- Cloudflare Access allowlist: manage **CLOUDFLARE ACCESS ALLOWLIST** entries and click **SAVE** to sync them to Cloudflare Access via the Worker (`/api/access/allowlist`). The KV-backed list is the source of truth and is cached in `overseer_access_allowlist` locally. **COPY ALLOWLIST** remains as a manual fallback. This helper does not secure the client; Access policy does.
 
 More details in `docs/settings.md` and `docs/cloudflare-access.md`.
 
