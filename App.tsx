@@ -4,7 +4,8 @@ import { useOverseer } from './hooks/useOverseer';
 import { AgentGraph } from './components/AgentGraph';
 import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
-import { LLMProvider } from './types';
+import { LLMProvider, ModelOverrides, ModelRole } from './types';
+import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
 import {
   MIN_AGENT_COUNT,
   MAX_AGENT_COUNT,
@@ -45,6 +46,42 @@ const ENV_EARLY_STOP_NOVELTY = parseEnvFloat(process.env.EARLY_STOP_NOVELTY_RATI
 const ENV_EARLY_STOP_NEW_DOMAINS = parseEnvNumber(process.env.EARLY_STOP_NEW_DOMAINS, EARLY_STOP_NEW_DOMAINS);
 const ENV_EARLY_STOP_NEW_SOURCES = parseEnvNumber(process.env.EARLY_STOP_NEW_SOURCES, EARLY_STOP_NEW_SOURCES);
 
+const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
+const isModelNameValid = (value: string) => MODEL_NAME_PATTERN.test(value.trim());
+
+const OPENAI_MODEL_SUGGESTIONS = [
+  'gpt-5-codex',
+  'gpt-4.1',
+  'gpt-4.1-mini',
+  'gpt-4o',
+  'gpt-4o-mini'
+];
+
+const MODEL_ROLE_CONFIG: Array<{ role: ModelRole; label: string; help: string }> = [
+  { role: 'overseer_planning', label: 'Overseer Planning', help: 'Plans the run; fast model usually fine.' },
+  { role: 'method_discovery', label: 'Method Discovery', help: 'Builds search tactics; fast model is cost-friendly.' },
+  { role: 'sector_analysis', label: 'Sector Analysis', help: 'Maps angles; reasoning model boosts coverage.' },
+  { role: 'deep_research_l1', label: 'Deep Research L1', help: 'First-pass research; fast model controls cost.' },
+  { role: 'deep_research_l2', label: 'Deep Research L2', help: 'Follow-up dives; stronger model improves recall.' },
+  { role: 'method_audit', label: 'Method Audit', help: 'Audits method quality; fast model is usually enough.' },
+  { role: 'gap_hunter', label: 'Gap Hunter', help: 'Finds missing leads; reasoning model recommended.' },
+  { role: 'exhaustion_scout', label: 'Exhaustion Scout', help: 'Tests saturation; fast model is fine.' },
+  { role: 'critique', label: 'Critique', help: 'Critiques findings; reasoning model recommended.' },
+  { role: 'synthesis', label: 'Synthesis', help: 'Writes the report; larger model recommended.' },
+  { role: 'validation', label: 'Validation', help: 'Validates results; reasoning model recommended.' }
+];
+
+const sanitizeModelOverrideDraft = (overrides: ModelOverrides): ModelOverrides => {
+  const sanitized: ModelOverrides = {};
+  for (const { role } of MODEL_ROLE_CONFIG) {
+    const value = (overrides[role] || '').trim();
+    if (value && isModelNameValid(value)) {
+      sanitized[role] = value;
+    }
+  }
+  return sanitized;
+};
+
 const App: React.FC = () => {
   const [topic, setTopic] = useState('');
   const [provider, setProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
@@ -72,6 +109,7 @@ const App: React.FC = () => {
     earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
     earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
   });
+  const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
   const [draftProvider, setDraftProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
   const [draftKeys, setDraftKeys] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
   const [draftRunConfig, setDraftRunConfig] = useState<{
@@ -97,6 +135,8 @@ const App: React.FC = () => {
     earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
     earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
   });
+  const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
+  const [bulkModelValue, setBulkModelValue] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(!REQUIRES_PASSWORD);
@@ -144,6 +184,8 @@ const App: React.FC = () => {
     } catch (_) {
       // ignore
     }
+    const storedOverrides = sanitizeModelOverrideDraft(loadModelOverrides());
+    setModelOverrides(storedOverrides);
     if (REQUIRES_PASSWORD) {
       try {
         const unlocked = sessionStorage.getItem('overseer_unlocked') === 'true';
@@ -202,6 +244,10 @@ const App: React.FC = () => {
       localStorage.removeItem('overseer_api_key_openai');
     }
 
+    const sanitizedOverrides = sanitizeModelOverrideDraft(draftModelOverrides);
+    setModelOverrides(sanitizedOverrides);
+    saveModelOverrides(sanitizedOverrides);
+
     setShowSettings(false);
   };
 
@@ -213,7 +259,26 @@ const App: React.FC = () => {
     setDraftProvider(provider);
     setDraftKeys(keyOverrides);
     setDraftRunConfig(runConfig);
+    setDraftModelOverrides(modelOverrides);
+    setBulkModelValue('');
     setShowSettings(true);
+  };
+
+  const openaiModelDefaults = getOpenAIModelDefaults();
+
+  const handleApplyModelToAll = () => {
+    const value = bulkModelValue.trim();
+    if (!value || !isModelNameValid(value)) return;
+    const nextOverrides: ModelOverrides = {};
+    for (const { role } of MODEL_ROLE_CONFIG) {
+      nextOverrides[role] = value;
+    }
+    setDraftModelOverrides(nextOverrides);
+  };
+
+  const handleResetModelOverrides = () => {
+    setDraftModelOverrides({});
+    setBulkModelValue('');
   };
 
   const { agents, logs, report, isRunning, startResearch, skills } = useOverseer();
@@ -416,6 +481,74 @@ const App: React.FC = () => {
                   Leave blank to use `.env.local`. Ensure your OpenAI key has access to the selected model.
                 </p>
               </div>
+
+              {draftProvider === 'openai' && (
+                <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-mono text-gray-400">OPENAI MODEL PER AGENT ROLE</label>
+                    <button
+                      onClick={handleResetModelOverrides}
+                      className="text-[10px] font-mono text-gray-400 hover:text-white transition-colors"
+                    >
+                      RESET TO DEFAULTS
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">APPLY TO ALL ROLES</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={bulkModelValue}
+                        onChange={(e) => setBulkModelValue(e.target.value)}
+                        list="openai-model-suggestions"
+                        placeholder="gpt-5-codex"
+                        className="flex-1 bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                      />
+                      <button
+                        onClick={handleApplyModelToAll}
+                        className="px-3 py-2 text-xs font-mono border border-gray-700 rounded text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+                      >
+                        APPLY
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      Leave fields blank to use defaults from `OPENAI_MODEL_FAST/REASONING`.
+                    </p>
+                  </div>
+                  <datalist id="openai-model-suggestions">
+                    {OPENAI_MODEL_SUGGESTIONS.map((model) => (
+                      <option key={model} value={model} />
+                    ))}
+                  </datalist>
+                  <div className="space-y-3">
+                    {MODEL_ROLE_CONFIG.map(({ role, label, help }) => {
+                      const value = draftModelOverrides[role] || '';
+                      const trimmed = value.trim();
+                      const invalid = trimmed.length > 0 && !isModelNameValid(trimmed);
+                      const defaultModel = openaiModelDefaults[role];
+                      return (
+                        <div key={role}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[11px] font-mono text-gray-300">{label}</span>
+                            <span className="text-[10px] font-mono text-gray-600">DEFAULT: {defaultModel}</span>
+                          </div>
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={(e) => setDraftModelOverrides(prev => ({ ...prev, [role]: e.target.value }))}
+                            list="openai-model-suggestions"
+                            placeholder={defaultModel}
+                            className={`w-full bg-black border rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono ${invalid ? 'border-red-600 text-red-400' : 'border-gray-700 text-cyber-green'}`}
+                          />
+                          <p className={`text-[10px] mt-1 ${invalid ? 'text-red-500' : 'text-gray-500'}`}>
+                            {invalid ? 'Invalid model name; will fall back to default.' : help}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-mono text-gray-400 mb-2">SEARCH LIMITS</label>

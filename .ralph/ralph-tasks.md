@@ -8,13 +8,13 @@
   - [x] Add a small helper that resolves the model for a role (e.g., `resolveModelForRole(role, overrides, defaults)`)
   - [x] Validate that every OpenAI call site has a named role and a resolved model (acceptance criteria)
 
-- [ ] Epic: Implement OpenAI model selector UI in Settings dialog
-  - [ ] Add a “OpenAI Model per Agent Role” section in the settings UI (likely in `App.tsx`) that is only visible when provider = OpenAI
-  - [ ] Provide a dropdown or editable select for each role with sensible defaults (e.g., `gpt-5-codex`, `gpt-4.1`, `gpt-4.1-mini`), plus a custom text entry option for advanced models
-  - [ ] Persist model choices to `overseer_model_overrides` and hydrate them on load
-  - [ ] Add “Apply to all roles” and “Reset to defaults” controls for fast configuration
-  - [ ] Add concise help text per role explaining impact and cost/quality tradeoffs (e.g., “Deep Research: more expensive but higher recall”, “Synthesis: reasoning‑heavy; larger model recommended”)
-  - [ ] Ensure empty/invalid entries fall back to defaults and do not break the run (acceptance criteria)
+- [x] Epic: Implement OpenAI model selector UI in Settings dialog
+  - [x] Add a “OpenAI Model per Agent Role” section in the settings UI (likely in `App.tsx`) that is only visible when provider = OpenAI
+  - [x] Provide a dropdown or editable select for each role with sensible defaults (e.g., `gpt-5-codex`, `gpt-4.1`, `gpt-4.1-mini`), plus a custom text entry option for advanced models
+  - [x] Persist model choices to `overseer_model_overrides` and hydrate them on load
+  - [x] Add “Apply to all roles” and “Reset to defaults” controls for fast configuration
+  - [x] Add concise help text per role explaining impact and cost/quality tradeoffs (e.g., “Deep Research: more expensive but higher recall”, “Synthesis: reasoning‑heavy; larger model recommended”)
+  - [x] Ensure empty/invalid entries fall back to defaults and do not break the run (acceptance criteria)
 
 - [ ] Epic: Wire model overrides into OpenAI service calls
   - [ ] Update `hooks/useOverseer.ts` to pass `modelOverrides` in `startResearch` run config
