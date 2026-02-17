@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import {
@@ -737,6 +737,7 @@ export const useOverseer = () => {
     earlyStopNoveltyRatio?: number;
     earlyStopNewDomains?: number;
     earlyStopNewSources?: number;
+    modelOverrides?: ModelOverrides;
   }) => {
     setIsRunning(true);
     setAgents([]);
@@ -775,6 +776,7 @@ export const useOverseer = () => {
     );
     const earlyStopNewDomains = Math.max(0, resolveNumber(runConfig?.earlyStopNewDomains, EARLY_STOP_NEW_DOMAINS));
     const earlyStopNewSources = Math.max(0, resolveNumber(runConfig?.earlyStopNewSources, EARLY_STOP_NEW_SOURCES));
+    const modelOverrides = runConfig?.modelOverrides;
     const knowledgeBase = loadKnowledgeBase();
     const usedQueries = new Set<string>();
     const methodCandidateQueries: string[] = [];
@@ -853,7 +855,7 @@ export const useOverseer = () => {
         topic,
         taxonomySummary: taxonomySummaryForClassifier,
         hintVerticalIds: hintVerticals
-      });
+      }, modelOverrides);
       let classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
       const weightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
       const selectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
@@ -899,7 +901,8 @@ export const useOverseer = () => {
               agent.name,
               'General discovery',
               query,
-              (msg) => addLog(agentId, agent.name, msg, 'info')
+              (msg) => addLog(agentId, agent.name, msg, 'info'),
+              { modelOverrides }
             );
 
             updateAgent(agentId, {
@@ -918,7 +921,7 @@ export const useOverseer = () => {
               taxonomySummary: taxonomySummaryForClassifier,
               hintVerticalIds: hintVerticals,
               contextText
-            });
+            }, modelOverrides);
             classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
             const reweightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
             const reselectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
@@ -1089,7 +1092,7 @@ export const useOverseer = () => {
               findingsText: snippet,
               taxonomySummary,
               hintVerticalIds: hintVerticals
-            });
+            }, modelOverrides);
             const vetResult = vetAndPersistTaxonomyProposals(proposals, {
               topic,
               agentId: context.agentId,
@@ -1179,7 +1182,8 @@ export const useOverseer = () => {
             agent.name,
             'Method discovery',
             query,
-            (msg) => addLog(agentId, agent.name, msg, 'info')
+            (msg) => addLog(agentId, agent.name, msg, 'info'),
+            { modelOverrides, role: 'method_discovery' }
           );
 
           enqueueTaxonomyGrowth({
@@ -1195,7 +1199,7 @@ export const useOverseer = () => {
           });
           addLog(agentId, agent.name, `Method Discovery Complete. Sources Vetted: ${result.sources.length}`, 'success');
 
-          const methods = await extractResearchMethods(topic, result.text, researchContextText);
+          const methods = await extractResearchMethods(topic, result.text, researchContextText, modelOverrides);
           const extracted = Array.isArray(methods?.methods) ? methods.methods : [];
           const extractedQueries = extracted.map((m: any) => m?.query).filter(Boolean);
           extractedQueries.forEach((q: string) => registerMethodQuery(q, { source: 'llm_method_discovery' }));
@@ -1214,7 +1218,7 @@ export const useOverseer = () => {
         undefined,
         'action'
       );
-      const sectorPlan = await generateSectorAnalysis(topic, skills, researchContextText);
+      const sectorPlan = await generateSectorAnalysis(topic, skills, researchContextText, modelOverrides);
       const rawSectors = sectorPlan && Array.isArray(sectorPlan.sectors) ? sectorPlan.sectors : [];
       const weightMap = new Map(selectedVerticals.map(v => [v.id, v.weight]));
       const orderedPacks = [...tacticPacks].sort((a, b) => {
@@ -1379,7 +1383,8 @@ export const useOverseer = () => {
               agent.name,
               sector.focus,
               sector.initialQuery,
-              (msg) => addLog(agentId, agent.name, msg, 'info')
+              (msg) => addLog(agentId, agent.name, msg, 'info'),
+              { modelOverrides, l1Role: 'deep_research_l1', l2Role: 'deep_research_l2' }
             );
             roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
 
@@ -1447,7 +1452,8 @@ export const useOverseer = () => {
               agent.name,
               'Independent method audit',
               query,
-              (msg) => addLog(agentId, agent.name, msg, 'info')
+              (msg) => addLog(agentId, agent.name, msg, 'info'),
+              { modelOverrides, role: 'method_audit' }
             );
             roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
             enqueueTaxonomyGrowth({
@@ -1557,7 +1563,7 @@ export const useOverseer = () => {
       );
       
       const allFindingsText = findingsRef.current.map(f => f.content).join('\n');
-      const critique = await critiqueAndFindGaps(topic, allFindingsText, researchContextText);
+      const critique = await critiqueAndFindGaps(topic, allFindingsText, researchContextText, modelOverrides);
       const latestMetrics = exhaustionTracker.rounds[exhaustionTracker.rounds.length - 1];
       const exhaustionScore = latestMetrics ? computeExhaustionScore(latestMetrics) : 0;
       const isExhausted = latestMetrics ? exhaustionScore >= earlyStopDiminishingScore : false;
@@ -1590,7 +1596,8 @@ export const useOverseer = () => {
              gapAgent.name, 
              critique.newMethod.task, 
              critique.newMethod.query, 
-             (msg) => addLog(gapAgentId, gapAgent.name, msg, 'info')
+             (msg) => addLog(gapAgentId, gapAgent.name, msg, 'info'),
+             { modelOverrides, role: 'gap_hunter' }
          );
          gapSources.push(...gapResult.sources.map(s => s.uri).filter(Boolean));
 
@@ -1682,7 +1689,8 @@ export const useOverseer = () => {
               agent.name,
               'Exhaustion test',
               query,
-              (msg) => addLog(agentId, agent.name, msg, 'info')
+              (msg) => addLog(agentId, agent.name, msg, 'info'),
+              { modelOverrides, role: 'exhaustion_scout' }
             );
             phase3BSources.push(...result.sources.map(s => s.uri).filter(Boolean));
             enqueueTaxonomyGrowth({
@@ -1736,7 +1744,7 @@ export const useOverseer = () => {
 
       const allRawSources = findingsRef.current.flatMap((f: any) => f.rawSources || []);
       const allowedSources = uniqueList(allRawSources.map((s: any) => s.uri).filter(Boolean));
-      const finalReportData = await synthesizeGrandReport(topic, findingsRef.current, allowedSources);
+      const finalReportData = await synthesizeGrandReport(topic, findingsRef.current, allowedSources, modelOverrides);
       const rawText = (finalReportData as any)?.__rawText;
       if (rawText) {
         const providerLabel = provider === 'openai' ? 'openai' : 'gemini';
@@ -1811,7 +1819,7 @@ export const useOverseer = () => {
         }
       };
 
-      const validation = await validateReport(topic, reportCandidate, allowedSources);
+      const validation = await validateReport(topic, reportCandidate, allowedSources, modelOverrides);
       const isValid = validation?.isValid === true;
       if (!isValid) {
         const issues = Array.isArray(validation?.issues) ? validation.issues : [];

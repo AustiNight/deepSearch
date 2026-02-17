@@ -16,7 +16,7 @@
   - [x] Add concise help text per role explaining impact and cost/quality tradeoffs (e.g., “Deep Research: more expensive but higher recall”, “Synthesis: reasoning‑heavy; larger model recommended”)
   - [x] Ensure empty/invalid entries fall back to defaults and do not break the run (acceptance criteria)
 
-- [ ] Epic: Wire model overrides into OpenAI service calls
+- [x] Epic: Wire model overrides into OpenAI service calls
   - [ ] Update `hooks/useOverseer.ts` to pass `modelOverrides` in `startResearch` run config
   - [ ] Update `services/openaiService.ts` to accept optional model overrides for each role and route each call through `resolveModelForRole`
   - [ ] Ensure `performDeepResearch`, `generateSectorAnalysis`, `critiqueAndFindGaps`, `synthesizeGrandReport`, and `validateReport` each use the role‑specific override

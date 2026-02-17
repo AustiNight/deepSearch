@@ -312,7 +312,7 @@ const App: React.FC = () => {
         openSettings();
         return;
     }
-    startResearch(topic, provider, effectiveKey, runConfig);
+    startResearch(topic, provider, effectiveKey, { ...runConfig, modelOverrides });
   };
 
   const openSettings = () => {

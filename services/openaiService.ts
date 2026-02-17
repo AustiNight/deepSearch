@@ -1,7 +1,7 @@
-import { OPENAI_MODEL_FAST, OPENAI_MODEL_REASONING } from "../constants";
-import { Skill } from "../types";
+import type { ModelOverrides, ModelRole, Skill } from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
+import { getOpenAIModelDefaults, resolveModelForRole } from "./modelOverrides";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
@@ -15,12 +15,23 @@ export const initializeOpenAI = (apiKey?: string) => {
   openAIKey = apiKey;
 };
 
-const getModelFast = () => {
-  return (process.env.OPENAI_MODEL_FAST || OPENAI_MODEL_FAST).trim();
+const loggedModelRoles = new Set<ModelRole>();
+const shouldLogResolvedModels = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage?.getItem("overseer_log_models") === "true";
+  } catch (_) {
+    return false;
+  }
 };
 
-const getModelReasoning = () => {
-  return (process.env.OPENAI_MODEL_REASONING || OPENAI_MODEL_REASONING).trim();
+const resolveRoleModel = (role: ModelRole, overrides?: ModelOverrides) => {
+  const model = resolveModelForRole(role, overrides, getOpenAIModelDefaults());
+  if (shouldLogResolvedModels() && !loggedModelRoles.has(role)) {
+    console.info(`[OpenAI] Using model "${model}" for role "${role}".`);
+    loggedModelRoles.add(role);
+  }
+  return model;
 };
 
 const requestOpenAI = async (body: Record<string, unknown>) => {
@@ -168,8 +179,9 @@ export const classifyResearchVertical = async (input: {
   taxonomySummary: Array<{ id: string; label: string; blueprintFields?: string[] }>;
   hintVerticalIds?: string[];
   contextText?: string;
-}) => {
+}, modelOverrides?: ModelOverrides) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
+  const model = resolveRoleModel('overseer_planning', modelOverrides);
   const summaryLines = input.taxonomySummary.map((v) => {
     const fields = Array.isArray(v.blueprintFields) && v.blueprintFields.length > 0
       ? ` fields: ${v.blueprintFields.join(", ")}`
@@ -203,14 +215,15 @@ export const classifyResearchVertical = async (input: {
   `;
 
   try {
-    return await jsonRequest(getModelFast(), prompt);
+    return await jsonRequest(model, prompt);
   } catch (_) {
     return { verticals: [], isUncertain: true, confidence: 0 };
   }
 };
 
-export const extractResearchMethods = async (topic: string, sourceText: string, contextText?: string) => {
+export const extractResearchMethods = async (topic: string, sourceText: string, contextText?: string, modelOverrides?: ModelOverrides) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
+  const model = resolveRoleModel('method_discovery', modelOverrides);
   const prompt = `
     Topic: "${topic}"
     Research Context (taxonomy + blueprint):
@@ -224,7 +237,7 @@ export const extractResearchMethods = async (topic: string, sourceText: string, 
     Return JSON.
   `;
   try {
-    return await jsonRequest(getModelFast(), prompt);
+    return await jsonRequest(model, prompt);
   } catch (_) {
     return { methods: [] };
   }
@@ -237,8 +250,9 @@ export const proposeTaxonomyGrowth = async (input: {
   findingsText: string;
   taxonomySummary: Array<{ id: string; label: string; subtopics: Array<{ id: string; label: string }> }>;
   hintVerticalIds?: string[];
-}): Promise<TaxonomyProposalBundle> => {
+}, modelOverrides?: ModelOverrides): Promise<TaxonomyProposalBundle> => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
+  const model = resolveRoleModel('overseer_planning', modelOverrides);
   const summaryLines = input.taxonomySummary.map((v) => {
     const subs = v.subtopics.map(s => `${s.id} (${s.label})`).join(", ");
     return `${v.id} (${v.label}): ${subs}`;
@@ -272,14 +286,15 @@ export const proposeTaxonomyGrowth = async (input: {
   `;
 
   try {
-    return await jsonRequest(getModelFast(), prompt);
+    return await jsonRequest(model, prompt);
   } catch (_) {
     return { tactics: [], subtopics: [], verticals: [] };
   }
 };
 
-export const validateReport = async (topic: string, report: any, allowedSources: string[] = []) => {
+export const validateReport = async (topic: string, report: any, allowedSources: string[] = [], modelOverrides?: ModelOverrides) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
+  const model = resolveRoleModel('validation', modelOverrides);
   const prompt = `
     Topic: "${topic}"
     Allowed Sources:
@@ -293,7 +308,7 @@ export const validateReport = async (topic: string, report: any, allowedSources:
     Return JSON with isValid, issues (array), confidence (0-1).
   `;
   try {
-    return await jsonRequest(getModelReasoning(), prompt);
+    return await jsonRequest(model, prompt);
   } catch (_) {
     return { isValid: false, issues: ["Validation failed."], confidence: 0 };
   }
@@ -327,8 +342,9 @@ const jsonRequestWithRaw = async (model: string, prompt: string) => {
 };
 
 // --- PHASE 1: SECTOR ANALYSIS ---
-export const generateSectorAnalysis = async (topic: string, skills: Skill[] = [], contextText?: string) => {
+export const generateSectorAnalysis = async (topic: string, skills: Skill[] = [], contextText?: string, modelOverrides?: ModelOverrides) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
+  const model = resolveRoleModel('sector_analysis', modelOverrides);
   const currentDate = new Date().toDateString();
 
   const prompt = `
@@ -348,7 +364,7 @@ export const generateSectorAnalysis = async (topic: string, skills: Skill[] = []
   `;
 
   try {
-    return await jsonRequest(getModelReasoning(), prompt);
+    return await jsonRequest(model, prompt);
   } catch (error) {
     console.error("Sector analysis failed:", error);
     return {
@@ -363,11 +379,11 @@ export const generateSectorAnalysis = async (topic: string, skills: Skill[] = []
 };
 
 // --- PHASE 2: RECURSIVE DEEP DRILL ---
-const singleSearch = async (query: string, context: string = ""): Promise<{ text: string, sources: any[] }> => {
+const singleSearch = async (query: string, context: string, model: string): Promise<{ text: string, sources: any[] }> => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
   try {
     const response = await requestOpenAI({
-      model: getModelFast(),
+      model,
       input: `Context: ${context}\n\nTask: Search for "${query}".\nExtract hard data, dates, and specific names.`,
       tools: [{ type: "web_search" }],
       tool_choice: "auto",
@@ -382,13 +398,35 @@ const singleSearch = async (query: string, context: string = ""): Promise<{ text
   }
 };
 
-export const performDeepResearch = async (agentName: string, focus: string, initialQuery: string, logCallback: (msg: string) => void) => {
+type DeepResearchModelOptions = {
+  modelOverrides?: ModelOverrides;
+  role?: ModelRole;
+  l1Role?: ModelRole;
+  l2Role?: ModelRole;
+};
+
+export const performDeepResearch = async (
+  agentName: string,
+  focus: string,
+  initialQuery: string,
+  logCallback: (msg: string) => void,
+  options?: DeepResearchModelOptions
+) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
   const currentDate = new Date().toDateString();
+  const overrideRole = options?.role;
+  const l1Role = overrideRole ?? options?.l1Role ?? 'deep_research_l1';
+  const l2Role = overrideRole ?? options?.l2Role ?? 'deep_research_l2';
+  const l1Model = resolveRoleModel(l1Role, options?.modelOverrides);
+  const l2Model = resolveRoleModel(l2Role, options?.modelOverrides);
 
   // Step 1: Broad Search
   logCallback(`Initiating Level 1 Scan: "${initialQuery}"`);
-  const level1 = await singleSearch(initialQuery, `Current Date: ${currentDate}. Agent: ${agentName}. Focus: ${focus}`);
+  const level1 = await singleSearch(
+    initialQuery,
+    `Current Date: ${currentDate}. Agent: ${agentName}. Focus: ${focus}`,
+    l1Model
+  );
 
   if (!level1.text) return { text: "Search failed.", sources: [] };
 
@@ -407,7 +445,7 @@ export const performDeepResearch = async (agentName: string, focus: string, init
 
   let drillQueries: string[] = [];
   try {
-    const plan = await jsonRequest(getModelFast(), drillDownPrompt);
+    const plan = await jsonRequest(l2Model, drillDownPrompt);
     if (Array.isArray(plan.queries)) drillQueries = plan.queries;
   } catch (e) {
     drillQueries = [`${initialQuery} statistics`, `${initialQuery} criticism`, `${initialQuery} latest news`];
@@ -419,7 +457,7 @@ export const performDeepResearch = async (agentName: string, focus: string, init
   // Step 3: Execute Parallel Drill-Downs
   logCallback(`Level 2 Drill-Down: Executing ${drillQueries.length} verification searches...`);
   const level2Results = await Promise.all(
-    drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`))
+    drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`, l2Model))
   );
 
   // Step 4: Synthesize Findings
@@ -444,8 +482,9 @@ export const performDeepResearch = async (agentName: string, focus: string, init
 };
 
 // --- PHASE 3: CRITIQUE ---
-export const critiqueAndFindGaps = async (topic: string, currentFindings: string, contextText?: string) => {
+export const critiqueAndFindGaps = async (topic: string, currentFindings: string, contextText?: string, modelOverrides?: ModelOverrides) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
+  const model = resolveRoleModel('critique', modelOverrides);
 
   const currentDate = new Date().toDateString();
   const prompt = `
@@ -471,15 +510,16 @@ export const critiqueAndFindGaps = async (topic: string, currentFindings: string
   `;
 
   try {
-    return await jsonRequest(getModelReasoning(), prompt);
+    return await jsonRequest(model, prompt);
   } catch (error) {
     return { isExhaustive: true, gapAnalysis: "Critique failed, assuming exhaustive." };
   }
 };
 
 // --- PHASE 4: GRAND SYNTHESIS ---
-export const synthesizeGrandReport = async (topic: string, allFindings: any[], allowedSources: string[] = []) => {
+export const synthesizeGrandReport = async (topic: string, allFindings: any[], allowedSources: string[] = [], modelOverrides?: ModelOverrides) => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
+  const model = resolveRoleModel('synthesis', modelOverrides);
   const currentDate = new Date().toDateString();
 
   // Combine huge amount of text
@@ -523,14 +563,14 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
   `;
 
   const initialPrompt = buildPrompt(combinedText.substring(0, 100000), false);
-  const initial = await jsonRequestWithRaw(getModelFast(), initialPrompt);
+  const initial = await jsonRequestWithRaw(model, initialPrompt);
   if (initial.parsed.data && isValidReportData(initial.parsed.data) && initial.parsed.data.sections.length > 0) {
     return initial.parsed.data;
   }
   storeRawSynthesis(initial.raw, "initial");
 
   const retryPrompt = buildPrompt(combinedText.substring(0, 40000), true);
-  const retry = await jsonRequestWithRaw(getModelFast(), retryPrompt);
+  const retry = await jsonRequestWithRaw(model, retryPrompt);
   if (retry.parsed.data && isValidReportData(retry.parsed.data) && retry.parsed.data.sections.length > 0) {
     return retry.parsed.data;
   }
