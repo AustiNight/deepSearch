@@ -14,6 +14,7 @@
   - [x] Persist model choices to `overseer_model_overrides` and hydrate them on load
   - [x] Add “Apply to all roles” and “Reset to defaults” controls for fast configuration
   - [x] Add concise help text per role explaining impact and cost/quality tradeoffs (e.g., “Deep Research: more expensive but higher recall”, “Synthesis: reasoning‑heavy; larger model recommended”)
+  - [x] Add a fixed-height, scrollable container for the Settings dialog content so all settings are reachable on small screens; ensure the scroll bar is visible and stable
   - [x] Ensure empty/invalid entries fall back to defaults and do not break the run (acceptance criteria)
 
 - [x] Epic: Wire model overrides into OpenAI service calls
@@ -36,8 +37,8 @@
   - [x] Provide at least one example per setting showing impact (e.g., “Max agents 20 = wider coverage but slower UI”; “Force exhaustion = extra rounds even if critique says complete”)
   - [x] Ensure help text is concise and doesn’t crowd the UI (acceptance criteria)
 
-- [ ] Epic: Update repo documentation for new settings
-  - [ ] Update `README.md` with a Settings section covering model overrides and Cloudflare Access allowlist usage
-  - [ ] Add or update `docs/cloudflare-access.md` with email allowlist workflow, where to paste it in Cloudflare Access, and how it ties to `deepsearches.app`
-  - [ ] Add or update `docs/settings.md` describing each setting and the model‑role mapping table
-  - [ ] Verify docs match the UI labels and storage keys (acceptance criteria)
+- [x] Epic: Update repo documentation for new settings
+  - [x] Update `README.md` with a Settings section covering model overrides and Cloudflare Access allowlist usage
+  - [x] Add or update `docs/cloudflare-access.md` with email allowlist workflow, where to paste it in Cloudflare Access, and how it ties to `deepsearches.app`
+  - [x] Add or update `docs/settings.md` describing each setting and the model‑role mapping table
+  - [x] Verify docs match the UI labels and storage keys (acceptance criteria)

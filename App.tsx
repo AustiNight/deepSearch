@@ -522,12 +522,12 @@ const App: React.FC = () => {
       {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
-          <div className="bg-cyber-gray border border-gray-700 p-6 rounded-lg max-w-md w-full shadow-2xl relative overflow-hidden">
+          <div className="bg-cyber-gray border border-gray-700 p-6 rounded-lg max-w-md w-full shadow-2xl relative overflow-hidden flex flex-col max-h-[85vh]">
              <div className="absolute top-0 left-0 w-full h-1 bg-cyber-green"></div>
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2 font-mono">
               <Settings className="w-5 h-5" /> SYSTEM_CONFIG
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-4 overflow-y-scroll pr-2 flex-1 min-h-0">
               <div>
                 <label className="block text-xs font-mono text-gray-400 mb-2">LLM PROVIDER</label>
                 <div className="grid grid-cols-2 gap-2">

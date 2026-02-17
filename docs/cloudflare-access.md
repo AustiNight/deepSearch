@@ -1,23 +1,25 @@
 # Cloudflare Access Deployment Notes
 
 ## Purpose
-This project is intended to be served on GitHub Pages with a custom domain and protected by Cloudflare Access. These notes capture the expected Access setup and the source of truth for the email allowlist.
+This project is intended to be served at `https://deepsearches.app` (GitHub Pages behind Cloudflare Access). These notes capture the expected Access setup and how to manage the email allowlist from the app UI.
 
 ## Cloudflare Zero Trust App Expectations
 - Create a Zero Trust Access application for `https://deepsearches.app`.
 - Authentication method: One-time PIN via email.
 - Policy: email allowlist (no public access).
 
-## Allowlist Source of Truth
-The source of truth for authorized emails is this document.
+## Allowlist Workflow
+The Settings modal provides a **CLOUDFLARE ACCESS ALLOWLIST** helper that stores entries in localStorage (`overseer_access_allowlist`) and formats them for Cloudflare Access.
 
-### Allowlisted Emails
-- (none yet)
+1. Open **SYSTEM_CONFIG** in the app and add emails under **CLOUDFLARE ACCESS ALLOWLIST**.
+2. Click **COPY ALLOWLIST** to copy the normalized list.
+3. In Cloudflare Zero Trust → Access → Applications → `deepsearches.app` → Policies, add or update:
+   - Include → Emails in → paste the list.
+4. Save the policy.
 
-### Update Process
-1. Update the Access application policy in Cloudflare Zero Trust with the email add/remove.
-2. Update this file in the `Allowlisted Emails` section to match the policy.
-3. Note the change in the relevant deployment PR/commit message.
+Notes:
+- The allowlist helper is a convenience for policy entry; it does not secure the client app.
+- If you update the Access policy directly in Cloudflare, also update the Settings allowlist so the UI stays in sync.
 
 ## Headers Guidance (Caching + CSP Compatibility)
 If Cloudflare is fronting GitHub Pages, configure headers in Cloudflare (or via a Worker/Pages custom headers if you add one later). Suggested guidance:
