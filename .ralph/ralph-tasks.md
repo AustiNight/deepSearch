@@ -102,12 +102,12 @@
     - [x] Implement per-vertical query packs (e.g., Individual -> Professional/Assets/News/Social) and ensure   they are executed before declaring completeness
     - [x] Validate that person/address topics generate targeted tactics (LinkedIn, public records, property   assessment, tax collector) in spawned queries (acceptance criteria)
   
-  - [/] Feature: Add probabilistic exhaustion heuristics and multi-round loop control
+  - [x] Feature: Add probabilistic exhaustion heuristics and multi-round loop control
     - [x] Define exhaustion metrics: unique domain growth per round, new sources per round, query novelty   ratio, diminishing returns score
     - [x] Implement multi-round search loop with configurable max rounds and early stop thresholds (not   "checking against reality")
     - [x] Add per-vertical exhaustion criteria (e.g., Individual: keep searching until Employment found OR 5   name variants exhausted)
     - [x] Keep `forceExhaustion` override while replacing `critique.isExhaustive` gating with computed   exhaustion score
-    - [ ] Validate that low-coverage topics trigger extra rounds and that exhaustion stops only after   thresholds are met (acceptance criteria)
+    - [x] Validate that low-coverage topics trigger extra rounds and that exhaustion stops only after   thresholds are met (acceptance criteria)
   
   - [ ] Feature: Update prompts, types, and UI telemetry
     - [ ] Extend `types.ts` for taxonomy/blueprint models (ResearchVertical, ResearchSubtopic,   ResearchTactic, BlueprintField, ExhaustionMetrics)
