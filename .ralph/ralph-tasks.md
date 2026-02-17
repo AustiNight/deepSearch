@@ -1,133 +1,43 @@
 # Ralph Tasks
- - [x] Epic: Refactor search strategy and user authentication
-  - [x] Feature: Map current Overseer workflow and target architecture
-    - [x] Review `hooks/useOverseer.ts`, `services/openaiService.ts`, `services/geminiService.ts`, and   `constants.ts` to document current phases, agent spawning points, and loop boundaries
-    - [x] Identify insertion points for vertical classification, taxonomy-based tactics, hybrid branching,   and probabilistic exhaustion heuristics
-    - [x] Draft target data flow: Input -> Vertical Classification -> Blueprint (fields expected) -> Tactic   Library -> Agent Spawning -> Multi-round Exhaustion -> Synthesis
-    - [x] Create `docs/overseer-workflow.md` with current phases, insertion points, and target data flow   (acceptance criteria)
-    - [x] Verify the doc includes all phases and loop boundaries as a checklist (acceptance criteria)
-  
-  - [x] Feature: Define research taxonomy and tactic library (Information Conservator)
-    - [x] Create taxonomy data model (verticals, subtopics, methods, tactics, query templates, blueprint   fields) in a dedicated file (e.g., `data/researchTaxonomy.ts` or `data/researchTaxonomy.json`)
-    - [x] Implement taxonomy growth pipeline: search agent proposal -> overseer vetting -> provenance tagging   -> persistence -> reuse in future runs
-    - [x] Encode vertical: Individual (Person)
-    - [x] Expand Individual vertical by prompting the search agents to propose additional search methods and   specific tactics after they complete their searches; append vetted additions to taxonomy with provenance   tags
-    - [x] Add subtopic Professional with tactics: `site:linkedin.com {name}`, `site:zoominfo.com {name}`,   `filetype:pdf "resume" {name}`, `filetype:pdf "cv" {name}`
-    - [x] Add subtopic Assets with tactics: `"property assessment" {name}`, `"tax collector" {name}`
-    - [x] Add subtopic News with tactics: `site:newspapers.com {name}`, `"{hometown} Gazette" {name}`
-    - [x] Add subtopic Social with tactics: `"@{handle}"`, `inurl:facebook.com/{name}`
-    - [x] Encode vertical: Corporation (Business / Non-Profit)
-    - [x] Expand Corporation vertical by prompting the search agents to propose additional search methods and   specific tactics after they complete their searches; append vetted additions to taxonomy with provenance   tags
-    - [x] Add subtopic Financials & Funding with tactics: `site:sec.gov "{company}" 10-K`, `site:crunchbase.  com "{company}"`, `"{company}" revenue {current year - 1}`, `"{company}" annual report filetype:pdf`
-    - [x] Add subtopic Internal Culture with tactics: `site:glassdoor.com "{company}" reviews`,   `site:teamblind.com "{company}"`, `site:reddit.com/r/jobs "{company}" interview`
-    - [x] Add subtopic Legal/Compliance with tactics: `"{company}" lawsuit`, `"{company}" v.`, `"{company}"   settlement`, `site:justice.gov "{company}"`
-    - [x] Add subtopic Tech Stack with tactics: `site:builtwith.com "{company}"`, `site:stackshare.io "  {company}"`, `"{company}" engineering blog`
-    - [x] Add subtopic Leadership/Org with tactics: `site:rocketreach.co "{company}"`, `site:theorg.com "  {company}"`, `"{company}" executive team`
-    - [x] Add subtopic Documents/Strategy with tactics: `site:{companyDomain} filetype:pdf`, `site:  {companyDomain} filetype:ppt`, `"{company}" investor presentation filetype:pdf`
-    - [x] Encode vertical: Product (Physical Good / Software)
-    - [x] Expand Product vertical by prompting the search agents to propose additional search methods and   specific tactics after they complete their searches; append vetted additions to taxonomy with provenance   tags
-    - [x] Add subtopic Technical Specs with tactics: `"{product}" datasheet filetype:pdf`, `"{product}"   manual filetype:pdf`, `"{product}" schematic OR blueprint`
-    - [x] Add subtopic Real Sentiment with tactics: `site:reddit.com "{product}" broken`, `site:reddit.com "  {product}" vs`, `"{product}" suck OR fail OR problem -site:{brandDomain}`
-    - [x] Add subtopic Pricing/Value with tactics: `"{product}" price history`, `"{product}" MSRP`, `"  {product}" alternative`, `"{product}" alternative open source`
-    - [x] Add subtopic Support/Issues with tactics: `"{product}" error code`, `"{product}" firmware release   notes`, `"{product}" known issues`
-    - [x] Add subtopic Security/Privacy with tactics: `"{product}" CVE`, `"{product}" data breach`, `"  {product}" privacy policy analysis`
-    - [x] Encode vertical: Location (City / Region / Property)
-    - [x] Expand Location vertical by prompting the search agents to propose additional search methods and   specific tactics after they complete their searches; append vetted additions to taxonomy with provenance   tags
-    - [x] Add subtopic Governance with tactics: `site:.gov "{city}" city council minutes`, `"{city}" budget   filetype:pdf`, `"{city}" organizational chart`, `"{city}" zoning map filetype:pdf`, `"{city}" master plan`
-    - [x] Add subtopic Development/Land with tactics: `"{city}" master plan filetype:pdf`, `"{city}" zoning   map`, `"{city}" comprehensive plan`
-    - [x] Add subtopic Parcel/Real Estate with tactics: `"{county}" GIS map`, `"{address}" property card`, `"  {address}" assessment history`, `"{address}" parcel map`
-    - [x] Add subtopic Crime/Safety with tactics: `site:city-data.com "{city}"`, `"{city}" police blotter`, `"  {city}" crime statistics {year}`
-    - [x] Add subtopic Economy with tactics: `"{city}" major employers`, `"{city}" chamber of commerce   directory`, `"{city}" unemployment rate history`
-    - [x] Add subtopic Community with tactics: `site:reddit.com/r/{city}`, `site:facebook.com "residents of   {city}"`, `"{city}" local news archive`
-    - [x] Encode vertical: Event (News / History)
-    - [x] Expand Event vertical by prompting the search agents to propose additional search methods and   specific tactics after they complete their searches; append vetted additions to taxonomy with provenance   tags
-    - [x] Add subtopic Primary Sources with tactics: `"{event}" full transcript`, `"{event}" official report   filetype:pdf`, `site:archive.org "{event}"`
-    - [x] Add subtopic Timeline with tactics: `timeline of "{event}"`, `"{event}" minute by minute`, `"{event}  " sequence of events`
-    - [x] Add subtopic Controversy with tactics: `"{event}" criticism`, `"{event}" debunked`, `"{event}"   editorial OR opinion`, `"{event}" conspiracy debunked`
-    - [x] Add subtopic Social Reaction with tactics: `site:twitter.com "{event}"`, `site:reddit.com/r/news "  {event}"`
-    - [x] Add subtopic Participants with tactics: `who organized "{event}"`, `"{event}" attendees list`, `"  {event}" key figures`
-    - [x] Add subtopic Impact with tactics: `"{event}" aftermath`, `"{event}" policy changes`, `"{event}"   death toll OR damages`
-    - [x] Encode vertical: Technical Concept (Code / Engineering)
-    - [x] Expand Technical Concept vertical by prompting the search agents to propose additional search   methods and specific tactics after they complete their searches; append vetted additions to taxonomy with   provenance tags
-    - [x] Add subtopic Implementation with tactics: `site:github.com "{concept}"`, `site:stackoverflow.com "  {concept}" error`, `"{concept}" tutorial "how to"`, `"{concept}" implementation python OR java`
-    - [x] Add subtopic Academic Basis with tactics: `site:arxiv.org "{concept}"`, `site:scholar.google.com "  {concept}"`, `"{concept}" survey paper filetype:pdf`, `"{concept}" seminal paper`
-    - [x] Add subtopic Instructional with tactics: `"{concept}" tutorial for beginners`, `"{concept}" best   practices`, `"{concept}" cheat sheet filetype:pdf`
-    - [x] Add subtopic Vulnerabilities with tactics: `"{concept}" CVE`, `"{concept}" exploit`, `"{concept}"   bypass`, `"{concept}" security risks`
-    - [x] Add subtopic Comparison with tactics: `"{concept}" vs {alternative}`, `"{concept}" performance   benchmarks`
-    - [x] Encode vertical: Non-Technical Concept (Idea / Theory / Movement)
-    - [x] Expand Non-Technical Concept vertical by prompting the search agents to propose additional search   methods and specific tactics after they complete their searches; append vetted additions to taxonomy with   provenance tags
-    - [x] Add subtopic Definition & Etymology with tactics: `define:"{concept}"`, `"origin of the term   {concept}"`, `"{concept}" etymology`
-    - [x] Add subtopic Key Theorists with tactics: `"who coined {concept}"`, `"famous {concept} authors"`,   `site:scholar.google.com "{concept}" seminal paper`, `site:iep.utm.edu "{concept}"`
-    - [x] Add subtopic Critical Analysis with tactics: `"{concept}" criticism OR critique`, `"arguments   against {concept}"`, `"{concept}" vs {opposingConcept}`, `"{concept}" limitations`
-    - [x] Add subtopic Historical Context with tactics: `"{concept}" history timeline`, `"{concept}" in the   19th century`, `site:edu "{concept}" sociology`, `"{concept}" paradigm shift`
-    - [x] Add subtopic Modern Application with tactics: `"{concept}" in modern society`, `"{concept}" case   study 2024`, `site:nytimes.com "{concept}"`
-    - [x] Encode vertical: Creative Work (Book / Film / Art / Music)
-    - [x] Expand Creative Work vertical by prompting the search agents to propose additional search methods   and specific tactics after they complete their searches; append vetted additions to taxonomy with   provenance tags
-    - [x] Add subtopic Reception with tactics: `site:rottentomatoes.com "{title}"`, `site:goodreads.com "  {title}" review`, `"{title}" metacritic score`
-    - [x] Add subtopic Thematic Analysis with tactics: `"{title}" symbolism`, `"{title}" themes explained`,   `site:jstor.org "{title}" analysis`
-    - [x] Add subtopic Production History with tactics: `"{title}" making of`, `"{title}" development hell`,   `"{title}" budget vs box office`
-    - [x] Add subtopic Credits/Personnel with tactics: `site:imdb.com "{title}" full cast`, `"{title}" author   interview`, `"{title}" cinematographer style`
-    - [x] Add subtopic Ending/Plot with tactics: `"{title}" ending explained`, `"{title}" plot summary`
-    - [x] Encode vertical: Medical Subject (Condition / Drug / Anatomy)
-    - [x] Expand Medical Subject vertical by prompting the search agents to propose additional search methods   and specific tactics after they complete their searches; append vetted additions to taxonomy with   provenance tags
-    - [x] Add subtopic Clinical Definition with tactics: `site:cdc.gov "{condition}"`, `site:mayoclinic.org "  {condition}"`, `site:who.int "{condition}"`
-    - [x] Add subtopic Research Studies with tactics: `site:pubmed.ncbi.nlm.nih.gov "{condition}"`, `"{drug}"   clinical trial results`, `"{condition}" meta-analysis {year}`
-    - [x] Add subtopic Patient Experience with tactics: `site:patientslikeme.com "{condition}"`, `site:reddit.  com/r/{condition}`, `"{drug}" user reviews side effects`
-    - [x] Add subtopic Treatment Guidelines with tactics: `"{condition}" treatment guidelines 2024`, `"  {condition}" standard of care`, `"{drug}" FDA label filetype:pdf`
-    - [x] Add subtopic Statistics with tactics: `"{condition}" prevalence statistics`, `"{condition}"   mortality rate`
-    - [x] Encode vertical: Legal Matter (Statute / Case Law / Regulation)
-    - [x] Expand Legal Matter vertical by prompting the search agents to propose additional search methods   and specific tactics after they complete their searches; append vetted additions to taxonomy with   provenance tags
-    - [x] Add subtopic Statutory Text with tactics: `site:cornell.edu "{law}"`, `"{statuteCitation}" text`,   `site:govinfo.gov "{billName}"`
-    - [x] Add subtopic Case Precedent with tactics: `"{caseName}" v. "{opposing}" opinion`, `"{caseName}"   holding summary`, `site:justia.com "{caseName}"`
-    - [x] Add subtopic Interpretation with tactics: `"{law}" legal analysis`, `"{law}" constitutional   challenge`, `site:lawreview.org "{law}"`
-    - [x] Add subtopic Jurisdiction with tactics: `"{law}" {stateOrCountry} application`, `"{law}" federal vs   state`
-    - [x] Add subtopic Forms/Procedure with tactics: `"{legalAction}" form filetype:pdf`, `"how to file"   {legalAction} {state}`
-    - [x] Expand taxonomy by prompting the search agents (post-search) to propose any additional verticals   needed to cover 99.99% of topics; for each proposed vertical, define subtopics, methods, and specific   tactics, then add to taxonomy with provenance tags
-    - [x] Encode fallback: Catch-all / General Discovery Mode to identify vertical then restart loop
-    - [x] Implement tactic expansion utility to render query templates with slots like `{topic}`, `  {companyDomain}`, `{year}` and keep the original raw template for provenance
-    - [x] Validate taxonomy file includes all verticals, subtopics, and tactics above and can return a full   tactic list per vertical (acceptance criteria)
-  
-  - [x] Feature: Implement vertical classification and blueprint selection
-    - [x] Add LLM-driven vertical classifier with weighted outputs and support for hybrid topics that span   multiple verticals
-    - [x] Implement Step 0 classification before any method discovery: decide vertical(s) and load the   blueprint (expected data fields)
-    - [x] Add fallback behavior when classification uncertain: run General Discovery, infer vertical, then   restart loop
-    - [x] Implement hybrid branching example: `"Tesla Cybertruck"` -> spawn Product tactics + Corporation   tactics in parallel
-    - [x] Add name-variation logic for Person/Individual classification (e.g., try multiple name variants)
-    - [x] Validate sample inputs in logs: Person, Product+Corp hybrid, Location, Non-Technical Concept   (acceptance criteria)
-  
-  - [x] Feature: Drive method discovery and agent spawning from taxonomy
-    - [x] Replace or augment `METHOD_*` templates with taxonomy-derived tactics for selected vertical(s)
-    - [x] Use blueprint subtopics to seed sector analysis and initial queries (one subtopic per sub-agent)
-    - [x] Expand method discovery to include tactic-driven query variations and track method provenance by   vertical/subtopic
-    - [x] Implement per-vertical query packs (e.g., Individual -> Professional/Assets/News/Social) and ensure   they are executed before declaring completeness
-    - [x] Validate that person/address topics generate targeted tactics (LinkedIn, public records, property   assessment, tax collector) in spawned queries (acceptance criteria)
-  
-  - [x] Feature: Add probabilistic exhaustion heuristics and multi-round loop control
-    - [x] Define exhaustion metrics: unique domain growth per round, new sources per round, query novelty   ratio, diminishing returns score
-    - [x] Implement multi-round search loop with configurable max rounds and early stop thresholds (not   "checking against reality")
-    - [x] Add per-vertical exhaustion criteria (e.g., Individual: keep searching until Employment found OR 5   name variants exhausted)
-    - [x] Keep `forceExhaustion` override while replacing `critique.isExhaustive` gating with computed   exhaustion score
-    - [x] Validate that low-coverage topics trigger extra rounds and that exhaustion stops only after   thresholds are met (acceptance criteria)
-  
-  - [x] Feature: Update prompts, types, and UI telemetry
-    - [x] Extend `types.ts` for taxonomy/blueprint models (ResearchVertical, ResearchSubtopic,   ResearchTactic, BlueprintField, ExhaustionMetrics)
-    - [x] Update OpenAI/Gemini prompts to accept taxonomy/blueprint context in sector analysis, critique, and   method extraction
-    - [x] Update agent naming to reflect assigned vertical + subtopic + tactic pack in `hooks/useOverseer.ts`   so UI nodes display intent, not generic labels
-    - [x] Update `components/AgentGraph.tsx` (and related UI) to render the enriched agent name without   truncating key vertical/tactic identifiers
-    - [x] Log vertical classification decision with confidence/weights in `hooks/useOverseer.ts`
-    - [x] Log blueprint fields selected per vertical before spawning agents
-    - [x] Log tactic pack selection per subtopic and the exact query templates used
-    - [x] Log per-round exhaustion metrics and explicit stop reason (threshold met vs max rounds vs   forceExhaustion)
-    - [x] Log taxonomy growth events (agent‑proposed tactics accepted/rejected with provenance) 
-    - [x] Log hybrid branching and coverage metrics in `hooks/useOverseer.ts`
-    - [x] Define and implement a narrative Overseer log format (phase header -> decision -> action ->   outcome) so UI logs read as a coherent story of the new approach
-    - [x] Ensure `SYSTEM_INSTRUCTION_OVERSEER` reflects vertical classification + exhaustion-first reasoning
-    - [x] Validate the app completes a run and displays the new telemetry logs (acceptance criteria)
-  
-  - [x] Feature: Prepare GitHub Pages deployment for Cloudflare Access protection
-    - [x] Add a `CNAME` file at repo root with `deepsearches.app` to support custom domain on GitHub Pages
-    - [x] Ensure Vite build assets resolve from `/` (custom domain) and not a repo subpath; adjust `vite.config.ts` `base` if needed
-    - [x] Add a lightweight `security.md` or `docs/cloudflare-access.md` with Access setup expectations (Zero Trust app, email allowlist policy, One-time PIN email auth) for future deployment
-    - [x] Define the email allowlist source of truth (doc section + update process) and note how to add/remove authorized emails
-    - [x] Add headers guidance in `wrangler.toml` or deployment notes for caching and CSP compatibility with Cloudflare Access
-    - [x] Verify build output still serves correctly under the custom domain path (acceptance criteria)
+
+- [ ] Epic: Define model‑override architecture for OpenAI agent roles
+  - [ ] Enumerate every OpenAI call site and map each to a distinct agent role (Overseer planning, Method Discovery, Sector Analysis, Deep Research L1/L2, Method Audit, Gap Hunter, Exhaustion Scout, Critique, Synthesis, Validation) in a short design note (e.g., `docs/model-roles.md`)
+  - [ ] Define a `ModelOverrides` type in `types.ts` with explicit keys per role and optional values (blank = default model)
+  - [ ] Add a single persisted settings object in localStorage (e.g., `overseer_model_overrides`) that stores the role->model mapping
+  - [ ] Define precedence rules: UI override > env default (`OPENAI_MODEL_FAST/REASONING`) > service hard default
+  - [ ] Add a small helper that resolves the model for a role (e.g., `resolveModelForRole(role, overrides, defaults)`)
+  - [ ] Validate that every OpenAI call site has a named role and a resolved model (acceptance criteria)
+
+- [ ] Epic: Implement OpenAI model selector UI in Settings dialog
+  - [ ] Add a “OpenAI Model per Agent Role” section in the settings UI (likely in `App.tsx`) that is only visible when provider = OpenAI
+  - [ ] Provide a dropdown or editable select for each role with sensible defaults (e.g., `gpt-5-codex`, `gpt-4.1`, `gpt-4.1-mini`), plus a custom text entry option for advanced models
+  - [ ] Persist model choices to `overseer_model_overrides` and hydrate them on load
+  - [ ] Add “Apply to all roles” and “Reset to defaults” controls for fast configuration
+  - [ ] Add concise help text per role explaining impact and cost/quality tradeoffs (e.g., “Deep Research: more expensive but higher recall”, “Synthesis: reasoning‑heavy; larger model recommended”)
+  - [ ] Ensure empty/invalid entries fall back to defaults and do not break the run (acceptance criteria)
+
+- [ ] Epic: Wire model overrides into OpenAI service calls
+  - [ ] Update `hooks/useOverseer.ts` to pass `modelOverrides` in `startResearch` run config
+  - [ ] Update `services/openaiService.ts` to accept optional model overrides for each role and route each call through `resolveModelForRole`
+  - [ ] Ensure `performDeepResearch`, `generateSectorAnalysis`, `critiqueAndFindGaps`, `synthesizeGrandReport`, and `validateReport` each use the role‑specific override
+  - [ ] Add minimal logging to confirm resolved model per role at runtime (guarded to avoid noisy logs)
+  - [ ] Validate that switching a role model in UI changes the model used in the next run (acceptance criteria)
+
+- [ ] Epic: Add email allowlist management controls to Settings dialog
+  - [ ] Add a “Cloudflare Access Allowlist” section to the settings UI with a multi‑line textarea and add/remove controls
+  - [ ] Normalize and validate email entries (trim, lowercase, remove duplicates; basic email format check)
+  - [ ] Persist allowlist to localStorage (e.g., `overseer_access_allowlist`)
+  - [ ] Add “Copy allowlist” button to export a newline‑separated list for Cloudflare Access policy entry
+  - [ ] Add help text clarifying this is for Access policy configuration (does not enforce client‑side security), with a short example policy snippet
+  - [ ] Validate that the allowlist is retained across reloads and can be exported cleanly (acceptance criteria)
+
+- [ ] Epic: Expand help text for all settings with concrete examples
+  - [ ] Add inline help text for provider selection, agent caps, exhaustion settings, and the new model/allowlist controls
+  - [ ] Provide at least one example per setting showing impact (e.g., “Max agents 20 = wider coverage but slower UI”; “Force exhaustion = extra rounds even if critique says complete”)
+  - [ ] Ensure help text is concise and doesn’t crowd the UI (acceptance criteria)
+
+- [ ] Epic: Update repo documentation for new settings
+  - [ ] Update `README.md` with a Settings section covering model overrides and Cloudflare Access allowlist usage
+  - [ ] Add or update `docs/cloudflare-access.md` with email allowlist workflow, where to paste it in Cloudflare Access, and how it ties to `deepsearches.app`
+  - [ ] Add or update `docs/settings.md` describing each setting and the model‑role mapping table
+  - [ ] Verify docs match the UI labels and storage keys (acceptance criteria)
