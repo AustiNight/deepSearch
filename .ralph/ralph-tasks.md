@@ -31,10 +31,10 @@
   - [x] Add help text clarifying this is for Access policy configuration (does not enforce client‑side security), with a short example policy snippet
   - [x] Validate that the allowlist is retained across reloads and can be exported cleanly (acceptance criteria)
 
-- [ ] Epic: Expand help text for all settings with concrete examples
-  - [ ] Add inline help text for provider selection, agent caps, exhaustion settings, and the new model/allowlist controls
-  - [ ] Provide at least one example per setting showing impact (e.g., “Max agents 20 = wider coverage but slower UI”; “Force exhaustion = extra rounds even if critique says complete”)
-  - [ ] Ensure help text is concise and doesn’t crowd the UI (acceptance criteria)
+- [x] Epic: Expand help text for all settings with concrete examples
+  - [x] Add inline help text for provider selection, agent caps, exhaustion settings, and the new model/allowlist controls
+  - [x] Provide at least one example per setting showing impact (e.g., “Max agents 20 = wider coverage but slower UI”; “Force exhaustion = extra rounds even if critique says complete”)
+  - [x] Ensure help text is concise and doesn’t crowd the UI (acceptance criteria)
 
 - [ ] Epic: Update repo documentation for new settings
   - [ ] Update `README.md` with a Settings section covering model overrides and Cloudflare Access allowlist usage

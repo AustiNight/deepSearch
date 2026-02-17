@@ -544,6 +544,9 @@ const App: React.FC = () => {
                     OPENAI
                   </button>
                 </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Example: choose OPENAI to use per-role model overrides; choose GOOGLE to run on Gemini with your Google key.
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-mono text-gray-400 mb-1">GEMINI_API_KEY</label>
@@ -604,6 +607,9 @@ const App: React.FC = () => {
                     </div>
                     <p className="text-[10px] text-gray-500 mt-1">
                       Leave fields blank to use defaults from `OPENAI_MODEL_FAST/REASONING`.
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      Example: set `gpt-4.1-mini` for all roles to reduce cost on quick scans.
                     </p>
                   </div>
                   <datalist id="openai-model-suggestions">
@@ -700,6 +706,9 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-gray-500">
                   This helper only prepares an Access policy allowlist; it does not secure the client app.
                 </p>
+                <p className="text-[10px] text-gray-500">
+                  Example: copy the list below into Cloudflare Access → Include → Emails in.
+                </p>
                 <pre className="text-[10px] text-gray-500 bg-black/60 border border-gray-800 rounded p-2 whitespace-pre-wrap font-mono">
 {`Include
   Emails in
@@ -742,6 +751,9 @@ const App: React.FC = () => {
                     />
                   </div>
                 </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Example: MAX_AGENTS 20 widens coverage but can slow the UI; MAX_METHOD 3 keeps method discovery focused.
+                </p>
                 <label className="mt-3 flex items-center gap-2 text-xs font-mono text-gray-400">
                   <input
                     type="checkbox"
@@ -752,6 +764,9 @@ const App: React.FC = () => {
                 </label>
                 <p className="text-[10px] text-gray-500 mt-1">
                   When enabled, the Overseer always runs the exhaustion test and spawns extra scouts up to the max cap.
+                </p>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Example: enable for regulated topics where you want extra passes even if critique says "complete."
                 </p>
                 <label className="block text-xs font-mono text-gray-400 mt-4 mb-2">ROUND CONTROL</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -776,6 +791,9 @@ const App: React.FC = () => {
                     />
                   </div>
                 </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Example: MIN_ROUNDS 2 / MAX_ROUNDS 6 ensures a second pass while still capping long runs.
+                </p>
                 <label className="block text-xs font-mono text-gray-400 mt-4 mb-2">EARLY STOP THRESHOLDS</label>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -825,6 +843,9 @@ const App: React.FC = () => {
                 </div>
                 <p className="text-[10px] text-gray-500 mt-1">
                   Early stop triggers when diminishing returns are high and novelty or new-source counts fall below thresholds.
+                </p>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Example: set NOVELTY 0.2 and NEW SOURCES 1 to stop sooner on well-trodden topics.
                 </p>
               </div>
 
