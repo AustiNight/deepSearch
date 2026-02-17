@@ -20,7 +20,7 @@
 - [x] Epic: Wire model overrides into OpenAI service calls
   - [x] Update `hooks/useOverseer.ts` to pass `modelOverrides` in `startResearch` run config
   - [x] Update `services/openaiService.ts` to accept optional model overrides for each role and route each call through `resolveModelForRole`
-  - [ ] Ensure `performDeepResearch`, `generateSectorAnalysis`, `critiqueAndFindGaps`, `synthesizeGrandReport`, and `validateReport` each use the role‑specific override
+  - [x] Ensure `performDeepResearch`, `generateSectorAnalysis`, `critiqueAndFindGaps`, `synthesizeGrandReport`, and `validateReport` each use the role‑specific override
   - [ ] Add minimal logging to confirm resolved model per role at runtime (guarded to avoid noisy logs)
   - [ ] Validate that switching a role model in UI changes the model used in the next run (acceptance criteria)
 
