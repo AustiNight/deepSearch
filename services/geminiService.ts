@@ -3,6 +3,7 @@ import { GEMINI_MODEL_FAST, GEMINI_MODEL_REASONING } from "../constants";
 import { Skill } from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
+import { coerceReportData } from "./reportFormatter";
 
 const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
 const USE_PROXY = PROXY_BASE_URL.length > 0;
@@ -615,13 +616,13 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
   const initialPrompt = buildPrompt(combinedText.substring(0, 100000), false);
   const initialRaw = await request(initialPrompt);
   const initialParsed = tryParseJsonFromText(initialRaw);
-  if (initialParsed.data) return initialParsed.data;
+  if (initialParsed.data) return coerceReportData(initialParsed.data, topic);
   storeRawSynthesis(initialRaw, "initial");
 
   const retryPrompt = buildPrompt(combinedText.substring(0, 40000), true);
   const retryRaw = await request(retryPrompt);
   const retryParsed = tryParseJsonFromText(retryRaw);
-  if (retryParsed.data) return retryParsed.data;
+  if (retryParsed.data) return coerceReportData(retryParsed.data, topic);
   storeRawSynthesis(retryRaw, "retry");
 
   return {

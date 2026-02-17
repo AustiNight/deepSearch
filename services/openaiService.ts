@@ -1,6 +1,7 @@
 import type { ModelOverrides, ModelRole, Skill } from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
+import { coerceReportData } from "./reportFormatter";
 import { getOpenAIModelDefaults, resolveModelForRole } from "./modelOverrides";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
@@ -564,17 +565,26 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
 
   const initialPrompt = buildPrompt(combinedText.substring(0, 100000), false);
   const initial = await jsonRequestWithRaw(model, initialPrompt);
-  if (initial.parsed.data && isValidReportData(initial.parsed.data) && initial.parsed.data.sections.length > 0) {
-    return initial.parsed.data;
+  const initialParsed = initial.parsed.data;
+  if (initialParsed && isValidReportData(initialParsed) && initialParsed.sections.length > 0) {
+    return initialParsed;
   }
-  storeRawSynthesis(initial.raw, "initial");
+  if (initial.raw) storeRawSynthesis(initial.raw, "initial");
+  const initialFallback = initialParsed ? coerceReportData(initialParsed, topic) : null;
 
   const retryPrompt = buildPrompt(combinedText.substring(0, 40000), true);
   const retry = await jsonRequestWithRaw(model, retryPrompt);
-  if (retry.parsed.data && isValidReportData(retry.parsed.data) && retry.parsed.data.sections.length > 0) {
-    return retry.parsed.data;
+  const retryParsed = retry.parsed.data;
+  if (retryParsed && isValidReportData(retryParsed) && retryParsed.sections.length > 0) {
+    return retryParsed;
   }
-  storeRawSynthesis(retry.raw, "retry");
+  if (retry.raw) storeRawSynthesis(retry.raw, "retry");
+  if (retryParsed) {
+    return coerceReportData(retryParsed, topic);
+  }
+  if (initialFallback) {
+    return initialFallback;
+  }
 
   return {
     __rawText: retry.raw || initial.raw,

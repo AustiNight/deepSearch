@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
+import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
 import {
   INITIAL_OVERSEER_ID,
   METHOD_TEMPLATES_GENERAL,
@@ -646,6 +647,18 @@ const dedupeParagraphs = (text: string) => {
     out.push(part);
   }
   return out.join('\n\n');
+};
+
+const DEFAULT_METHOD_AUDIT = "Deep Drill Protocol: 3-Stage Recursive Verification.";
+
+const isReportLike = (value: any): value is FinalReport => {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof value.title === 'string' &&
+    typeof value.summary === 'string' &&
+    Array.isArray(value.sections)
+  );
 };
 
 const buildNarrativeMessage = (phase: string, decision: string, action: string, outcome?: string) => {
@@ -1760,7 +1773,66 @@ export const useOverseer = () => {
       // Calculate total unique sources across all agents
       const uniqueSourceCount = allowedSources.length;
 
-      const parsedSections = Array.isArray((finalReportData as any)?.sections) ? (finalReportData as any).sections : [];
+      const baseReport = isReportLike(finalReportData)
+        ? finalReportData
+        : finalReportData && typeof finalReportData === 'object' && !(finalReportData as any).__rawText
+          ? coerceReportData(finalReportData, topic)
+          : null;
+
+      let reportFromRaw: FinalReport | null = null;
+      if (rawText) {
+        const parsed = buildReportFromRawText(rawText, topic);
+        if (parsed.report) {
+          reportFromRaw = parsed.report;
+        } else if (!looksLikeJsonText(rawText)) {
+          const maxRawChars = 50000;
+          const rawClean = dedupeParagraphs(rawText);
+          const rawForReport = rawClean.length > maxRawChars ? `${rawClean.slice(0, maxRawChars)}\n...[truncated]` : rawClean;
+          reportFromRaw = {
+            title: baseReport?.title || `Deep Dive: ${topic}`,
+            summary: "Synthesis returned unstructured output. See report sections.",
+            sections: [{
+              title: "Synthesis Output",
+              content: rawForReport,
+              sources: []
+            }],
+            provenance: {
+              totalSources: 0,
+              methodAudit: baseReport?.provenance?.methodAudit || DEFAULT_METHOD_AUDIT
+            }
+          };
+        } else {
+          reportFromRaw = {
+            title: baseReport?.title || `Deep Dive: ${topic}`,
+            summary: "Synthesis returned malformed JSON. The raw output is stored in sessionStorage for debugging.",
+            sections: [{
+              title: "Synthesis Output Unavailable",
+              content: "The synthesis model returned malformed JSON. Please re-run the report or try a smaller topic. Raw output is stored in sessionStorage for debugging.",
+              sources: []
+            }],
+            provenance: {
+              totalSources: 0,
+              methodAudit: baseReport?.provenance?.methodAudit || DEFAULT_METHOD_AUDIT
+            }
+          };
+        }
+      }
+
+      const normalizedReport = reportFromRaw || baseReport || {
+        title: `Deep Dive: ${topic}`,
+        summary: "Synthesis output unavailable. Please re-run the report.",
+        sections: [{
+          title: "Synthesis Incomplete",
+          content: "The model did not return a structured report. Try a smaller topic, or re-run with more sources.",
+          sources: []
+        }],
+        provenance: {
+          totalSources: 0,
+          methodAudit: DEFAULT_METHOD_AUDIT
+        }
+      };
+
+      const parsedSections = Array.isArray(normalizedReport.sections) ? normalizedReport.sections : [];
       const allowedSet = new Set(allowedSources);
       let filteredOutCount = 0;
       let sections = parsedSections.map((section: any) => {
@@ -1778,22 +1850,11 @@ export const useOverseer = () => {
           'warning'
         );
       }
-      let summary = (finalReportData as any)?.summary || "Summary generation failed.";
-      if (rawText) {
-        const maxRawChars = 50000;
-        const rawClean = dedupeParagraphs(rawText);
-        const rawForReport = rawClean.length > maxRawChars ? `${rawClean.slice(0, maxRawChars)}\n...[truncated]` : rawClean;
-        if (sections.length === 0) {
-          sections = [{
-            title: "Raw Synthesis Output (Unstructured)",
-            content: rawForReport,
-            sources: []
-          }];
-        }
-        if (summary === "Summary generation failed.") {
-          summary = "Synthesis returned unstructured output. See raw output section.";
-        }
-      } else if (sections.length === 0) {
+      let summary = typeof normalizedReport.summary === 'string' && normalizedReport.summary.trim().length > 0
+        ? normalizedReport.summary
+        : "Summary generation failed.";
+
+      if (sections.length === 0) {
         logOverseer(
           'PHASE 4: SYNTHESIS',
           'missing structured sections',
@@ -1808,14 +1869,14 @@ export const useOverseer = () => {
         }];
       }
 
-      const reportTitle = finalReportData.title || `Deep Dive: ${topic}`;
+      const reportTitle = normalizedReport.title || `Deep Dive: ${topic}`;
       let reportCandidate = {
         title: reportTitle,
         summary,
         sections,
         provenance: {
           totalSources: uniqueSourceCount,
-          methodAudit: finalReportData.provenance?.methodAudit || "Deep Drill Protocol: 3-Stage Recursive Verification."
+          methodAudit: normalizedReport.provenance?.methodAudit || DEFAULT_METHOD_AUDIT
         }
       };
 
