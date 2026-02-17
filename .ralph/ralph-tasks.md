@@ -109,7 +109,7 @@
   - [ ] Update `README.md` Settings section to reference the new sync flow and the KV-backed source of truth
   - [ ] Acceptance: docs match UI labels, storage keys, Worker endpoints, and secret names
 
-- [ ] Epic: Render markdown tables as responsive data tables in final report
+- [x] Epic: Render markdown tables as responsive data tables in final report
   - [ ] Audit where report markdown is rendered (e.g., `components/ReportView.tsx`, `ReactMarkdown` usage) and identify the exact code path that renders markdown tables today
   - [ ] Select a data table component native to the stack (React + Tailwind/Vite) that is lightweight, supports SSR-safe rendering, prints cleanly, and can be themed for light/dark
   - [ ] Define the exact markdown renderer integration (e.g., `react-markdown` `components` override for `table`, `thead`, `tbody`, `tr`, `th`, `td`) and ensure semantic/a11y requirements (header scopes, captions, readable contrast)
