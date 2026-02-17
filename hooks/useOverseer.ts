@@ -50,6 +50,14 @@ const isPersonLike = (topic: string) => {
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
+const normalizeForMatch = (value: string) => {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 const inferVerticalHints = (topic: string) => {
   const hints: string[] = [];
   const lower = topic.toLowerCase();
@@ -66,6 +74,239 @@ const inferVerticalHints = (topic: string) => {
   if (/\b(theory|movement|ideology|philosophy)\b/i.test(lower)) hints.push('nontechnical_concept');
   if (hints.length === 0) hints.push('general_discovery');
   return uniqueList(hints);
+};
+
+const collectFindingsText = (findings: Array<{ content?: string }>) => {
+  const combined = findings.map(f => f.content || '').join(' ');
+  return normalizeForMatch(combined);
+};
+
+const extractSourceDomainsFromFindings = (findings: Array<{ rawSources?: any[] }>) => {
+  const domains: string[] = [];
+  findings.forEach((finding: any) => {
+    const sources = Array.isArray(finding?.rawSources) ? finding.rawSources : [];
+    sources.forEach((source: any) => {
+      const uri = typeof source === 'string' ? source : source?.uri;
+      const domain = normalizeDomain(uri || '');
+      if (domain) domains.push(domain);
+    });
+  });
+  return uniqueList(domains);
+};
+
+const countNameVariantsUsed = (usedQueries: Set<string>, nameVariants: string[]) => {
+  const normalizedQueries = Array.from(usedQueries).map(normalizeForMatch);
+  const normalizedVariants = uniqueList(nameVariants.map(normalizeForMatch)).filter(Boolean);
+  let matched = 0;
+  normalizedVariants.forEach(variant => {
+    if (normalizedQueries.some(query => query.includes(variant))) {
+      matched += 1;
+    }
+  });
+  return matched;
+};
+
+const evaluateVerticalExhaustion = (context: {
+  topic: string;
+  selectedVerticalIds: string[];
+  nameVariants: string[];
+  usedQueries: Set<string>;
+  findings: Array<{ content?: string; rawSources?: any[] }>;
+  addressLike: boolean;
+  companyDomainHint?: string;
+  brandDomainHint?: string;
+}) => {
+  const reasons: string[] = [];
+  if (context.selectedVerticalIds.length === 0) {
+    return { blockEarlyStop: false, reasons };
+  }
+
+  const findingsText = collectFindingsText(context.findings);
+  const sourceDomains = extractSourceDomainsFromFindings(context.findings);
+  const hasKeyword = (keywords: string[]) => keywords.some(keyword => findingsText.includes(keyword));
+  const hasDomain = (domain?: string) => {
+    if (!domain) return false;
+    const normalized = normalizeDomain(domain);
+    return sourceDomains.some(d => d === normalized || d.endsWith(`.${normalized}`));
+  };
+
+  if (context.selectedVerticalIds.includes('individual')) {
+    const employmentKeywords = [
+      'employed',
+      'employment',
+      'works at',
+      'worked at',
+      'working at',
+      'job title',
+      'occupation',
+      'position',
+      'ceo',
+      'founder',
+      'president',
+      'director',
+      'manager',
+      'engineer',
+      'consultant',
+      'attorney',
+      'professor',
+      'teacher',
+      'nurse',
+      'doctor',
+      'researcher',
+      'analyst'
+    ];
+    const employmentFound = hasKeyword(employmentKeywords);
+    const variantTarget = context.nameVariants.length === 0 ? 0 : Math.min(5, context.nameVariants.length);
+    const variantsUsed = countNameVariantsUsed(context.usedQueries, context.nameVariants);
+    if (!employmentFound && variantTarget > 0 && variantsUsed < variantTarget) {
+      reasons.push(`Individual: employment not found; ${variantsUsed}/${variantTarget} name variants attempted.`);
+    } else if (!employmentFound && variantTarget === 0) {
+      reasons.push('Individual: employment signal not found.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('corporation')) {
+    const corpKeywords = [
+      'headquarters',
+      'founded',
+      'incorporated',
+      'revenue',
+      'funding',
+      'subsidiary',
+      'executive team',
+      'ceo',
+      'cfo',
+      'annual report',
+      '10-k',
+      'ownership',
+      'acquired'
+    ];
+    const domainHit = hasDomain(context.companyDomainHint);
+    if (!domainHit && !hasKeyword(corpKeywords)) {
+      reasons.push('Corporation: missing leadership/financials/ownership signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('product')) {
+    const productKeywords = [
+      'datasheet',
+      'manual',
+      'spec',
+      'specification',
+      'price',
+      'msrp',
+      'firmware',
+      'release notes',
+      'features'
+    ];
+    const domainHit = hasDomain(context.brandDomainHint);
+    if (!domainHit && !hasKeyword(productKeywords)) {
+      reasons.push('Product: missing specs/pricing/support signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('location')) {
+    const locationKeywords = context.addressLike
+      ? ['parcel', 'assessor', 'tax collector', 'property card', 'assessment']
+      : ['population', 'city council', 'mayor', 'zoning', 'budget', 'county', 'police', 'crime rate'];
+    if (!hasKeyword(locationKeywords)) {
+      reasons.push('Location: missing governance or parcel/assessment signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('event')) {
+    const eventKeywords = [
+      'timeline',
+      'official report',
+      'press release',
+      'aftermath',
+      'casualties',
+      'sequence of events',
+      'investigation'
+    ];
+    if (!hasKeyword(eventKeywords)) {
+      reasons.push('Event: missing timeline or primary source signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('technical_concept')) {
+    const technicalKeywords = [
+      'implementation',
+      'github',
+      'benchmark',
+      'performance',
+      'paper',
+      'arxiv',
+      'api',
+      'tutorial'
+    ];
+    if (!hasKeyword(technicalKeywords)) {
+      reasons.push('Technical concept: missing implementation or academic signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('nontechnical_concept')) {
+    const nontechnicalKeywords = [
+      'definition',
+      'origin',
+      'etymology',
+      'theory',
+      'critique',
+      'history',
+      'movement'
+    ];
+    if (!hasKeyword(nontechnicalKeywords)) {
+      reasons.push('Non-technical concept: missing definition or historical signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('creative_work')) {
+    const creativeKeywords = [
+      'plot',
+      'ending',
+      'review',
+      'box office',
+      'director',
+      'author',
+      'cast',
+      'release'
+    ];
+    if (!hasKeyword(creativeKeywords)) {
+      reasons.push('Creative work: missing reception or plot/credit signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('medical_subject')) {
+    const medicalKeywords = [
+      'symptoms',
+      'treatment',
+      'clinical',
+      'prevalence',
+      'mortality',
+      'guidelines',
+      'diagnosis'
+    ];
+    if (!hasKeyword(medicalKeywords)) {
+      reasons.push('Medical subject: missing clinical or treatment signals.');
+    }
+  }
+
+  if (context.selectedVerticalIds.includes('legal_matter')) {
+    const legalKeywords = [
+      'statute',
+      'regulation',
+      'case',
+      'holding',
+      'jurisdiction',
+      'opinion',
+      'legal analysis'
+    ];
+    if (!hasKeyword(legalKeywords)) {
+      reasons.push('Legal matter: missing statutory or case-law signals.');
+    }
+  }
+
+  return { blockEarlyStop: reasons.length > 0, reasons };
 };
 
 type WeightedVertical = { id: string; weight: number; reason?: string };
@@ -695,6 +936,9 @@ export const useOverseer = () => {
       }
 
       const slotValues = buildSlotValues(topic, nameVariants, isAddressLike(topic));
+      const slotValuesAny = slotValues as Record<string, unknown>;
+      const companyDomainHint = Array.isArray(slotValuesAny.companyDomain) ? String(slotValuesAny.companyDomain[0] || '') : '';
+      const brandDomainHint = Array.isArray(slotValuesAny.brandDomain) ? String(slotValuesAny.brandDomain[0] || '') : '';
       const { packs: tacticPacks, expandedAll: expandedTactics } = buildTacticPacks(taxonomy, selectedVerticalIds, slotValues);
       const tacticPackQueries = uniqueList(expandedTactics.map(t => t.query));
       const subtopicSeedQueries = uniqueList(
@@ -1058,8 +1302,28 @@ export const useOverseer = () => {
         }
 
         const metrics = recordExhaustionRound(exhaustionTracker, `round_${round}`, roundQueries, roundSources);
-        if (shouldStopAfterRound(round, metrics)) {
-          break;
+        const baseStop = shouldStopAfterRound(round, metrics);
+        if (baseStop) {
+          const verticalGate = evaluateVerticalExhaustion({
+            topic,
+            selectedVerticalIds,
+            nameVariants,
+            usedQueries,
+            findings: findingsRef.current as Array<{ content?: string; rawSources?: any[] }>,
+            addressLike: isAddressLike(topic),
+            companyDomainHint,
+            brandDomainHint
+          });
+          if (verticalGate.blockEarlyStop) {
+            addLog(
+              overseerId,
+              overseer.name,
+              `EXHAUSTION GATE: ${verticalGate.reasons.join(' | ')} Continuing search.`,
+              'info'
+            );
+          } else {
+            break;
+          }
         }
       }
 
