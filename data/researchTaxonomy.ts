@@ -183,11 +183,26 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('individual-professional-resume', 'filetype:pdf "resume" {name}'),
           tactic('individual-professional-cv', 'filetype:pdf "cv" {name}')
         ]),
-        subtopic('assets', 'Assets & Property', [
-          tactic('individual-assets-property-records-county', '"{name}" "property records" "county"'),
-          tactic('individual-assets-appraisal-district-search', '"{name}" "property search" "appraisal district"'),
-          tactic('individual-assets-property-ownership', '"{name}" "property ownership"')
-        ]),
+        subtopic(
+          'assets',
+          'Assets & Property',
+          [
+            tactic('individual-assets-property-authority-site', '"{countyPrimary}" {propertyAuthorityPrimary} "property search"'),
+            tactic('individual-assets-property-authority-name', '"{name}" {propertyAuthorityPrimary} "{countyMetro}" "property search"'),
+            tactic('individual-assets-city-metro-cad', '"{name}" "property search" "appraisal district" "{cityMetro}"'),
+            tactic('individual-assets-property-authority-secondary', '"{name}" {propertyAuthoritySecondary} "{countyRegion}" "property search"'),
+            tactic('individual-assets-property-authority-address', '"{address}" {propertyAuthorityPrimary} "property search"'),
+            tactic('individual-assets-parcel-viewer', '"{countyMetro}" "parcel viewer" "{name}"'),
+            tactic('individual-assets-recorder-deeds', '"{name}" "{countyRegion}" "recorder of deeds"'),
+            tactic('individual-assets-site-org-cad', 'site:.org "{countyRegion}" "appraisal district" "{name}"'),
+            tactic('individual-assets-site-gov-assessor', 'site:.gov "{countyRegion}" "assessor" "{name}"'),
+            tactic('individual-assets-property-sales-2023', '"{countyPrimary}" "appraisal district" "sales" "2023" "{name}"'),
+            tactic('individual-assets-property-records-county', '"{name}" "property records" "county"'),
+            tactic('individual-assets-appraisal-district-search', '"{name}" "property search" "appraisal district"'),
+            tactic('individual-assets-property-ownership', '"{name}" "property ownership"')
+          ],
+          'Use public record sources only (appraisal/assessor, recorder, parcel/GIS). Avoid sensitive data; focus on ownership and assessment history.'
+        ),
         subtopic('news', 'News', [
           tactic('individual-news-newspapers', 'site:newspapers.com {name}'),
           tactic('individual-news-gazette', '"{hometown} Gazette" {name}')
@@ -196,7 +211,8 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('individual-social-handle', '"@{handle}"'),
           tactic('individual-social-facebook', 'inurl:facebook.com/{name}')
         ])
-      ]
+      ],
+      'Public-records research about individuals. Use official sources, avoid sensitive data, and prioritize broad context over doxxing.'
     ),
     vertical(
       'corporation',
@@ -329,12 +345,22 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
           tactic('location-development-zoning', '"{city}" zoning map'),
           tactic('location-development-comprehensive', '"{city}" comprehensive plan')
         ]),
-        subtopic('parcel_real_estate', 'Parcel/Real Estate', [
-          tactic('location-parcel-gis', '"{county}" GIS map'),
-          tactic('location-parcel-card', '"{address}" property card'),
-          tactic('location-parcel-assessment', '"{address}" assessment history'),
-          tactic('location-parcel-map', '"{address}" parcel map')
-        ]),
+        subtopic(
+          'parcel_real_estate',
+          'Parcel/Real Estate',
+          [
+            tactic('location-parcel-authority-site', '"{countyPrimary}" {propertyAuthorityPrimary} "property search"'),
+            tactic('location-parcel-authority-secondary', '"{countyRegion}" {propertyAuthoritySecondary} "property search"'),
+            tactic('location-parcel-city-metro', '"{cityMetro}" "property search" "assessor"'),
+            tactic('location-parcel-site-org-cad', 'site:.org "{countyRegion}" "appraisal district" "property search"'),
+            tactic('location-parcel-site-gov-assessor', 'site:.gov "{countyRegion}" "assessor" "property search"'),
+            tactic('location-parcel-gis', '"{countyMetro}" GIS map'),
+            tactic('location-parcel-card', '"{address}" property card'),
+            tactic('location-parcel-assessment', '"{address}" assessment history'),
+            tactic('location-parcel-map', '"{address}" parcel map')
+          ],
+          'Prioritize official parcel, appraisal, and recorder systems. Use address-based searches when available.'
+        ),
         subtopic('crime_safety', 'Crime/Safety', [
           tactic('location-crime-citydata', 'site:city-data.com "{city}"'),
           tactic('location-crime-blotter', '"{city}" police blotter'),
@@ -745,7 +771,8 @@ export const summarizeTaxonomy = (taxonomy: ResearchTaxonomy) => {
   return taxonomy.verticals.map(v => ({
     id: v.id,
     label: v.label,
-    subtopics: v.subtopics.map(s => ({ id: s.id, label: s.label }))
+    description: v.description,
+    subtopics: v.subtopics.map(s => ({ id: s.id, label: s.label, description: s.description }))
   }));
 };
 

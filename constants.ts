@@ -34,6 +34,8 @@ export const METHOD_TEMPLATES_GENERAL = [
 export const METHOD_TEMPLATES_ADDRESS = [
   '{topic} county assessor',
   '{topic} property appraiser',
+  '{topic} central appraisal district',
+  '{topic} tax assessor-collector',
   '{topic} parcel map',
   '{topic} GIS map',
   '{topic} deed records',
@@ -56,6 +58,7 @@ export const METHOD_DISCOVERY_TEMPLATES_GENERAL = [
 export const METHOD_DISCOVERY_TEMPLATES_PERSON = [
   'how to research a person named {topic}',
   'public records to find information about {topic}',
+  'property ownership records for {topic}',
   'how to find news mentions of {topic}',
   'how to find professional profiles for {topic}',
 ];

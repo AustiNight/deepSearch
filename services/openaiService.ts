@@ -275,7 +275,7 @@ export const proposeTaxonomyGrowth = async (input: {
     ${input.findingsText.substring(0, 8000)}
 
     Propose taxonomy growth for future research. Focus on NEW search query templates (tactics) that are not already in the taxonomy.
-    Use placeholders like {topic}, {name}, {company}, {companyDomain}, {product}, {brandDomain}, {city}, {county}, {address}, {year}, {event}, {concept}, {title}, {condition}, {drug}, {law}, {statuteCitation}, {billName}.
+    Use placeholders like {topic}, {name}, {company}, {companyDomain}, {product}, {brandDomain}, {city}, {cityExpanded}, {cityMetro}, {county}, {countyPrimary}, {countyMetro}, {countyRegion}, {countyExpanded}, {state}, {address}, {propertyAuthorityPrimary}, {propertyAuthoritySecondary}, {year}, {event}, {concept}, {title}, {condition}, {drug}, {law}, {statuteCitation}, {billName}.
     Prefer adding tactics to existing subtopics. Only propose a new subtopic or vertical if the taxonomy clearly lacks coverage.
 
     Return JSON with:

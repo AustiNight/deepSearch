@@ -59,6 +59,115 @@ const normalizeForMatch = (value: string) => {
     .trim();
 };
 
+const STATE_NAME_TO_CODE: Record<string, string> = {
+  'alabama': 'AL',
+  'alaska': 'AK',
+  'arizona': 'AZ',
+  'arkansas': 'AR',
+  'california': 'CA',
+  'colorado': 'CO',
+  'connecticut': 'CT',
+  'delaware': 'DE',
+  'florida': 'FL',
+  'georgia': 'GA',
+  'hawaii': 'HI',
+  'idaho': 'ID',
+  'illinois': 'IL',
+  'indiana': 'IN',
+  'iowa': 'IA',
+  'kansas': 'KS',
+  'kentucky': 'KY',
+  'louisiana': 'LA',
+  'maine': 'ME',
+  'maryland': 'MD',
+  'massachusetts': 'MA',
+  'michigan': 'MI',
+  'minnesota': 'MN',
+  'mississippi': 'MS',
+  'missouri': 'MO',
+  'montana': 'MT',
+  'nebraska': 'NE',
+  'nevada': 'NV',
+  'new hampshire': 'NH',
+  'new jersey': 'NJ',
+  'new mexico': 'NM',
+  'new york': 'NY',
+  'north carolina': 'NC',
+  'north dakota': 'ND',
+  'ohio': 'OH',
+  'oklahoma': 'OK',
+  'oregon': 'OR',
+  'pennsylvania': 'PA',
+  'rhode island': 'RI',
+  'south carolina': 'SC',
+  'south dakota': 'SD',
+  'tennessee': 'TN',
+  'texas': 'TX',
+  'utah': 'UT',
+  'vermont': 'VT',
+  'virginia': 'VA',
+  'washington': 'WA',
+  'west virginia': 'WV',
+  'wisconsin': 'WI',
+  'wyoming': 'WY',
+  'district of columbia': 'DC'
+};
+
+const STATE_NAME_REGEX = new RegExp(
+  `\\b(${Object.keys(STATE_NAME_TO_CODE).sort((a, b) => b.length - a.length).map((name) => name.replace(/\\s+/g, '\\\\s+')).join('|')})\\b`,
+  'i'
+);
+
+const normalizeStateCode = (value: string) => {
+  const trimmed = value.trim();
+  if (trimmed.length === 2 && /^[a-z]{2}$/i.test(trimmed)) return trimmed.toUpperCase();
+  const mapped = STATE_NAME_TO_CODE[trimmed.toLowerCase()];
+  return mapped || '';
+};
+
+const extractLocationHint = (topic: string) => {
+  const match = topic.match(/\\b(?:of|in|from|near|around|outside|outside of)\\s+([^,]+(?:,\\s*[^,]+)?)$/i);
+  return match ? match[1].trim() : topic.trim();
+};
+
+const parseCityState = (value: string): { city: string; state: string } => {
+  const cleaned = value.replace(/\\s+/g, ' ').trim();
+  if (!cleaned) return { city: '', state: '' };
+
+  const commaParts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
+  if (commaParts.length >= 2) {
+    const stateCandidate = normalizeStateCode(commaParts[commaParts.length - 1]);
+    if (stateCandidate) {
+      return { city: commaParts.slice(0, -1).join(', '), state: stateCandidate };
+    }
+  }
+
+  const abbrMatch = cleaned.match(/^(.*)\\s+([A-Za-z]{2})$/);
+  if (abbrMatch) {
+    const stateCandidate = normalizeStateCode(abbrMatch[2]);
+    if (stateCandidate) {
+      return { city: abbrMatch[1].trim(), state: stateCandidate };
+    }
+  }
+
+  const nameMatch = cleaned.match(new RegExp(`^(.*)\\s+${STATE_NAME_REGEX.source}$`, 'i'));
+  if (nameMatch) {
+    const stateCandidate = normalizeStateCode(nameMatch[2]);
+    if (stateCandidate) {
+      return { city: nameMatch[1].trim(), state: stateCandidate };
+    }
+  }
+
+  return { city: '', state: '' };
+};
+
+const extractCityStateFromTopic = (topic: string) => {
+  const hint = extractLocationHint(topic);
+  const parsedHint = parseCityState(hint);
+  if (parsedHint.city || parsedHint.state) return parsedHint;
+  return parseCityState(topic);
+};
+
 const inferVerticalHints = (topic: string) => {
   const hints: string[] = [];
   const lower = topic.toLowerCase();
@@ -447,9 +556,8 @@ const extractDomainFromTopic = (topic: string) => {
 };
 
 const extractCityFromTopic = (topic: string) => {
-  const parts = topic.split(',').map(p => p.trim()).filter(Boolean);
-  if (parts.length >= 2) return parts[0];
-  return '';
+  const parsed = extractCityStateFromTopic(topic);
+  return parsed.city || '';
 };
 
 const extractCountyFromTopic = (topic: string) => {
@@ -458,10 +566,141 @@ const extractCountyFromTopic = (topic: string) => {
 };
 
 const extractStateFromTopic = (topic: string) => {
-  const match = topic.match(/,\\s*([A-Z]{2})\\b/);
-  if (match) return match[1];
-  const matchEnd = topic.match(/\\b([A-Z]{2})\\b$/);
-  return matchEnd ? matchEnd[1] : '';
+  const parsed = extractCityStateFromTopic(topic);
+  return parsed.state || '';
+};
+
+type MetroExpansion = {
+  id: string;
+  label: string;
+  state: string;
+  cityAliases: string[];
+  cities: string[];
+  coreCounties: string[];
+  outerCounties: string[];
+};
+
+const METRO_EXPANSIONS: MetroExpansion[] = [
+  {
+    id: 'dallas_fort_worth',
+    label: 'Dallas-Fort Worth-Arlington',
+    state: 'TX',
+    cityAliases: [
+      'dallas',
+      'fort worth',
+      'arlington',
+      'plano',
+      'irving',
+      'garland',
+      'frisco',
+      'mckinney',
+      'denton',
+      'richardson',
+      'lewisville',
+      'mesquite',
+      'carrollton',
+      'grand prairie'
+    ],
+    cities: [
+      'Dallas',
+      'Fort Worth',
+      'Arlington',
+      'Plano',
+      'Irving',
+      'Garland',
+      'Frisco',
+      'McKinney',
+      'Denton',
+      'Richardson',
+      'Lewisville',
+      'Mesquite',
+      'Carrollton',
+      'Grand Prairie'
+    ],
+    coreCounties: [
+      'Dallas',
+      'Tarrant',
+      'Collin',
+      'Denton',
+      'Ellis',
+      'Hunt',
+      'Johnson',
+      'Kaufman',
+      'Parker',
+      'Rockwall',
+      'Wise'
+    ],
+    outerCounties: [
+      'Erath',
+      'Navarro',
+      'Palo Pinto',
+      'Hood',
+      'Somervell'
+    ]
+  }
+];
+
+const MAX_CITY_EXPANSION = 14;
+const MAX_COUNTY_EXPANSION = 18;
+
+const formatCityName = (city: string) => {
+  return city.trim();
+};
+
+const formatCountyWithState = (county: string, state: string) => {
+  if (!county) return '';
+  const base = /\\bcounty\\b/i.test(county) ? county : `${county} County`;
+  if (!state) return base;
+  const normalized = base.toLowerCase();
+  if (normalized.includes(`, ${state.toLowerCase()}`) || normalized.endsWith(` ${state.toLowerCase()}`)) {
+    return base;
+  }
+  return `${base}, ${state}`;
+};
+
+const findMetroExpansion = (city: string, state: string) => {
+  if (!city || !state) return undefined;
+  const normalizedCity = normalizeForMatch(city);
+  return METRO_EXPANSIONS.find(metro =>
+    metro.state === state && metro.cityAliases.includes(normalizedCity)
+  );
+};
+
+const buildGeoExpansion = (city: string, state: string, county: string) => {
+  const metro = findMetroExpansion(city, state);
+  const primaryCity = city ? formatCityName(city) : '';
+  const primaryCounty = county ? formatCountyWithState(county, state) : '';
+  const metroCities = (metro?.cities || []).map(name => formatCityName(name));
+  const coreCounties = (metro?.coreCounties || []).map(name => formatCountyWithState(name, state));
+  const regionCounties = uniqueList([
+    ...(metro?.coreCounties || []),
+    ...(metro?.outerCounties || [])
+  ]).map(name => formatCountyWithState(name, state));
+
+  const metroCityList = uniqueList([primaryCity, ...metroCities].filter(Boolean)).slice(0, MAX_CITY_EXPANSION);
+  const metroCountyList = uniqueList([primaryCounty || coreCounties[0], ...coreCounties].filter(Boolean)).slice(0, MAX_COUNTY_EXPANSION);
+  const regionCountyList = uniqueList([primaryCounty || coreCounties[0], ...regionCounties].filter(Boolean)).slice(0, MAX_COUNTY_EXPANSION);
+
+  return {
+    primaryCity,
+    metroCities: metroCityList,
+    primaryCounty: primaryCounty || (coreCounties[0] || ''),
+    metroCounties: metroCountyList,
+    regionCounties: regionCountyList
+  };
+};
+
+const buildPropertyAuthorityTerms = (state: string) => {
+  if (state === 'TX') {
+    return {
+      primary: ['"central appraisal district"'],
+      secondary: ['"appraisal district"', '"tax assessor-collector"']
+    };
+  }
+  return {
+    primary: ['"assessor"'],
+    secondary: ['"property appraiser"', '"tax collector"', '"recorder of deeds"']
+  };
 };
 
 const normalizeHandle = (topic: string) => {
@@ -475,8 +714,16 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
   const city = extractCityFromTopic(cleaned);
   const county = extractCountyFromTopic(cleaned);
   const state = extractStateFromTopic(cleaned);
+  const geoExpansion = buildGeoExpansion(city, state, county);
+  const propertyAuthorityTerms = buildPropertyAuthorityTerms(state);
   const handle = normalizeHandle(cleaned);
   const names = nameVariants.length > 0 ? nameVariants : [cleaned];
+  const countyValue = county ? [formatCountyWithState(county, state)] : (addressLike ? [city || cleaned] : []);
+  const countyPrimary = geoExpansion.primaryCounty ? [geoExpansion.primaryCounty] : countyValue;
+  const countyMetro = geoExpansion.metroCounties.length > 0 ? geoExpansion.metroCounties : countyPrimary;
+  const countyRegion = geoExpansion.regionCounties.length > 0 ? geoExpansion.regionCounties : countyMetro;
+  const cityMetro = geoExpansion.metroCities.length > 0 ? geoExpansion.metroCities : (city ? [city] : []);
+  const cityExpanded = cityMetro;
 
   return {
     topic: [cleaned],
@@ -488,7 +735,15 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
     product: [cleaned],
     brandDomain: domain ? [domain] : [],
     city: city ? [city] : [cleaned],
-    county: county ? [county] : (addressLike ? [city || cleaned] : []),
+    cityExpanded,
+    cityMetro,
+    county: countyPrimary,
+    countyPrimary,
+    countyMetro,
+    countyRegion,
+    countyExpanded: countyRegion,
+    propertyAuthorityPrimary: propertyAuthorityTerms.primary,
+    propertyAuthoritySecondary: propertyAuthorityTerms.secondary,
     address: addressLike ? [cleaned] : [],
     event: [cleaned],
     concept: [cleaned],
@@ -1043,7 +1298,13 @@ export const useOverseer = () => {
 
       const selectedTaxonomySummary = taxonomySummary.filter(v => selectedVerticalIds.includes(v.id));
       const taxonomySummaryText = selectedTaxonomySummary
-        .map(v => `${v.label} (${v.id}): ${v.subtopics.map(s => `${s.label} (${s.id})`).join(', ')}`)
+        .map(v => {
+          const verticalDesc = v.description ? ` - ${v.description}` : '';
+          const subtopicText = v.subtopics
+            .map(s => s.description ? `${s.label} (${s.id}): ${s.description}` : `${s.label} (${s.id})`)
+            .join(', ');
+          return `${v.label} (${v.id})${verticalDesc}: ${subtopicText}`;
+        })
         .join(' | ');
       const blueprintSummaryText = blueprintSelections
         .map(b => `${b.label} (${b.id}): ${b.fields.join(', ') || 'none'}`)
