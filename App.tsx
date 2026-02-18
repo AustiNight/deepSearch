@@ -476,6 +476,7 @@ const App: React.FC = () => {
   const draftUsingEnvKey = draftProvider === 'google' ? (!draftKeys.google && !!ENV_GEMINI_KEY) : (!draftKeys.openai && !!ENV_OPENAI_KEY);
 
   const requireAuth = (action: 'settings' | 'start') => {
+    if (action === 'start' && isSystemTestTopic(topic)) return true;
     if (!REQUIRES_PASSWORD || isUnlocked) return true;
     setPendingAction(action);
     setAuthInput('');

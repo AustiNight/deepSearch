@@ -12,11 +12,10 @@ test('system test flow runs with minimal tokens across viewports', async ({ page
   await page.getByTestId('search-input').fill(`System Test ${SYSTEM_TEST_PHRASE}`);
   await page.getByTestId('start-search').click();
 
-  await expect(page.getByText('System Test Researcher')).toBeVisible();
-  await expect(page.getByText('System Test Critic')).toBeVisible();
-  await expect(page.getByText('System Test Synthesizer')).toBeVisible();
-
   await expect(page.getByText('System Test Report')).toBeVisible();
+  await expect(
+    page.getByText('Agents spawned: Overseer Alpha, System Test Researcher, System Test Critic, System Test Synthesizer.').first()
+  ).toBeVisible();
 
   const { scrollWidth, clientWidth } = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,

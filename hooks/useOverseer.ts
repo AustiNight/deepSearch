@@ -1162,13 +1162,14 @@ export const useOverseer = () => {
       });
       addLog(synthesizerId, synthesizer.name, 'Synthesis complete.', 'success');
 
+      const agentSummary = 'Agents spawned: Overseer Alpha, System Test Researcher, System Test Critic, System Test Synthesizer.';
       setReport({
         title: 'System Test Report',
-        summary: 'System test mode executed. All agent types spawned once with minimal tokens.',
+        summary: `System test mode executed. ${agentSummary}`,
         sections: [
           {
             title: 'System Test Summary',
-            content: `Test phrase detected. Vertical ${SYSTEM_TEST_VERTICAL_ID} selected. Agents spawned: Overseer, Researcher, Critic, Synthesizer.`,
+            content: `Test phrase detected. Vertical ${SYSTEM_TEST_VERTICAL_ID} selected. ${agentSummary}`,
             sources: [testSource.uri]
           }
         ],
