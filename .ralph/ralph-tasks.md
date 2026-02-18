@@ -50,11 +50,11 @@
   - [ ] Ensure light/dark styling and print‑friendly output with readable contrasts
   - [ ] Acceptance: Transparency Map displays all verticals in a structured table with clear headers and bullet‑list cells at 100% scale and passes accessibility review
 
-- [ ] Epic: Update documentation and release notes for UI/search changes
-  - [ ] Document the New Search reset behavior and universal settings sync in `README.md` and `docs/settings.md`
-  - [ ] Document the updated Transparency Map layout and any performance limits in `docs/vertical-logic.md` or a dedicated doc
-  - [ ] Add a user‑facing changelog entry for the UI/search changes and note any version tags
-  - [ ] Acceptance: docs reflect new UI behavior and sync semantics
+- [x] Epic: Update documentation and release notes for UI/search changes
+  - [x] Document the New Search reset behavior and universal settings sync in `README.md` and `docs/settings.md`
+  - [x] Document the updated Transparency Map layout and any performance limits in `docs/vertical-logic.md` or a dedicated doc
+  - [x] Add a user‑facing changelog entry for the UI/search changes and note any version tags
+  - [x] Acceptance: docs reflect new UI behavior and sync semantics
 
 - [x] Epic: System test vertical + UI smoke testing pipeline
   - [x] Add a reserved system test phrase (`DEEPSEARCH_SYSTEM_TEST`) and force classification to `system_test`

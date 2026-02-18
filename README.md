@@ -30,8 +30,17 @@ Open the **SYSTEM_CONFIG** modal (gear icon) to adjust runtime settings.
 
 - OpenAI model overrides: set **OPENAI MODEL PER AGENT ROLE** (only visible when `LLM_PROVIDER=openai`) to customize models per role. Overrides are stored in `overseer_model_overrides` and take precedence over `OPENAI_MODEL_FAST/OPENAI_MODEL_REASONING`.
 - Cloudflare Access allowlist: manage **CLOUDFLARE ACCESS ALLOWLIST** entries and click **SAVE** to sync them to Cloudflare Access via the Worker (`/api/access/allowlist`). The KV-backed list is the source of truth and is cached in `overseer_access_allowlist` locally. **COPY ALLOWLIST** remains as a manual fallback. This helper does not secure the client; Access policy does.
+- Universal settings sync: **Save Configuration** syncs non-secret settings (provider, run config, model overrides, allowlist) to the cloud using the Cloudflare Access identity. On success, the modal closes; on errors or conflicts it stays open and shows status details.
 
-More details in `docs/settings.md` and `docs/cloudflare-access.md`.
+## Search & Runs
+
+- **New Search** is always available in the header and cancels the active run, clears run state, and keeps saved settings and API keys intact.
+
+More details in `docs/settings.md`, `docs/universal-settings.md`, and `docs/cloudflare-access.md`.
+
+## Changelog
+
+See `CHANGELOG.md` for UI/search release notes.
 
 ## Cloudflare Worker Proxy (Recommended for Production)
 

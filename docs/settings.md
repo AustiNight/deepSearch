@@ -14,6 +14,21 @@ The Settings modal persists configuration to localStorage. Keys are shown here s
 | OpenAI model overrides | `overseer_model_overrides` | JSON object keyed by role |
 | Cloudflare Access allowlist | `overseer_access_allowlist` | JSON array of emails |
 | Cloudflare Access allowlist updated at | `overseer_access_allowlist_updated_at` | ISO timestamp |
+| Universal settings updated at | `overseer_settings_updated_at` | ISO timestamp |
+| Universal settings updated by | `overseer_settings_updated_by` | string |
+| Universal settings version | `overseer_settings_version` | number |
+| Universal settings local updated at | `overseer_settings_local_updated_at` | ISO timestamp |
+| Universal settings migrated | `overseer_settings_migrated` | boolean |
+
+## Universal Settings Sync
+When the Worker proxy is configured and Cloudflare Access headers are present, the app loads and saves settings to the universal store. If the cloud endpoint is unavailable or unauthorized, localStorage is used as a fallback.
+
+- **Save Configuration** persists provider/run config/model overrides locally, then attempts to sync non-secret settings to the cloud (`/api/settings`).
+- On success, the modal closes and the cloud metadata (`updatedAt`, `updatedBy`, `version`) is refreshed.
+- On errors or conflicts, the modal stays open and a status banner explains what happened. Conflicts offer a **Load Cloud Settings** action before retrying.
+- API keys are never sent to the server; only non-secret settings are synced.
+
+See `docs/universal-settings.md` for the full schema, conflict rules, and governance.
 
 ## LLM Provider
 - **LLM PROVIDER**: chooses between Google Gemini and OpenAI. Persisted in `overseer_provider`. If `LLM_PROVIDER` is set in `.env.local`, it is used as the initial default.
@@ -64,6 +79,9 @@ Stored in `overseer_run_config`.
 
 - **MIN_ROUNDS**: minimum research rounds. Defaults to `MIN_SEARCH_ROUNDS`.
 - **MAX_ROUNDS**: maximum research rounds. Defaults to `MAX_SEARCH_ROUNDS`.
+
+## New Search Reset
+The **New Search** control is always available in the header. It cancels any in-flight run, clears run state (agents, logs, report, progress flags), and preserves saved settings and API keys.
 
 ## Early Stop Thresholds
 Stored in `overseer_run_config`.
