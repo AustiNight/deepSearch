@@ -30,6 +30,7 @@ const callGemini = async (payload: { model: string; contents: any; config?: any 
     const res = await fetch(`${PROXY_BASE_URL}/api/gemini/generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: "include",
       body: JSON.stringify(payload),
       signal: options?.signal
     });

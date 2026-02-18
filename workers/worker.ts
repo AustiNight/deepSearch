@@ -39,12 +39,18 @@ const getCorsHeaders = (origin: string | null, env: Env) => {
     .split(",")
     .map((v) => v.trim())
     .filter(Boolean);
-  const allowOrigin = allowed.length === 0
-    ? "*"
-    : (origin && allowed.includes(origin) ? origin : allowed[0]);
+  let allowOrigin = "*";
+  if (origin) {
+    if (allowed.length === 0 || allowed.includes(origin)) {
+      allowOrigin = origin;
+    } else {
+      allowOrigin = allowed[0] || origin;
+    }
+  }
 
   return {
     "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Allow-Headers": [
       "Content-Type",
@@ -54,6 +60,7 @@ const getCorsHeaders = (origin: string | null, env: Env) => {
       ACCESS_EMAIL_HEADER,
     ].join(", "),
     "Access-Control-Expose-Headers": "ETag",
+    "Vary": "Origin",
   };
 };
 

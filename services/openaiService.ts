@@ -56,6 +56,7 @@ const requestOpenAI = async (body: Record<string, unknown>, options?: RequestOpt
     const res = await fetch(`${PROXY_BASE_URL}/api/openai/responses`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(body),
       signal: options?.signal
     });

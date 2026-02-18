@@ -21,7 +21,7 @@ export type UniversalSettingsUpdateResult =
   | { ok: false; status: number; error: string; data?: any };
 
 export const fetchUniversalSettings = async (): Promise<UniversalSettingsFetchResult> => {
-  const res = await fetch(buildSettingsUrl(), { method: 'GET' });
+  const res = await fetch(buildSettingsUrl(), { method: 'GET', credentials: 'include' });
   const data = await parseJson(res);
   if (!res.ok) {
     return {
@@ -46,6 +46,7 @@ export const updateUniversalSettings = async (
   const res = await fetch(buildSettingsUrl(), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(body),
   });
   const data = await parseJson(res);

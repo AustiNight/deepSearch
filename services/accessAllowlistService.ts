@@ -24,7 +24,7 @@ const parseJson = async (res: Response) => {
 };
 
 export const fetchAllowlist = async (): Promise<AllowlistResponse> => {
-  const res = await fetch(buildAllowlistUrl(), { method: 'GET' });
+  const res = await fetch(buildAllowlistUrl(), { method: 'GET', credentials: 'include' });
   const data = await parseJson(res);
   if (!res.ok) {
     const message = data?.error || `Allowlist fetch failed (${res.status}).`;
@@ -39,6 +39,7 @@ export const updateAllowlist = async (entries: string[], expectedUpdatedAt?: str
   const res = await fetch(buildAllowlistUrl(), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(body),
   });
   const data = await parseJson(res);
