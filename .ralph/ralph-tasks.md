@@ -14,13 +14,13 @@
   - [ ] Emit safe summary output (entry count + domain summary), never printing full emails or secrets
   - [ ] Acceptance: CI/CD script fetches the allowlist from the Worker, updates the Access policy, and exits non‑zero on stale or failed updates
 
-- [ ] Epic: Add an automated smoke test for allowlist endpoint + UI sync contract
-  - [ ] Add a script (e.g., `scripts/allowlist-smoke.mjs`) that:
-    - [ ] Calls `GET /api/access/allowlist` via `ALLOWLIST_ENDPOINT` and validates `entries`, `updatedAt`, and `count`
-    - [ ] Optionally performs a `PUT` update when `ALLOWLIST_SMOKE_UPDATE=1` using `expectedUpdatedAt` to verify optimistic concurrency
-    - [ ] Sends Access service token headers (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) when updating
-    - [ ] Emits a concise pass/fail summary without logging emails or secrets
-  - [ ] Add an `npm` script entry (e.g., `allowlist:smoke`) and document required env vars in the script header
-  - [ ] Add timeouts and explicit non‑zero exit codes for network/HTTP failures in the smoke test
-  - [ ] Wire `allowlist:smoke` into CI with a read‑only default (GET‑only) and a gated update mode
-  - [ ] Acceptance: running the smoke test with required env vars returns success on valid GET and fails on stale `expectedUpdatedAt`
+- [x] Epic: Add an automated smoke test for allowlist endpoint + UI sync contract
+  - [x] Add a script (e.g., `scripts/allowlist-smoke.mjs`) that:
+    - [x] Calls `GET /api/access/allowlist` via `ALLOWLIST_ENDPOINT` and validates `entries`, `updatedAt`, and `count`
+    - [x] Optionally performs a `PUT` update when `ALLOWLIST_SMOKE_UPDATE=1` using `expectedUpdatedAt` to verify optimistic concurrency
+    - [x] Sends Access service token headers (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) when updating
+    - [x] Emits a concise pass/fail summary without logging emails or secrets
+  - [x] Add an `npm` script entry (e.g., `allowlist:smoke`) and document required env vars in the script header
+  - [x] Add timeouts and explicit non‑zero exit codes for network/HTTP failures in the smoke test
+  - [x] Wire `allowlist:smoke` into CI with a read‑only default (GET‑only) and a gated update mode
+  - [x] Acceptance: running the smoke test with required env vars returns success on valid GET and fails on stale `expectedUpdatedAt`

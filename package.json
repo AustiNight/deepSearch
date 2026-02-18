@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "vertical-logic:generate": "node scripts/vertical-logic-table.mjs",
     "vertical-logic:check": "node scripts/vertical-logic-table.mjs --check",
-    "transparency:check": "node scripts/transparency-layout-check.mjs"
+    "transparency:check": "node scripts/transparency-layout-check.mjs",
+    "allowlist:smoke": "node scripts/allowlist-smoke.mjs"
   },
   "dependencies": {
     "framer-motion": "^12.34.0",
