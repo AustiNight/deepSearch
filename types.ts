@@ -165,6 +165,34 @@ export interface Skill {
 
 export type LLMProvider = 'google' | 'openai';
 
+export type SourceProvider = 'openai' | 'google' | 'system' | 'unknown';
+
+export type SourceKind = 'web' | 'citation' | 'unknown';
+
+export interface NormalizedSource {
+  uri: string;
+  title: string;
+  domain: string;
+  provider: SourceProvider;
+  kind: SourceKind;
+  snippet?: string;
+}
+
+export interface SourceNormalizationDiagnostics {
+  provider: SourceProvider;
+  toolUsage: string[];
+  rawSourceCount: number;
+  normalizedSourceCount: number;
+  dedupedCount: number;
+  parseErrors: string[];
+  fallbackUsed: boolean;
+}
+
+export interface SourceNormalizationResult {
+  sources: NormalizedSource[];
+  diagnostics: SourceNormalizationDiagnostics;
+}
+
 export type ModelRole =
   | 'overseer_planning'
   | 'method_discovery'

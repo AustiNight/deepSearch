@@ -1,8 +1,20 @@
-import type { ModelOverrides, ModelRole, Skill } from "../types";
+import type {
+  ModelOverrides,
+  ModelRole,
+  NormalizedSource,
+  Skill,
+  SourceNormalizationDiagnostics
+} from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
 import { coerceReportData } from "./reportFormatter";
 import { getOpenAIModelDefaults, resolveModelForRole } from "./modelOverrides";
+import {
+  formatSourceDiagnosticsMessage,
+  normalizeOpenAIResponseSources,
+  normalizeSourcesFromText,
+  recordEmptySources
+} from "./sourceNormalization";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
@@ -83,35 +95,12 @@ const extractOutputText = (resp: any): string => {
   return parts.join("");
 };
 
-const extractSources = (resp: any): { title: string; uri: string }[] => {
-  const sources = new Map<string, { title: string; uri: string }>();
-  const output = Array.isArray(resp?.output) ? resp.output : [];
-
-  for (const item of output) {
-    if (item?.type === "message" && Array.isArray(item?.content)) {
-      for (const part of item.content) {
-        const annotations = Array.isArray(part?.annotations) ? part.annotations : [];
-        for (const ann of annotations) {
-          if (ann?.type === "url_citation" && typeof ann?.url === "string") {
-            const uri = ann.url;
-            const title = typeof ann.title === "string" ? ann.title : uri;
-            sources.set(uri, { title, uri });
-          }
-        }
-      }
-    }
-
-    if (item?.type === "web_search_call" && Array.isArray(item?.action?.sources)) {
-      for (const src of item.action.sources) {
-        const uri = src?.url || src?.uri;
-        if (typeof uri !== "string") continue;
-        const title = typeof src?.title === "string" ? src.title : uri;
-        sources.set(uri, { title, uri });
-      }
-    }
-  }
-
-  return Array.from(sources.values());
+const logSourceDiagnostics = (
+  logCallback: ((msg: string) => void) | undefined,
+  input: { model: string; query: string; diagnostics: SourceNormalizationDiagnostics }
+) => {
+  if (!logCallback) return;
+  logCallback(formatSourceDiagnosticsMessage(input));
 };
 
 const supportsJsonSchema = (model: string) => {
@@ -397,7 +386,12 @@ export const generateSectorAnalysis = async (topic: string, skills: Skill[] = []
 };
 
 // --- PHASE 2: RECURSIVE DEEP DRILL ---
-const singleSearch = async (query: string, context: string, model: string): Promise<{ text: string, sources: any[] }> => {
+const singleSearch = async (
+  query: string,
+  context: string,
+  model: string,
+  logCallback?: (msg: string) => void
+): Promise<{ text: string; sources: NormalizedSource[] }> => {
   if (!openAIKey) throw new Error("OpenAI not initialized");
   try {
     const response = await requestOpenAI({
@@ -408,7 +402,38 @@ const singleSearch = async (query: string, context: string, model: string): Prom
     });
 
     const text = extractOutputText(response);
-    const sources = extractSources(response);
+    const normalization = normalizeOpenAIResponseSources(response);
+    let sources = normalization.sources;
+    let fallbackDiagnostics: SourceNormalizationDiagnostics | null = null;
+
+    if (sources.length === 0 && text) {
+      const fallback = normalizeSourcesFromText(text, "openai");
+      if (fallback.sources.length > 0) {
+        sources = fallback.sources;
+        fallbackDiagnostics = fallback.diagnostics;
+        normalization.diagnostics.fallbackUsed = true;
+      }
+    }
+
+    logSourceDiagnostics(logCallback, {
+      model,
+      query,
+      diagnostics: normalization.diagnostics
+    });
+
+    if (fallbackDiagnostics) {
+      logSourceDiagnostics(logCallback, {
+        model,
+        query,
+        diagnostics: fallbackDiagnostics
+      });
+    }
+
+    if (sources.length === 0 && text) {
+      logCallback?.(`Warning: OpenAI model "${model}" returned text without sources for "${query}".`);
+      recordEmptySources({ provider: "openai", model, query });
+    }
+
     return { text, sources };
   } catch (e) {
     console.warn(`Search failed for ${query}`, e);
@@ -443,7 +468,8 @@ export const performDeepResearch = async (
   const level1 = await singleSearch(
     initialQuery,
     `Current Date: ${currentDate}. Agent: ${agentName}. Focus: ${focus}`,
-    l1Model
+    l1Model,
+    logCallback
   );
 
   if (!level1.text) return { text: "Search failed.", sources: [] };
@@ -475,7 +501,7 @@ export const performDeepResearch = async (
   // Step 3: Execute Parallel Drill-Downs
   logCallback(`Level 2 Drill-Down: Executing ${drillQueries.length} verification searches...`);
   const level2Results = await Promise.all(
-    drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`, l2Model))
+    drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`, l2Model, logCallback))
   );
 
   // Step 4: Synthesize Findings

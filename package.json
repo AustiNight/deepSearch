@@ -11,6 +11,7 @@
     "vertical-logic:check": "node scripts/vertical-logic-table.mjs --check",
     "transparency:check": "node scripts/transparency-layout-check.mjs",
     "allowlist:smoke": "node scripts/allowlist-smoke.mjs",
+    "test:sources": "node scripts/source-normalization.test.mjs",
     "test:ui": "playwright test"
   },
   "dependencies": {

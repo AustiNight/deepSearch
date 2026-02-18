@@ -1092,7 +1092,13 @@ export const useOverseer = () => {
         'success'
       );
 
-      const testSource = { uri: 'https://example.com/system-test' };
+      const testSource = {
+        uri: 'https://example.com/system-test',
+        title: 'System Test Source',
+        domain: 'example.com',
+        provider: 'system',
+        kind: 'web'
+      };
       const testFinding: Finding = {
         source: 'System Test Researcher',
         content: 'System test search executed with minimal tokens.',

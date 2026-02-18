@@ -1,0 +1,155 @@
+{
+  "openai_annotations": {
+    "response": {
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Apollo 11 landed in 1969.",
+              "annotations": [
+                {
+                  "type": "url_citation",
+                  "url": "https://www.nasa.gov/mission/apollo-11",
+                  "title": "Apollo 11 Mission"
+                },
+                {
+                  "type": "url_citation",
+                  "url": "https://www.nasa.gov/mission/apollo-11?utm_source=demo",
+                  "title": "Apollo 11 Mission (Tracking)"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "openai_web_search_call": {
+    "response": {
+      "output": [
+        {
+          "type": "web_search_call",
+          "action": {
+            "sources": [
+              {
+                "url": "https://history.nasa.gov/ap11ann/",
+                "title": "Apollo 11 Anniversary",
+                "snippet": "NASA history archive"
+              },
+              {
+                "uri": "https://www.archives.gov/milestone-documents/apollo-11",
+                "title": "National Archives Apollo 11"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "gemini_grounding": {
+    "response": {
+      "text": "Apollo 11 mission details.",
+      "candidates": [
+        {
+          "groundingMetadata": {
+            "groundingChunks": [
+              {
+                "web": {
+                  "uri": "https://www.nasa.gov/mission/apollo-11",
+                  "title": "Apollo 11 Mission",
+                  "snippet": "Mission overview"
+                }
+              },
+              {
+                "web": {
+                  "uri": "https://www.archives.gov/milestone-documents/apollo-11",
+                  "title": "Apollo 11 National Archives"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "gemini_missing_title": {
+    "response": {
+      "text": "Apollo 11 mission details.",
+      "candidates": [
+        {
+          "groundingMetadata": {
+            "groundingChunks": [
+              {
+                "web": {
+                  "uri": "https://www.jpl.nasa.gov/mission/apollo-11"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "stable_topic_openai": {
+    "model": "gpt-4.1-mini",
+    "response": {
+      "output": [
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Apollo 11 landed on July 20, 1969.",
+              "annotations": [
+                {
+                  "type": "url_citation",
+                  "url": "https://www.nasa.gov/mission/apollo-11",
+                  "title": "Apollo 11 Mission"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "web_search_call",
+          "action": {
+            "sources": [
+              {
+                "url": "https://history.nasa.gov/ap11ann/",
+                "title": "Apollo 11 Anniversary"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "stable_topic_gemini": {
+    "model": "gemini-3-flash-preview",
+    "response": {
+      "text": "Apollo 11 landed on July 20, 1969.",
+      "candidates": [
+        {
+          "groundingMetadata": {
+            "groundingChunks": [
+              {
+                "web": {
+                  "uri": "https://www.nasa.gov/mission/apollo-11",
+                  "title": "Apollo 11 Mission"
+                }
+              },
+              {
+                "web": {
+                  "uri": "https://history.nasa.gov/ap11ann/",
+                  "title": "Apollo 11 Anniversary"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

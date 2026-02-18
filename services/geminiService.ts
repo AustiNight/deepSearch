@@ -1,9 +1,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GEMINI_MODEL_FAST, GEMINI_MODEL_REASONING } from "../constants";
-import { Skill } from "../types";
+import type { NormalizedSource, Skill, SourceNormalizationDiagnostics } from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
 import { coerceReportData } from "./reportFormatter";
+import {
+  formatSourceDiagnosticsMessage,
+  normalizeGeminiResponseSources,
+  normalizeSourcesFromText,
+  recordEmptySources
+} from "./sourceNormalization";
 
 const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
 const USE_PROXY = PROXY_BASE_URL.length > 0;
@@ -385,31 +391,81 @@ export const generateSectorAnalysis = async (topic: string, skills: Skill[] = []
 // --- PHASE 2: RECURSIVE DEEP DRILL ---
 const searchToolConfig = { tools: [{ googleSearch: {} }] };
 
-const singleSearch = async (query: string, context: string = ""): Promise<{ text: string, sources: any[] }> => {
+const logSourceDiagnostics = (
+  logCallback: ((msg: string) => void) | undefined,
+  input: { model: string; query: string; diagnostics: SourceNormalizationDiagnostics }
+) => {
+  if (!logCallback) return;
+  logCallback(formatSourceDiagnosticsMessage(input));
+};
+
+const singleSearch = async (
+  query: string,
+  context: string = "",
+  logCallback?: (msg: string) => void
+): Promise<{ text: string; sources: NormalizedSource[] }> => {
     try {
         const response = await callGemini({
             model: GEMINI_MODEL_FAST,
             contents: `Context: ${context}\n\nTask: Search for "${query}".\nExtract hard data, dates, and specific names.`,
             config: searchToolConfig
         });
-        
-        const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks
-            ?.map((c: any) => c.web ? { title: c.web.title, uri: c.web.uri } : null)
-            .filter(Boolean) || [];
-            
-        return { text: response.text || "", sources };
+
+        const text = response.text || "";
+        const normalization = normalizeGeminiResponseSources(response);
+        let sources = normalization.sources;
+        let fallbackDiagnostics: SourceNormalizationDiagnostics | null = null;
+
+        if (sources.length === 0 && text) {
+          const fallback = normalizeSourcesFromText(text, "google");
+          if (fallback.sources.length > 0) {
+            sources = fallback.sources;
+            fallbackDiagnostics = fallback.diagnostics;
+            normalization.diagnostics.fallbackUsed = true;
+          }
+        }
+
+        logSourceDiagnostics(logCallback, {
+          model: GEMINI_MODEL_FAST,
+          query,
+          diagnostics: normalization.diagnostics
+        });
+
+        if (fallbackDiagnostics) {
+          logSourceDiagnostics(logCallback, {
+            model: GEMINI_MODEL_FAST,
+            query,
+            diagnostics: fallbackDiagnostics
+          });
+        }
+
+        if (sources.length === 0 && text) {
+          logCallback?.(`Warning: Gemini model \"${GEMINI_MODEL_FAST}\" returned text without sources for \"${query}\".`);
+          recordEmptySources({ provider: "google", model: GEMINI_MODEL_FAST, query });
+        }
+
+        return { text, sources };
     } catch (e) {
         console.warn(`Search failed for ${query}`, e);
         return { text: "", sources: [] };
     }
 };
 
-export const performDeepResearch = async (agentName: string, focus: string, initialQuery: string, logCallback: (msg: string) => void) => {
+export const performDeepResearch = async (
+  agentName: string,
+  focus: string,
+  initialQuery: string,
+  logCallback: (msg: string) => void
+) => {
     const currentDate = new Date().toDateString();
     
     // Step 1: Broad Search
     logCallback(`Initiating Level 1 Scan: "${initialQuery}"`);
-    const level1 = await singleSearch(initialQuery, `Current Date: ${currentDate}. Agent: ${agentName}. Focus: ${focus}`);
+    const level1 = await singleSearch(
+      initialQuery,
+      `Current Date: ${currentDate}. Agent: ${agentName}. Focus: ${focus}`,
+      logCallback
+    );
     
     if (!level1.text) return { text: "Search failed.", sources: [] };
 
@@ -453,7 +509,7 @@ export const performDeepResearch = async (agentName: string, focus: string, init
     // Step 3: Execute Parallel Drill-Downs
     logCallback(`Level 2 Drill-Down: Executing ${drillQueries.length} verification searches...`);
     const level2Results = await Promise.all(
-        drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`))
+        drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`, logCallback))
     );
 
     // Step 4: Synthesize Findings

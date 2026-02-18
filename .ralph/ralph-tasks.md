@@ -1,16 +1,16 @@
 # Ralph Tasks
 
-- [ ] Epic: Fix default LLM models returning 0 sources
-  - [ ] Define a canonical `sources` schema (provider‑agnostic fields, normalization rules, and dedupe strategy)
-  - [ ] Implement a normalization layer for OpenAI + Gemini to convert raw tool responses into the canonical `sources` schema
-  - [ ] Add provider instrumentation: log tool usage, raw source counts, normalized source counts, and any parsing failures per run
-  - [ ] Reproduce with each default model in Settings (OpenAI + Gemini) and capture which provider/model pairs return empty sources
-  - [ ] Trace source extraction paths for both providers (OpenAI Responses + Gemini generateContent) and verify the `sources` payload is populated end‑to‑end
-  - [ ] Audit web search tool usage and source parsing to ensure citations/sources are surfaced (e.g., annotations, `web_search_call`, Gemini candidates)
-  - [ ] Add guardrails: if a provider returns text without sources, attempt a fallback retrieval path or provide a clear diagnostic message
-  - [ ] Add a deterministic fixture test (mock provider responses / fixed web-search fixture) that verifies non‑empty sources for default models on a stable topic
-  - [ ] Add provider snapshot tests to validate normalization across OpenAI + Gemini payload variants
-  - [ ] Acceptance: running a default model search returns >0 sources for a stable test topic and logs sources in the report UI with normalized sources visible
+- [x] Epic: Fix default LLM models returning 0 sources
+  - [x] Define a canonical `sources` schema (provider‑agnostic fields, normalization rules, and dedupe strategy)
+  - [x] Implement a normalization layer for OpenAI + Gemini to convert raw tool responses into the canonical `sources` schema
+  - [x] Add provider instrumentation: log tool usage, raw source counts, normalized source counts, and any parsing failures per run
+  - [x] Reproduce with each default model in Settings (OpenAI + Gemini) and capture which provider/model pairs return empty sources
+  - [x] Trace source extraction paths for both providers (OpenAI Responses + Gemini generateContent) and verify the `sources` payload is populated end‑to‑end
+  - [x] Audit web search tool usage and source parsing to ensure citations/sources are surfaced (e.g., annotations, `web_search_call`, Gemini candidates)
+  - [x] Add guardrails: if a provider returns text without sources, attempt a fallback retrieval path or provide a clear diagnostic message
+  - [x] Add a deterministic fixture test (mock provider responses / fixed web-search fixture) that verifies non‑empty sources for default models on a stable topic
+  - [x] Add provider snapshot tests to validate normalization across OpenAI + Gemini payload variants
+  - [x] Acceptance: running a default model search returns >0 sources for a stable test topic and logs sources in the report UI with normalized sources visible
 
 - [ ] Epic: Always-available “New Search” reset button
   - [ ] Add a persistent “New Search” control in the primary UI (visible even during errors or ongoing runs)

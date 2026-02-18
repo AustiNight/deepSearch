@@ -1,0 +1,54 @@
+{
+  "openai_annotations": [
+    {
+      "uri": "https://www.nasa.gov/mission/apollo-11",
+      "title": "Apollo 11 Mission",
+      "domain": "nasa.gov",
+      "provider": "openai",
+      "kind": "citation"
+    }
+  ],
+  "openai_web_search_call": [
+    {
+      "uri": "https://history.nasa.gov/ap11ann/",
+      "title": "Apollo 11 Anniversary",
+      "domain": "history.nasa.gov",
+      "provider": "openai",
+      "kind": "web",
+      "snippet": "NASA history archive"
+    },
+    {
+      "uri": "https://www.archives.gov/milestone-documents/apollo-11",
+      "title": "National Archives Apollo 11",
+      "domain": "archives.gov",
+      "provider": "openai",
+      "kind": "web"
+    }
+  ],
+  "gemini_grounding": [
+    {
+      "uri": "https://www.nasa.gov/mission/apollo-11",
+      "title": "Apollo 11 Mission",
+      "domain": "nasa.gov",
+      "provider": "google",
+      "kind": "web",
+      "snippet": "Mission overview"
+    },
+    {
+      "uri": "https://www.archives.gov/milestone-documents/apollo-11",
+      "title": "Apollo 11 National Archives",
+      "domain": "archives.gov",
+      "provider": "google",
+      "kind": "web"
+    }
+  ],
+  "gemini_missing_title": [
+    {
+      "uri": "https://www.jpl.nasa.gov/mission/apollo-11",
+      "title": "jpl.nasa.gov",
+      "domain": "jpl.nasa.gov",
+      "provider": "google",
+      "kind": "web"
+    }
+  ]
+}
