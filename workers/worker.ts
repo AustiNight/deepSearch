@@ -5,6 +5,7 @@ export interface Env {
   GEMINI_API_KEY: string;
   ALLOWED_ORIGINS?: string;
   ACCESS_ALLOWLIST_KV: KVNamespace;
+  SETTINGS_KV: KVNamespace;
   ALLOWLIST_ADMIN_EMAILS?: string;
   CF_API_TOKEN?: string;
   CF_ACCOUNT_ID?: string;
@@ -23,9 +24,13 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 };
 
 const ACCESS_ALLOWLIST_KEY = "access_allowlist";
+const SETTINGS_KEY_PREFIX = "user_settings:";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const MAX_ALLOWLIST_ENTRIES = 500;
 const MAX_ALLOWLIST_BODY_BYTES = 50_000;
+const MAX_SETTINGS_BODY_BYTES = 50_000;
+const SETTINGS_SCHEMA_VERSION = 1;
 const ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion";
 const ACCESS_EMAIL_HEADER = "Cf-Access-Authenticated-User-Email";
 
@@ -59,6 +64,61 @@ type AllowlistRecord = {
   version: number;
 };
 
+type RunConfig = {
+  minAgents: number;
+  maxAgents: number;
+  maxMethodAgents: number;
+  forceExhaustion: boolean;
+  minRounds: number;
+  maxRounds: number;
+  earlyStopDiminishingScore: number;
+  earlyStopNoveltyRatio: number;
+  earlyStopNewDomains: number;
+  earlyStopNewSources: number;
+};
+
+type SettingsPayload = {
+  schemaVersion: number;
+  provider: "google" | "openai";
+  runConfig: RunConfig;
+  modelOverrides: Record<string, string>;
+  accessAllowlist: string[];
+};
+
+type SettingsRecord = {
+  settings: SettingsPayload;
+  updatedAt: string;
+  updatedBy: string;
+  version: number;
+};
+
+const MODEL_ROLES = [
+  "overseer_planning",
+  "method_discovery",
+  "sector_analysis",
+  "deep_research_l1",
+  "deep_research_l2",
+  "method_audit",
+  "gap_hunter",
+  "exhaustion_scout",
+  "critique",
+  "synthesis",
+  "validation",
+];
+
+const RUN_CONFIG_DEFAULTS: RunConfig = {
+  minAgents: 8,
+  maxAgents: 20,
+  maxMethodAgents: 8,
+  forceExhaustion: false,
+  minRounds: 1,
+  maxRounds: 2,
+  earlyStopDiminishingScore: 0.75,
+  earlyStopNoveltyRatio: 0.25,
+  earlyStopNewDomains: 1,
+  earlyStopNewSources: 3,
+};
+
 const getAdminEmails = (env: Env) => {
   const raw = (env.ALLOWLIST_ADMIN_EMAILS || "")
     .split(",")
@@ -90,6 +150,95 @@ const normalizeAllowlistEntries = (rawEntries: unknown) => {
     entries.push(value);
   }
   return { entries, invalid, error: "" };
+};
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const toNumber = (value: unknown, fallback: number) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const normalizeRunConfig = (rawConfig: unknown): RunConfig => {
+  const base = (rawConfig && typeof rawConfig === "object") ? (rawConfig as Record<string, unknown>) : {};
+  const minAgents = Math.max(1, Math.floor(toNumber(base.minAgents, RUN_CONFIG_DEFAULTS.minAgents)));
+  const maxAgents = Math.max(minAgents, Math.floor(toNumber(base.maxAgents, RUN_CONFIG_DEFAULTS.maxAgents)));
+  const maxMethodAgents = Math.max(1, Math.floor(toNumber(base.maxMethodAgents, RUN_CONFIG_DEFAULTS.maxMethodAgents)));
+  const minRounds = Math.max(1, Math.floor(toNumber(base.minRounds, RUN_CONFIG_DEFAULTS.minRounds)));
+  const maxRounds = Math.max(minRounds, Math.floor(toNumber(base.maxRounds, RUN_CONFIG_DEFAULTS.maxRounds)));
+
+  const earlyStopDiminishingScore = clamp(
+    toNumber(base.earlyStopDiminishingScore, RUN_CONFIG_DEFAULTS.earlyStopDiminishingScore),
+    0,
+    1
+  );
+  const earlyStopNoveltyRatio = clamp(
+    toNumber(base.earlyStopNoveltyRatio, RUN_CONFIG_DEFAULTS.earlyStopNoveltyRatio),
+    0,
+    1
+  );
+  const earlyStopNewDomains = Math.max(
+    0,
+    Math.floor(toNumber(base.earlyStopNewDomains, RUN_CONFIG_DEFAULTS.earlyStopNewDomains))
+  );
+  const earlyStopNewSources = Math.max(
+    0,
+    Math.floor(toNumber(base.earlyStopNewSources, RUN_CONFIG_DEFAULTS.earlyStopNewSources))
+  );
+
+  return {
+    minAgents,
+    maxAgents,
+    maxMethodAgents,
+    forceExhaustion: base.forceExhaustion === true,
+    minRounds,
+    maxRounds,
+    earlyStopDiminishingScore,
+    earlyStopNoveltyRatio,
+    earlyStopNewDomains,
+    earlyStopNewSources,
+  };
+};
+
+const normalizeModelOverrides = (rawOverrides: unknown) => {
+  if (!rawOverrides || typeof rawOverrides !== "object") return {};
+  const overrides = rawOverrides as Record<string, unknown>;
+  const sanitized: Record<string, string> = {};
+  for (const role of MODEL_ROLES) {
+    const value = overrides[role];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed || !MODEL_NAME_PATTERN.test(trimmed)) continue;
+    sanitized[role] = trimmed;
+  }
+  return sanitized;
+};
+
+const normalizeSettingsPayload = (rawPayload: unknown) => {
+  if (!rawPayload || typeof rawPayload !== "object") {
+    return { error: "settings payload required." };
+  }
+  const payload = rawPayload as Record<string, unknown>;
+  const schemaVersion = Number(payload.schemaVersion ?? SETTINGS_SCHEMA_VERSION);
+  if (schemaVersion !== SETTINGS_SCHEMA_VERSION) {
+    return { error: "Unsupported settings schema version." };
+  }
+  const provider = payload.provider === "openai" ? "openai" : "google";
+  const runConfig = normalizeRunConfig(payload.runConfig);
+  const modelOverrides = normalizeModelOverrides(payload.modelOverrides);
+  const allowlistRaw = Array.isArray(payload.accessAllowlist) ? payload.accessAllowlist : [];
+  const allowlistParsed = normalizeAllowlistEntries(allowlistRaw);
+  if (allowlistParsed.entries.length > MAX_ALLOWLIST_ENTRIES) {
+    return { error: `Allowlist exceeds ${MAX_ALLOWLIST_ENTRIES} entries.` };
+  }
+  const settings: SettingsPayload = {
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
+    provider,
+    runConfig,
+    modelOverrides,
+    accessAllowlist: allowlistParsed.entries,
+  };
+  return { settings };
 };
 
 const summarizeDomains = (entries: string[], max = 5) => {
@@ -237,9 +386,9 @@ const updateAccessPolicy = async (env: Env, entries: string[]) => {
   }
 };
 
-const readJsonBody = async (request: Request) => {
+const readJsonBody = async (request: Request, maxBytes: number) => {
   const text = await request.text();
-  if (text.length > MAX_ALLOWLIST_BODY_BYTES) {
+  if (text.length > maxBytes) {
     return { error: "Request body too large." };
   }
   try {
@@ -291,7 +440,7 @@ export default {
         return json({ error: "Not authorized to update allowlist." }, 403, corsHeaders);
       }
 
-      const { data, error } = await readJsonBody(request);
+      const { data, error } = await readJsonBody(request, MAX_ALLOWLIST_BODY_BYTES);
       if (error) {
         return json({ error }, 400, corsHeaders);
       }
@@ -354,6 +503,102 @@ export default {
         version: record.version,
         count: record.entries.length,
         policyUpdated: true,
+      }, 200, corsHeaders);
+    }
+
+    if (url.pathname === "/api/settings") {
+      if (request.method !== "GET" && request.method !== "PUT") {
+        return json({ error: "Method not allowed" }, 405, corsHeaders);
+      }
+
+      const accessJwt = request.headers.get(ACCESS_JWT_HEADER);
+      const accessEmail = request.headers.get(ACCESS_EMAIL_HEADER)?.toLowerCase() || "";
+      if (!accessJwt || !accessEmail) {
+        return json({ error: "Access authentication required." }, 401, corsHeaders);
+      }
+
+      const storageKey = `${SETTINGS_KEY_PREFIX}${accessEmail}`;
+
+      if (request.method === "GET") {
+        const stored = await env.SETTINGS_KV.get<SettingsRecord>(storageKey, "json");
+        const responseBody = {
+          settings: stored?.settings || null,
+          updatedAt: stored?.updatedAt || null,
+          updatedBy: stored?.updatedBy || null,
+          version: stored?.version || 0,
+        };
+        const headers = {
+          ...corsHeaders,
+          "ETag": stored?.updatedAt || "",
+        };
+        return json(responseBody, 200, headers);
+      }
+
+      const { data, error } = await readJsonBody(request, MAX_SETTINGS_BODY_BYTES);
+      if (error) {
+        return json({ error }, 400, corsHeaders);
+      }
+
+      const expectedUpdatedAt = (data?.expectedUpdatedAt || request.headers.get("If-Match") || "").trim();
+      const expectedVersionRaw = data?.expectedVersion;
+      const expectedVersion = Number.isFinite(Number(expectedVersionRaw)) ? Number(expectedVersionRaw) : null;
+      const stored = await env.SETTINGS_KV.get<SettingsRecord>(storageKey, "json");
+
+      if (stored?.updatedAt && !expectedUpdatedAt && expectedVersion === null) {
+        return json({
+          error: "expectedUpdatedAt or expectedVersion is required for updates.",
+          updatedAt: stored.updatedAt,
+          version: stored.version,
+        }, 428, corsHeaders);
+      }
+
+      if (stored?.updatedAt) {
+        if (expectedUpdatedAt && stored.updatedAt !== expectedUpdatedAt) {
+          return json({
+            error: "Settings have been updated since last fetch.",
+            updatedAt: stored.updatedAt,
+            updatedBy: stored.updatedBy,
+            version: stored.version,
+            settings: stored.settings,
+          }, 409, corsHeaders);
+        }
+        if (expectedVersion !== null && stored.version !== expectedVersion) {
+          return json({
+            error: "Settings version mismatch.",
+            updatedAt: stored.updatedAt,
+            updatedBy: stored.updatedBy,
+            version: stored.version,
+            settings: stored.settings,
+          }, 409, corsHeaders);
+        }
+      }
+
+      const { settings, error: settingsError } = normalizeSettingsPayload(data?.settings);
+      if (settingsError) {
+        return json({ error: settingsError }, 400, corsHeaders);
+      }
+
+      const updatedAt = new Date().toISOString();
+      const record: SettingsRecord = {
+        settings: settings as SettingsPayload,
+        updatedAt,
+        updatedBy: accessEmail,
+        version: (stored?.version || 0) + 1,
+      };
+      await env.SETTINGS_KV.put(storageKey, JSON.stringify(record));
+      console.log("Settings updated.", {
+        email: accessEmail,
+        version: record.version,
+        provider: record.settings.provider,
+        modelOverrides: Object.keys(record.settings.modelOverrides || {}).length,
+        allowlist: record.settings.accessAllowlist?.length || 0,
+      });
+
+      return json({
+        settings: record.settings,
+        updatedAt: record.updatedAt,
+        updatedBy: record.updatedBy,
+        version: record.version,
       }, 200, corsHeaders);
     }
 

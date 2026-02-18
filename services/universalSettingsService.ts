@@ -1,0 +1,61 @@
+import type { UniversalSettingsPayload, UniversalSettingsResponse } from '../types';
+
+const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
+
+const buildSettingsUrl = () => `${PROXY_BASE_URL}/api/settings`;
+
+const parseJson = async (res: Response) => {
+  try {
+    return await res.json();
+  } catch (_) {
+    return null;
+  }
+};
+
+export type UniversalSettingsFetchResult =
+  | { ok: true; data: UniversalSettingsResponse }
+  | { ok: false; status: number; error: string; data?: any };
+
+export type UniversalSettingsUpdateResult =
+  | { ok: true; data: UniversalSettingsResponse }
+  | { ok: false; status: number; error: string; data?: any };
+
+export const fetchUniversalSettings = async (): Promise<UniversalSettingsFetchResult> => {
+  const res = await fetch(buildSettingsUrl(), { method: 'GET' });
+  const data = await parseJson(res);
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      error: data?.error || `Settings fetch failed (${res.status}).`,
+      data,
+    };
+  }
+  return { ok: true, data: data as UniversalSettingsResponse };
+};
+
+export const updateUniversalSettings = async (
+  payload: UniversalSettingsPayload,
+  expectedUpdatedAt?: string | null,
+  expectedVersion?: number | null
+): Promise<UniversalSettingsUpdateResult> => {
+  const body: Record<string, unknown> = { settings: payload };
+  if (expectedUpdatedAt) body.expectedUpdatedAt = expectedUpdatedAt;
+  if (typeof expectedVersion === 'number') body.expectedVersion = expectedVersion;
+
+  const res = await fetch(buildSettingsUrl(), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await parseJson(res);
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      error: data?.error || `Settings update failed (${res.status}).`,
+      data,
+    };
+  }
+  return { ok: true, data: data as UniversalSettingsResponse };
+};

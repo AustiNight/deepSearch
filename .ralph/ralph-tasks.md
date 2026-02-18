@@ -23,7 +23,7 @@
   - [x] Ensure the reset does not clear saved settings or API keys
   - [x] Acceptance: user can abort or recover from any state by clicking “New Search” and immediately start a fresh run
 
-- [ ] Epic: Universal settings sync (cross-device) + Save behavior
+- [x] Epic: Universal settings sync (cross-device) + Save behavior
   - [ ] Verify current Save behavior and identify why the dialog remains open
   - [ ] Ensure Save persists settings and closes the modal on success
   - [ ] If Save fails, keep the modal open and show a clear error status

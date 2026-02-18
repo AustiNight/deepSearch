@@ -5,11 +5,14 @@ import { AgentGraph } from './components/AgentGraph';
 import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
 import { TransparencyPanel } from './components/TransparencyPanel';
-import { LLMProvider, ModelOverrides, ModelRole } from './types';
+import { LLMProvider, ModelOverrides, ModelRole, RunConfig, UniversalSettingsPayload } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
 import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistService';
+import { fetchUniversalSettings, updateUniversalSettings } from './services/universalSettingsService';
+import { buildUniversalSettingsPayload, normalizeUniversalSettingsPayload } from './services/universalSettingsPayload';
 import { isSystemTestTopic } from './data/verticalLogic';
 import {
+  MODEL_OVERRIDE_STORAGE_KEY,
   MIN_AGENT_COUNT,
   MAX_AGENT_COUNT,
   MAX_METHOD_AGENTS,
@@ -49,11 +52,29 @@ const ENV_EARLY_STOP_NOVELTY = parseEnvFloat(process.env.EARLY_STOP_NOVELTY_RATI
 const ENV_EARLY_STOP_NEW_DOMAINS = parseEnvNumber(process.env.EARLY_STOP_NEW_DOMAINS, EARLY_STOP_NEW_DOMAINS);
 const ENV_EARLY_STOP_NEW_SOURCES = parseEnvNumber(process.env.EARLY_STOP_NEW_SOURCES, EARLY_STOP_NEW_SOURCES);
 
+const DEFAULT_RUN_CONFIG: RunConfig = {
+  minAgents: ENV_MIN_AGENTS,
+  maxAgents: ENV_MAX_AGENTS,
+  maxMethodAgents: ENV_MAX_METHOD_AGENTS,
+  forceExhaustion: false,
+  minRounds: ENV_MIN_ROUNDS,
+  maxRounds: ENV_MAX_ROUNDS,
+  earlyStopDiminishingScore: ENV_EARLY_STOP_DIMINISHING,
+  earlyStopNoveltyRatio: ENV_EARLY_STOP_NOVELTY,
+  earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
+  earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
+};
+
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const isModelNameValid = (value: string) => MODEL_NAME_PATTERN.test(value.trim());
 
 const ACCESS_ALLOWLIST_STORAGE_KEY = 'overseer_access_allowlist';
 const ACCESS_ALLOWLIST_UPDATED_AT_KEY = 'overseer_access_allowlist_updated_at';
+const SETTINGS_UPDATED_AT_KEY = 'overseer_settings_updated_at';
+const SETTINGS_UPDATED_BY_KEY = 'overseer_settings_updated_by';
+const SETTINGS_VERSION_KEY = 'overseer_settings_version';
+const SETTINGS_LOCAL_UPDATED_AT_KEY = 'overseer_settings_local_updated_at';
+const SETTINGS_MIGRATION_KEY = 'overseer_settings_migrated';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const OPENAI_MODEL_SUGGESTIONS = [
@@ -112,55 +133,11 @@ const App: React.FC = () => {
   const [topic, setTopic] = useState('');
   const [provider, setProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
   const [keyOverrides, setKeyOverrides] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
-  const [runConfig, setRunConfig] = useState<{
-    minAgents: number;
-    maxAgents: number;
-    maxMethodAgents: number;
-    forceExhaustion: boolean;
-    minRounds: number;
-    maxRounds: number;
-    earlyStopDiminishingScore: number;
-    earlyStopNoveltyRatio: number;
-    earlyStopNewDomains: number;
-    earlyStopNewSources: number;
-  }>({
-    minAgents: ENV_MIN_AGENTS,
-    maxAgents: ENV_MAX_AGENTS,
-    maxMethodAgents: ENV_MAX_METHOD_AGENTS,
-    forceExhaustion: false,
-    minRounds: ENV_MIN_ROUNDS,
-    maxRounds: ENV_MAX_ROUNDS,
-    earlyStopDiminishingScore: ENV_EARLY_STOP_DIMINISHING,
-    earlyStopNoveltyRatio: ENV_EARLY_STOP_NOVELTY,
-    earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
-    earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
-  });
+  const [runConfig, setRunConfig] = useState<RunConfig>({ ...DEFAULT_RUN_CONFIG });
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
   const [draftProvider, setDraftProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
   const [draftKeys, setDraftKeys] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
-  const [draftRunConfig, setDraftRunConfig] = useState<{
-    minAgents: number;
-    maxAgents: number;
-    maxMethodAgents: number;
-    forceExhaustion: boolean;
-    minRounds: number;
-    maxRounds: number;
-    earlyStopDiminishingScore: number;
-    earlyStopNoveltyRatio: number;
-    earlyStopNewDomains: number;
-    earlyStopNewSources: number;
-  }>({
-    minAgents: ENV_MIN_AGENTS,
-    maxAgents: ENV_MAX_AGENTS,
-    maxMethodAgents: ENV_MAX_METHOD_AGENTS,
-    forceExhaustion: false,
-    minRounds: ENV_MIN_ROUNDS,
-    maxRounds: ENV_MAX_ROUNDS,
-    earlyStopDiminishingScore: ENV_EARLY_STOP_DIMINISHING,
-    earlyStopNoveltyRatio: ENV_EARLY_STOP_NOVELTY,
-    earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
-    earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
-  });
+  const [draftRunConfig, setDraftRunConfig] = useState<RunConfig>({ ...DEFAULT_RUN_CONFIG });
   const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
   const [bulkModelValue, setBulkModelValue] = useState('');
   const [accessAllowlist, setAccessAllowlist] = useState<string[]>([]);
@@ -171,6 +148,14 @@ const App: React.FC = () => {
   const [allowlistUpdatedAt, setAllowlistUpdatedAt] = useState<string | null>(null);
   const [allowlistSyncStatus, setAllowlistSyncStatus] = useState<{ tone: 'success' | 'error' | 'warning' | 'info'; message: string } | null>(null);
   const [allowlistSyncing, setAllowlistSyncing] = useState(false);
+  const [settingsSyncStatus, setSettingsSyncStatus] = useState<{ tone: 'success' | 'error' | 'warning' | 'info'; message: string } | null>(null);
+  const [settingsSyncing, setSettingsSyncing] = useState(false);
+  const [settingsUpdatedAt, setSettingsUpdatedAt] = useState<string | null>(null);
+  const [settingsUpdatedBy, setSettingsUpdatedBy] = useState<string | null>(null);
+  const [settingsVersion, setSettingsVersion] = useState<number | null>(null);
+  const [settingsConflict, setSettingsConflict] = useState<UniversalSettingsPayload | null>(null);
+  const [settingsConflictMeta, setSettingsConflictMeta] = useState<{ updatedAt: string | null; updatedBy: string | null; version: number | null } | null>(null);
+  const [settingsCloudStatus, setSettingsCloudStatus] = useState<'unknown' | 'available' | 'unavailable' | 'unauthorized'>('unknown');
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [showTransparency, setShowTransparency] = useState(false);
@@ -179,6 +164,61 @@ const App: React.FC = () => {
   const [authInput, setAuthInput] = useState('');
   const [authError, setAuthError] = useState('');
   const [pendingAction, setPendingAction] = useState<'settings' | 'start' | null>(null);
+
+  const persistSettingsMetadata = (meta: { updatedAt?: string | null; updatedBy?: string | null; version?: number | null }) => {
+    const updatedAt = meta.updatedAt ?? null;
+    const updatedBy = meta.updatedBy ?? null;
+    const version = typeof meta.version === 'number' ? meta.version : null;
+    setSettingsUpdatedAt(updatedAt);
+    setSettingsUpdatedBy(updatedBy);
+    setSettingsVersion(version);
+    if (updatedAt) {
+      localStorage.setItem(SETTINGS_UPDATED_AT_KEY, updatedAt);
+    } else {
+      localStorage.removeItem(SETTINGS_UPDATED_AT_KEY);
+    }
+    if (updatedBy) {
+      localStorage.setItem(SETTINGS_UPDATED_BY_KEY, updatedBy);
+    } else {
+      localStorage.removeItem(SETTINGS_UPDATED_BY_KEY);
+    }
+    if (typeof version === 'number') {
+      localStorage.setItem(SETTINGS_VERSION_KEY, version.toString());
+    } else {
+      localStorage.removeItem(SETTINGS_VERSION_KEY);
+    }
+  };
+
+  const applySettingsPayload = (payload: UniversalSettingsPayload, options?: { updateDraft?: boolean }) => {
+    setProvider(payload.provider);
+    setRunConfig(payload.runConfig);
+    setModelOverrides(payload.modelOverrides);
+    setAccessAllowlist(payload.accessAllowlist);
+    localStorage.setItem('overseer_provider', payload.provider);
+    localStorage.setItem('overseer_run_config', JSON.stringify(payload.runConfig));
+    localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(payload.accessAllowlist));
+    saveModelOverrides(payload.modelOverrides);
+    if (options?.updateDraft) {
+      setDraftProvider(payload.provider);
+      setDraftRunConfig(payload.runConfig);
+      setDraftModelOverrides(payload.modelOverrides);
+      setDraftAllowlistText(payload.accessAllowlist.join('\n'));
+    }
+  };
+
+  const recordLocalSettingsUpdate = () => {
+    const stamp = new Date().toISOString();
+    localStorage.setItem(SETTINGS_LOCAL_UPDATED_AT_KEY, stamp);
+  };
+
+  const areAllowlistsEqual = (left: string[], right: string[]) => {
+    if (left.length !== right.length) return false;
+    const setLeft = new Set(left);
+    for (const entry of right) {
+      if (!setLeft.has(entry)) return false;
+    }
+    return true;
+  };
 
   const refreshAllowlistFromWorker = async (showStatus: boolean, updateDraft = false) => {
     setAllowlistSyncing(true);
@@ -214,15 +254,78 @@ const App: React.FC = () => {
     }
   };
 
+  const syncUniversalSettingsFromCloud = async (localSnapshot: UniversalSettingsPayload, hasLocalSettings: boolean) => {
+    setSettingsSyncing(true);
+    try {
+      const result = await fetchUniversalSettings();
+      if (!result.ok) {
+        const unauthorized = result.status === 401 || result.status === 403;
+        setSettingsCloudStatus(unauthorized ? 'unauthorized' : 'unavailable');
+        setSettingsSyncStatus({
+          tone: unauthorized ? 'warning' : 'info',
+          message: unauthorized
+            ? 'Cloud settings unavailable (Access auth missing). Using local settings.'
+            : 'Cloud settings unavailable. Using local settings.'
+        });
+        return;
+      }
+
+      setSettingsCloudStatus('available');
+      const data = result.data;
+      if (data.settings) {
+        const normalized = normalizeUniversalSettingsPayload(data.settings, {
+          provider: DEFAULT_PROVIDER,
+          runConfig: DEFAULT_RUN_CONFIG
+        });
+        if (normalized) {
+          applySettingsPayload(normalized);
+          persistSettingsMetadata({
+            updatedAt: data.updatedAt ?? null,
+            updatedBy: data.updatedBy ?? null,
+            version: data.version ?? null
+          });
+        }
+        return;
+      }
+
+      const migrationComplete = localStorage.getItem(SETTINGS_MIGRATION_KEY) === 'true';
+      if (!migrationComplete && hasLocalSettings) {
+        const migrationResult = await updateUniversalSettings(localSnapshot, null, null);
+        if (migrationResult.ok) {
+          persistSettingsMetadata({
+            updatedAt: migrationResult.data.updatedAt ?? null,
+            updatedBy: migrationResult.data.updatedBy ?? null,
+            version: migrationResult.data.version ?? null
+          });
+          localStorage.setItem(SETTINGS_MIGRATION_KEY, 'true');
+          setSettingsSyncStatus({ tone: 'success', message: 'Migrated local settings to cloud.' });
+        } else {
+          setSettingsSyncStatus({
+            tone: 'warning',
+            message: `Settings migration failed: ${migrationResult.error}`
+          });
+        }
+      }
+    } catch (err) {
+      setSettingsCloudStatus('unavailable');
+      const message = err instanceof Error ? err.message : 'Cloud settings unavailable.';
+      setSettingsSyncStatus({ tone: 'info', message });
+    } finally {
+      setSettingsSyncing(false);
+    }
+  };
+
   // Initialize from local storage if available
   useEffect(() => {
     const storedProvider = localStorage.getItem('overseer_provider');
-    if (storedProvider === 'google' || storedProvider === 'openai') {
-      setProvider(storedProvider);
-    }
+    const resolvedProvider = storedProvider === 'google' || storedProvider === 'openai' ? storedProvider : DEFAULT_PROVIDER;
+    setProvider(resolvedProvider);
+
     const storedGoogle = localStorage.getItem('overseer_api_key_google') || '';
     const storedOpenAI = localStorage.getItem('overseer_api_key_openai') || '';
     setKeyOverrides({ google: storedGoogle, openai: storedOpenAI });
+
+    let resolvedRunConfig: RunConfig = { ...DEFAULT_RUN_CONFIG };
     try {
       const storedConfig = localStorage.getItem('overseer_run_config');
       if (storedConfig) {
@@ -237,7 +340,7 @@ const App: React.FC = () => {
         const earlyStopNoveltyRatio = parseEnvFloat(parsed?.earlyStopNoveltyRatio?.toString(), ENV_EARLY_STOP_NOVELTY);
         const earlyStopNewDomains = parseEnvNumber(parsed?.earlyStopNewDomains?.toString(), ENV_EARLY_STOP_NEW_DOMAINS);
         const earlyStopNewSources = parseEnvNumber(parsed?.earlyStopNewSources?.toString(), ENV_EARLY_STOP_NEW_SOURCES);
-        setRunConfig({
+        resolvedRunConfig = {
           minAgents,
           maxAgents: Math.max(minAgents, maxAgents),
           maxMethodAgents,
@@ -248,37 +351,56 @@ const App: React.FC = () => {
           earlyStopNoveltyRatio,
           earlyStopNewDomains,
           earlyStopNewSources
-        });
+        };
       }
     } catch (_) {
       // ignore
     }
+    setRunConfig(resolvedRunConfig);
+
     const storedOverrides = sanitizeModelOverrideDraft(loadModelOverrides());
     setModelOverrides(storedOverrides);
+
+    let resolvedAllowlist: string[] = [];
     try {
       const storedAllowlist = localStorage.getItem(ACCESS_ALLOWLIST_STORAGE_KEY);
       if (storedAllowlist) {
         try {
           const parsed = JSON.parse(storedAllowlist);
           if (Array.isArray(parsed)) {
-            const entries = parseAllowlistText(parsed.join('\n')).entries;
-            setAccessAllowlist(entries);
+            resolvedAllowlist = parseAllowlistText(parsed.join('\n')).entries;
           } else if (typeof parsed === 'string') {
-            setAccessAllowlist(parseAllowlistText(parsed).entries);
+            resolvedAllowlist = parseAllowlistText(parsed).entries;
           }
         } catch (_) {
-          setAccessAllowlist(parseAllowlistText(storedAllowlist).entries);
+          resolvedAllowlist = parseAllowlistText(storedAllowlist).entries;
         }
       }
     } catch (_) {
       // ignore
     }
+    setAccessAllowlist(resolvedAllowlist);
+
     try {
       const storedUpdatedAt = localStorage.getItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY);
       if (storedUpdatedAt) setAllowlistUpdatedAt(storedUpdatedAt);
     } catch (_) {
       // ignore
     }
+
+    try {
+      const storedSettingsUpdatedAt = localStorage.getItem(SETTINGS_UPDATED_AT_KEY);
+      const storedSettingsUpdatedBy = localStorage.getItem(SETTINGS_UPDATED_BY_KEY);
+      const storedSettingsVersion = localStorage.getItem(SETTINGS_VERSION_KEY);
+      if (storedSettingsUpdatedAt) setSettingsUpdatedAt(storedSettingsUpdatedAt);
+      if (storedSettingsUpdatedBy) setSettingsUpdatedBy(storedSettingsUpdatedBy);
+      if (storedSettingsVersion && Number.isFinite(Number(storedSettingsVersion))) {
+        setSettingsVersion(Number(storedSettingsVersion));
+      }
+    } catch (_) {
+      // ignore
+    }
+
     if (REQUIRES_PASSWORD) {
       try {
         const unlocked = sessionStorage.getItem('overseer_unlocked') === 'true';
@@ -287,10 +409,33 @@ const App: React.FC = () => {
         // ignore
       }
     }
-    void refreshAllowlistFromWorker(false);
+
+    const hasLocalSettings = Boolean(
+      localStorage.getItem('overseer_provider')
+      || localStorage.getItem('overseer_run_config')
+      || localStorage.getItem(MODEL_OVERRIDE_STORAGE_KEY)
+      || localStorage.getItem(ACCESS_ALLOWLIST_STORAGE_KEY)
+    );
+    const localSnapshot = buildUniversalSettingsPayload({
+      provider: resolvedProvider,
+      runConfig: resolvedRunConfig,
+      modelOverrides: storedOverrides,
+      accessAllowlist: resolvedAllowlist,
+      defaults: { runConfig: DEFAULT_RUN_CONFIG }
+    });
+
+    const init = async () => {
+      await syncUniversalSettingsFromCloud(localSnapshot, hasLocalSettings);
+      await refreshAllowlistFromWorker(false);
+    };
+
+    void init();
   }, []);
 
   const handleSaveKey = async () => {
+    setSettingsSyncStatus(null);
+    setSettingsConflict(null);
+    setSettingsConflictMeta(null);
     const nextKeys = {
       google: draftKeys.google.trim(),
       openai: draftKeys.openai.trim()
@@ -326,6 +471,7 @@ const App: React.FC = () => {
     setRunConfig(nextRunConfig);
     localStorage.setItem('overseer_provider', draftProvider);
     localStorage.setItem('overseer_run_config', JSON.stringify(nextRunConfig));
+    recordLocalSettingsUpdate();
 
     if (nextKeys.google) {
       localStorage.setItem('overseer_api_key_google', nextKeys.google);
@@ -343,47 +489,111 @@ const App: React.FC = () => {
     saveModelOverrides(sanitizedOverrides);
 
     const sanitizedAllowlist = parseAllowlistText(draftAllowlistText).entries;
-    setAccessAllowlist(sanitizedAllowlist);
-    localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(sanitizedAllowlist));
-    setAllowlistSyncStatus({ tone: 'info', message: 'SYNCING ACCESS ALLOWLIST…' });
-    setAllowlistSyncing(true);
-    try {
-      const allowlistResult = await updateAllowlist(sanitizedAllowlist, allowlistUpdatedAt);
-      if (allowlistResult.ok) {
-        const { entries, updatedAt } = allowlistResult.data;
-        const resolvedEntries = Array.isArray(entries) ? entries : sanitizedAllowlist;
-        setAccessAllowlist(resolvedEntries);
-        localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(resolvedEntries));
-        if (updatedAt) {
-          setAllowlistUpdatedAt(updatedAt);
-          localStorage.setItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY, updatedAt);
+    const allowlistChanged = !areAllowlistsEqual(sanitizedAllowlist, accessAllowlist);
+    let allowlistOk = true;
+    if (allowlistChanged) {
+      setAllowlistSyncStatus({ tone: 'info', message: 'SYNCING ACCESS ALLOWLIST…' });
+      setAllowlistSyncing(true);
+      try {
+        const allowlistResult = await updateAllowlist(sanitizedAllowlist, allowlistUpdatedAt);
+        if (allowlistResult.ok) {
+          const { entries, updatedAt } = allowlistResult.data;
+          const resolvedEntries = Array.isArray(entries) ? entries : sanitizedAllowlist;
+          setAccessAllowlist(resolvedEntries);
+          localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(resolvedEntries));
+          if (updatedAt) {
+            setAllowlistUpdatedAt(updatedAt);
+            localStorage.setItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY, updatedAt);
+          }
+          setDraftAllowlistText(resolvedEntries.join('\n'));
+          setAllowlistSyncStatus({
+            tone: 'success',
+            message: `SYNCED TO CLOUDFLARE ACCESS (${resolvedEntries.length} ENTRIES).`
+          });
+        } else if (allowlistResult.status === 409 || allowlistResult.status === 428) {
+          allowlistOk = false;
+          setAllowlistSyncStatus({
+            tone: 'warning',
+            message: 'ALLOWLIST CHANGED ON SERVER. REFRESH BEFORE RESUBMITTING.'
+          });
+        } else {
+          allowlistOk = false;
+          setAllowlistSyncStatus({
+            tone: 'error',
+            message: `SYNC FAILED: ${allowlistResult.error}`
+          });
         }
-        setDraftAllowlistText(resolvedEntries.join('\n'));
-        setAllowlistSyncStatus({
-          tone: 'success',
-          message: `SYNCED TO CLOUDFLARE ACCESS (${resolvedEntries.length} ENTRIES).`
-        });
-      } else if (allowlistResult.status === 409 || allowlistResult.status === 428) {
-        setAllowlistSyncStatus({
-          tone: 'warning',
-          message: 'ALLOWLIST CHANGED ON SERVER. REFRESH BEFORE RESUBMITTING.'
-        });
-      } else {
+      } catch (err) {
+        allowlistOk = false;
+        const message = err instanceof Error ? err.message : 'Allowlist sync failed.';
         setAllowlistSyncStatus({
           tone: 'error',
-          message: `SYNC FAILED: ${allowlistResult.error}`
+          message: `SYNC FAILED: ${message}`
+        });
+      } finally {
+        setAllowlistSyncing(false);
+      }
+    }
+
+    const settingsPayload = buildUniversalSettingsPayload({
+      provider: draftProvider,
+      runConfig: nextRunConfig,
+      modelOverrides: sanitizedOverrides,
+      accessAllowlist: sanitizedAllowlist,
+      defaults: { runConfig: DEFAULT_RUN_CONFIG }
+    });
+
+    let settingsOk = true;
+    setSettingsSyncing(true);
+    try {
+      const settingsResult = await updateUniversalSettings(settingsPayload, settingsUpdatedAt, settingsVersion);
+      if (settingsResult.ok) {
+        setSettingsCloudStatus('available');
+        persistSettingsMetadata({
+          updatedAt: settingsResult.data.updatedAt ?? null,
+          updatedBy: settingsResult.data.updatedBy ?? null,
+          version: settingsResult.data.version ?? null
+        });
+        setSettingsSyncStatus({ tone: 'success', message: 'Settings synced to cloud.' });
+      } else if (settingsResult.status === 409 || settingsResult.status === 428) {
+        settingsOk = false;
+        const conflictPayload = normalizeUniversalSettingsPayload(settingsResult.data?.settings, {
+          provider: DEFAULT_PROVIDER,
+          runConfig: DEFAULT_RUN_CONFIG
+        });
+        if (conflictPayload) {
+          setSettingsConflict(conflictPayload);
+          setSettingsConflictMeta({
+            updatedAt: settingsResult.data?.updatedAt ?? null,
+            updatedBy: settingsResult.data?.updatedBy ?? null,
+            version: settingsResult.data?.version ?? null
+          });
+        }
+        setSettingsSyncStatus({
+          tone: 'warning',
+          message: 'Cloud settings changed. Load latest settings before saving.'
+        });
+      } else {
+        settingsOk = false;
+        const unauthorized = settingsResult.status === 401 || settingsResult.status === 403;
+        setSettingsCloudStatus(unauthorized ? 'unauthorized' : 'unavailable');
+        setSettingsSyncStatus({
+          tone: unauthorized ? 'warning' : 'error',
+          message: `Cloud sync failed: ${settingsResult.error}`
         });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Allowlist sync failed.';
-      setAllowlistSyncStatus({
-        tone: 'error',
-        message: `SYNC FAILED: ${message}`
-      });
+      settingsOk = false;
+      const message = err instanceof Error ? err.message : 'Cloud sync failed.';
+      setSettingsCloudStatus('unavailable');
+      setSettingsSyncStatus({ tone: 'error', message: `Cloud sync failed: ${message}` });
     } finally {
-      setAllowlistSyncing(false);
+      setSettingsSyncing(false);
     }
 
+    if (allowlistOk && settingsOk) {
+      setShowSettings(false);
+    }
   };
 
   const handleClearKey = () => {
@@ -402,6 +612,21 @@ const App: React.FC = () => {
     setAllowlistCopyStatus('');
     setAllowlistSyncStatus(null);
     setShowSettings(true);
+  };
+
+  const handleLoadCloudSettings = () => {
+    if (!settingsConflict) return;
+    applySettingsPayload(settingsConflict, { updateDraft: true });
+    if (settingsConflictMeta) {
+      persistSettingsMetadata({
+        updatedAt: settingsConflictMeta.updatedAt,
+        updatedBy: settingsConflictMeta.updatedBy,
+        version: settingsConflictMeta.version
+      });
+    }
+    setSettingsConflict(null);
+    setSettingsConflictMeta(null);
+    setSettingsSyncStatus({ tone: 'info', message: 'Loaded cloud settings.' });
   };
 
   const openaiModelDefaults = getOpenAIModelDefaults();
@@ -980,6 +1205,37 @@ const App: React.FC = () => {
                 </p>
               </div>
 
+              {settingsSyncStatus && (
+                <p
+                  className={`text-[10px] font-mono ${
+                    settingsSyncStatus.tone === 'success'
+                      ? 'text-cyber-green'
+                      : settingsSyncStatus.tone === 'warning'
+                        ? 'text-yellow-500'
+                        : settingsSyncStatus.tone === 'error'
+                          ? 'text-red-500'
+                          : 'text-gray-500'
+                  }`}
+                >
+                  {settingsSyncStatus.message}
+                </p>
+              )}
+              {settingsConflict && (
+                <button
+                  onClick={handleLoadCloudSettings}
+                  className="px-3 py-2 text-xs font-mono border border-yellow-500 text-yellow-400 hover:text-yellow-200 hover:border-yellow-300 rounded transition-colors"
+                >
+                  LOAD CLOUD SETTINGS
+                </button>
+              )}
+              {settingsUpdatedAt && (
+                <p className="text-[10px] text-gray-500 font-mono">
+                  Cloud settings: {new Date(settingsUpdatedAt).toLocaleString()}
+                  {settingsUpdatedBy ? ` · ${settingsUpdatedBy}` : ''}
+                  {typeof settingsVersion === 'number' ? ` · v${settingsVersion}` : ''}
+                </p>
+              )}
+
               <div className="flex justify-between pt-2">
                  <button
                   onClick={handleClearKey}
@@ -997,7 +1253,7 @@ const App: React.FC = () => {
                   </button>
                   <button
                     onClick={handleSaveKey}
-                    disabled={allowlistSyncing}
+                    disabled={allowlistSyncing || settingsSyncing}
                     className="flex items-center gap-2 px-4 py-2 bg-cyber-gray border border-gray-600 hover:border-cyber-green hover:bg-gray-800 text-white font-mono text-xs uppercase tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Save className="w-4 h-4" /> Save Configuration

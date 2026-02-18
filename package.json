@@ -12,6 +12,7 @@
     "transparency:check": "node scripts/transparency-layout-check.mjs",
     "allowlist:smoke": "node scripts/allowlist-smoke.mjs",
     "test:sources": "node scripts/source-normalization.test.mjs",
+    "test:settings": "node scripts/settings-serialization.test.mjs",
     "test:ui": "playwright test"
   },
   "dependencies": {

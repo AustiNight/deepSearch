@@ -220,6 +220,34 @@ export type ModelOverrides = {
   validation?: string;
 };
 
+export type RunConfig = {
+  minAgents: number;
+  maxAgents: number;
+  maxMethodAgents: number;
+  forceExhaustion: boolean;
+  minRounds: number;
+  maxRounds: number;
+  earlyStopDiminishingScore: number;
+  earlyStopNoveltyRatio: number;
+  earlyStopNewDomains: number;
+  earlyStopNewSources: number;
+};
+
+export type UniversalSettingsPayload = {
+  schemaVersion: number;
+  provider: LLMProvider;
+  runConfig: RunConfig;
+  modelOverrides: ModelOverrides;
+  accessAllowlist: string[];
+};
+
+export type UniversalSettingsResponse = {
+  settings: UniversalSettingsPayload | null;
+  updatedAt: string | null;
+  updatedBy?: string | null;
+  version?: number;
+};
+
 export interface AppState {
   topic: string;
   isRunning: boolean;
