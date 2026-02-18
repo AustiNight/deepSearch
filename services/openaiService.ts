@@ -17,7 +17,9 @@ import {
 } from "./sourceNormalization";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
-const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
+import { resolveProxyBaseUrl } from "./proxyBaseUrl";
+
+const PROXY_BASE_URL = resolveProxyBaseUrl();
 const USE_PROXY = PROXY_BASE_URL.length > 0;
 
 let openAIKey: string | null = null;
@@ -30,6 +32,11 @@ export const initializeOpenAI = (apiKey?: string) => {
   if (USE_PROXY) return;
   if (!apiKey) throw new Error("OpenAI API key required");
   openAIKey = apiKey;
+};
+
+const ensureOpenAIReady = () => {
+  if (USE_PROXY) return;
+  ensureOpenAIReady();
 };
 
 const loggedModelRoles = new Set<ModelRole>();
@@ -67,7 +74,7 @@ const requestOpenAI = async (body: Record<string, unknown>, options?: RequestOpt
     return res.json();
   }
 
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const res = await fetch(OPENAI_API_URL, {
     method: "POST",
     headers: {
@@ -194,7 +201,7 @@ export const classifyResearchVertical = async (input: {
   hintVerticalIds?: string[];
   contextText?: string;
 }, modelOverrides?: ModelOverrides, options?: RequestOptions) => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const model = resolveRoleModel('overseer_planning', modelOverrides);
   const summaryLines = input.taxonomySummary.map((v) => {
     const fields = Array.isArray(v.blueprintFields) && v.blueprintFields.length > 0
@@ -242,7 +249,7 @@ export const extractResearchMethods = async (
   modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const model = resolveRoleModel('method_discovery', modelOverrides);
   const prompt = `
     Topic: "${topic}"
@@ -271,7 +278,7 @@ export const proposeTaxonomyGrowth = async (input: {
   taxonomySummary: Array<{ id: string; label: string; subtopics: Array<{ id: string; label: string }> }>;
   hintVerticalIds?: string[];
 }, modelOverrides?: ModelOverrides, options?: RequestOptions): Promise<TaxonomyProposalBundle> => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const model = resolveRoleModel('overseer_planning', modelOverrides);
   const summaryLines = input.taxonomySummary.map((v) => {
     const subs = v.subtopics.map(s => `${s.id} (${s.label})`).join(", ");
@@ -319,7 +326,7 @@ export const validateReport = async (
   modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const model = resolveRoleModel('validation', modelOverrides);
   const prompt = `
     Topic: "${topic}"
@@ -375,7 +382,7 @@ export const generateSectorAnalysis = async (
   modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const model = resolveRoleModel('sector_analysis', modelOverrides);
   const currentDate = new Date().toDateString();
 
@@ -418,7 +425,7 @@ const singleSearch = async (
   logCallback?: (msg: string) => void,
   options?: RequestOptions
 ): Promise<{ text: string; sources: NormalizedSource[] }> => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   try {
     const response = await requestOpenAI({
       model,
@@ -483,7 +490,7 @@ export const performDeepResearch = async (
   logCallback: (msg: string) => void,
   options?: DeepResearchModelOptions
 ) => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const currentDate = new Date().toDateString();
   const overrideRole = options?.role;
   const l1Role = overrideRole ?? options?.l1Role ?? 'deep_research_l1';
@@ -562,7 +569,7 @@ export const critiqueAndFindGaps = async (
   modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const model = resolveRoleModel('critique', modelOverrides);
 
   const currentDate = new Date().toDateString();
@@ -603,7 +610,7 @@ export const synthesizeGrandReport = async (
   modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
-  if (!openAIKey) throw new Error("OpenAI not initialized");
+  ensureOpenAIReady();
   const model = resolveRoleModel('synthesis', modelOverrides);
   const currentDate = new Date().toDateString();
 
