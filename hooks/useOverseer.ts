@@ -10,6 +10,8 @@ import {
   METHOD_DISCOVERY_TEMPLATES_GENERAL,
   METHOD_DISCOVERY_TEMPLATES_PERSON,
   METHOD_DISCOVERY_TEMPLATES_ADDRESS,
+  SYSTEM_TEST_PHRASE,
+  SYSTEM_TEST_VERTICAL_ID,
   MIN_AGENT_COUNT,
   MAX_AGENT_COUNT,
   MAX_METHOD_AGENTS,
@@ -21,7 +23,7 @@ import {
   EARLY_STOP_NEW_SOURCES
 } from '../constants';
 import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
-import { inferVerticalHints, isAddressLike, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
+import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -37,6 +39,8 @@ const normalizeDomain = (url: string) => {
 };
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const normalizeForMatch = (value: string) => {
   return value
@@ -1078,6 +1082,115 @@ export const useOverseer = () => {
       addLog(overseerId, overseer.name, buildNarrativeMessage(phase, decision, action, outcome), type);
     };
     logOverseer('PHASE 0: INIT', 'start run', 'initialize providers + taxonomy', `topic "${topic}"`, 'action');
+
+    if (isSystemTestTopic(topic)) {
+      logOverseer(
+        'PHASE 0: SYSTEM TEST',
+        'detected test phrase',
+        'bypass external LLM and run smoke flow',
+        `vertical ${SYSTEM_TEST_VERTICAL_ID}`,
+        'success'
+      );
+
+      const testSource = { uri: 'https://example.com/system-test' };
+      const testFinding: Finding = {
+        source: 'System Test Researcher',
+        content: 'System test search executed with minimal tokens.',
+        confidence: 1,
+        url: testSource.uri
+      };
+
+      const researcherId = generateId();
+      const researcher: Agent = {
+        id: researcherId,
+        name: 'System Test Researcher',
+        type: AgentType.RESEARCHER,
+        status: AgentStatus.SEARCHING,
+        task: 'System test search',
+        reasoning: [`Test phrase: ${SYSTEM_TEST_PHRASE}`],
+        findings: [],
+        parentId: overseerId
+      };
+      addAgent(researcher);
+      addLog(researcherId, researcher.name, 'Deployed for system test.', 'info');
+      await wait(60);
+      updateAgent(researcherId, {
+        status: AgentStatus.COMPLETE,
+        findings: [testFinding],
+        reasoning: ['Completed minimal token search.']
+      });
+      addLog(researcherId, researcher.name, 'System test search complete.', 'success');
+      findingsRef.current.push({ ...testFinding, rawSources: [testSource] } as any);
+
+      const criticId = generateId();
+      const critic: Agent = {
+        id: criticId,
+        name: 'System Test Critic',
+        type: AgentType.CRITIC,
+        status: AgentStatus.ANALYZING,
+        task: 'System test critique',
+        reasoning: ['Validate minimal agent coverage.'],
+        findings: [],
+        parentId: overseerId
+      };
+      addAgent(critic);
+      addLog(criticId, critic.name, 'Running critique pass.', 'info');
+      await wait(40);
+      updateAgent(criticId, {
+        status: AgentStatus.COMPLETE,
+        reasoning: ['No gaps detected in system test.']
+      });
+      addLog(criticId, critic.name, 'Critique complete.', 'success');
+
+      const synthesizerId = generateId();
+      const synthesizer: Agent = {
+        id: synthesizerId,
+        name: 'System Test Synthesizer',
+        type: AgentType.SYNTHESIZER,
+        status: AgentStatus.THINKING,
+        task: 'System test synthesis',
+        reasoning: ['Compile system test report.'],
+        findings: [],
+        parentId: overseerId
+      };
+      addAgent(synthesizer);
+      addLog(synthesizerId, synthesizer.name, 'Synthesizing system test report.', 'info');
+      await wait(40);
+      updateAgent(synthesizerId, {
+        status: AgentStatus.COMPLETE,
+        reasoning: ['Report ready.']
+      });
+      addLog(synthesizerId, synthesizer.name, 'Synthesis complete.', 'success');
+
+      setReport({
+        title: 'System Test Report',
+        summary: 'System test mode executed. All agent types spawned once with minimal tokens.',
+        sections: [
+          {
+            title: 'System Test Summary',
+            content: `Test phrase detected. Vertical ${SYSTEM_TEST_VERTICAL_ID} selected. Agents spawned: Overseer, Researcher, Critic, Synthesizer.`,
+            sources: [testSource.uri]
+          }
+        ],
+        visualizations: [],
+        provenance: {
+          totalSources: 1,
+          methodAudit: 'System test run'
+        },
+        schemaVersion: 1
+      });
+
+      updateAgent(overseerId, { status: AgentStatus.COMPLETE });
+      logOverseer(
+        'PHASE 0: SYSTEM TEST',
+        'complete',
+        'deliver system test report',
+        'minimal token path executed',
+        'success'
+      );
+      setIsRunning(false);
+      return;
+    }
 
     try {
       if (provider === 'openai') {

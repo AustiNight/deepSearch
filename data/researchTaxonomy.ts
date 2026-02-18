@@ -908,6 +908,24 @@ export const BASE_RESEARCH_TAXONOMY: ResearchTaxonomy = {
         ], 'Use public sources only; avoid personal data and doxxing. Prefer official portals and aggregated datasets.')
       ],
       'Fallback discovery using public sources only. Avoid sensitive data; prefer official portals and aggregated datasets.'
+    ),
+    vertical(
+      'system_test',
+      'System Test (CI / QA)',
+      [
+        'testRunId',
+        'agentCoverage',
+        'uiViewportChecks',
+        'status'
+      ],
+      [
+        subtopic('system_smoke', 'System Smoke Test', [
+          tactic('system-test-phrase', '"{topic}" system test phrase'),
+          tactic('system-test-agents', '"{topic}" spawn each agent type once'),
+          tactic('system-test-ui', '"{topic}" responsive UI checks')
+        ], 'Reserved for automated CI smoke tests only.')
+      ],
+      'Reserved vertical for automated system smoke tests and regression checks.'
     )
   ]
 };

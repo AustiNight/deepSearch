@@ -1,3 +1,5 @@
+import { SYSTEM_TEST_PHRASE, SYSTEM_TEST_VERTICAL_ID } from '../constants';
+
 export type VerticalHintContext = {
   topic: string;
   lower: string;
@@ -5,6 +7,7 @@ export type VerticalHintContext = {
   isAddressLike: boolean;
   hasCreativeWork: boolean;
   hasReceptionSignals: boolean;
+  isSystemTest: boolean;
 };
 
 export type VerticalHintRule = {
@@ -31,6 +34,10 @@ export const isPersonLike = (topic: string) => {
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
+export const isSystemTestTopic = (topic: string) => {
+  return topic.toLowerCase().includes(SYSTEM_TEST_PHRASE.toLowerCase());
+};
+
 const buildHintContext = (topic: string): VerticalHintContext => {
   const lower = topic.toLowerCase();
   const hasCreativeWork = /\b(film|movie|book|novel|album|song|painting)\b/i.test(lower);
@@ -43,11 +50,18 @@ const buildHintContext = (topic: string): VerticalHintContext => {
     isPersonLike: isPersonLike(topic),
     isAddressLike: isAddressLike(topic),
     hasCreativeWork,
-    hasReceptionSignals
+    hasReceptionSignals,
+    isSystemTest: isSystemTestTopic(topic)
   };
 };
 
 export const VERTICAL_HINT_RULES: VerticalHintRule[] = [
+  {
+    id: 'system_test_phrase',
+    verticalId: SYSTEM_TEST_VERTICAL_ID,
+    signals: `Contains ${SYSTEM_TEST_PHRASE}.`,
+    match: (context) => context.isSystemTest
+  },
   {
     id: 'person_like',
     verticalId: 'individual',
@@ -136,6 +150,7 @@ export const VERTICAL_HINT_RULES: VerticalHintRule[] = [
 ];
 
 export const inferVerticalHints = (topic: string) => {
+  if (isSystemTestTopic(topic)) return [SYSTEM_TEST_VERTICAL_ID];
   const context = buildHintContext(topic);
   const matches = VERTICAL_HINT_RULES
     .filter((rule) => !rule.isFallback && rule.match(context))
@@ -145,6 +160,7 @@ export const inferVerticalHints = (topic: string) => {
 };
 
 export const VERTICAL_SEED_QUERIES: Record<string, string> = {
+  [SYSTEM_TEST_VERTICAL_ID]: `"${SYSTEM_TEST_PHRASE}" system test`,
   individual: '"{topic}" biography',
   corporation: '"{topic}" company profile',
   product: '"{topic}" specifications',

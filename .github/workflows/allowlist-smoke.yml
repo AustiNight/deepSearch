@@ -27,7 +27,7 @@ jobs:
           node-version: "22"
           cache: "npm"
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Allowlist smoke test (read-only)
         env:
           ALLOWLIST_ENDPOINT: ${{ secrets.ALLOWLIST_ENDPOINT }}

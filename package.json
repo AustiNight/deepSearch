@@ -10,7 +10,8 @@
     "vertical-logic:generate": "node scripts/vertical-logic-table.mjs",
     "vertical-logic:check": "node scripts/vertical-logic-table.mjs --check",
     "transparency:check": "node scripts/transparency-layout-check.mjs",
-    "allowlist:smoke": "node scripts/allowlist-smoke.mjs"
+    "allowlist:smoke": "node scripts/allowlist-smoke.mjs",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "framer-motion": "^12.34.0",
@@ -21,6 +22,7 @@
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",

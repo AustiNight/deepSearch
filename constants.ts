@@ -6,6 +6,9 @@ export const MODEL_OVERRIDE_STORAGE_KEY = 'overseer_model_overrides';
 
 export const DEFAULT_LLM_PROVIDER = 'google';
 
+export const SYSTEM_TEST_PHRASE = 'DEEPSEARCH_SYSTEM_TEST';
+export const SYSTEM_TEST_VERTICAL_ID = 'system_test';
+
 export const MIN_AGENT_COUNT = 8;
 export const MAX_AGENT_COUNT = 20;
 export const MAX_METHOD_AGENTS = 8;

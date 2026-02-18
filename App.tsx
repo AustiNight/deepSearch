@@ -8,6 +8,7 @@ import { TransparencyPanel } from './components/TransparencyPanel';
 import { LLMProvider, ModelOverrides, ModelRole } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
 import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistService';
+import { isSystemTestTopic } from './data/verticalLogic';
 import {
   MIN_AGENT_COUNT,
   MAX_AGENT_COUNT,
@@ -485,7 +486,7 @@ const App: React.FC = () => {
 
   const doStart = () => {
     if (!topic.trim()) return;
-    if (!effectiveKey && !USE_PROXY) {
+    if (!effectiveKey && !USE_PROXY && !isSystemTestTopic(topic)) {
         openSettings();
         return;
     }
@@ -1071,11 +1072,13 @@ const App: React.FC = () => {
                     onChange={(e) => setTopic(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleStart()}
                     placeholder="Enter research vector (e.g., 'Solid State Battery breakthroughs')"
+                    data-testid="search-input"
                     className="flex-1 bg-transparent border-none outline-none text-white px-4 py-3 placeholder-gray-700 font-mono"
                     autoFocus
                   />
                   <button 
                     onClick={handleStart}
+                    data-testid="start-search"
                     className="bg-gray-900 hover:bg-cyber-green hover:text-black text-white px-6 py-2 rounded-md transition-all font-mono text-sm border border-gray-700 hover:border-cyber-green"
                   >
                     INITIALIZE
