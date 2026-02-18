@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const inferredProxyBaseUrl = env.PROXY_BASE_URL || (mode === 'production' ? 'https://api.deepsearches.app' : '');
     return {
       base: '/',
       server: {
@@ -22,7 +23,7 @@ export default defineConfig(({ mode }) => {
         'process.env.MAX_AGENT_COUNT': JSON.stringify(env.MAX_AGENT_COUNT),
         'process.env.MAX_METHOD_AGENTS': JSON.stringify(env.MAX_METHOD_AGENTS),
         'process.env.ADMIN_PASSWORD': JSON.stringify(env.ADMIN_PASSWORD),
-        'process.env.PROXY_BASE_URL': JSON.stringify(env.PROXY_BASE_URL)
+        'process.env.PROXY_BASE_URL': JSON.stringify(inferredProxyBaseUrl)
       },
       resolve: {
         alias: {
