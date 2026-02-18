@@ -1,38 +1,36 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from 'lucide-react';
 import { getResearchTaxonomy } from '../data/researchTaxonomy';
-import { VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
-import { TRANSPARENCY_LAYOUT } from '../data/transparencyLayout';
-
-type LayoutDensity = 'normal' | 'condensed' | 'ultra';
-
-type LayoutState = {
-  scale: number;
-  columns: number;
-  fontSize: number;
-  lineHeight: number;
-  density: LayoutDensity;
-};
+import { buildTransparencyRows, TRANSPARENCY_TABLE_PERF } from '../data/transparencyTable';
 
 type TransparencyPanelProps = {
   open: boolean;
   onClose: () => void;
 };
 
-const formatList = (items: string[]) => items.join(' · ');
+const KEYBOARD_HELP_ID = 'transparency-map-keyboard-help';
+
+const renderList = (items: React.ReactNode[], emptyLabel = '—') => {
+  if (!items || items.length === 0) {
+    return <span className="text-gray-500 print:text-gray-700">{emptyLabel}</span>;
+  }
+  if (items.length === 1) {
+    return <span>{items[0]}</span>;
+  }
+  return (
+    <ul className="list-disc pl-4 space-y-1">
+      {items.map((item, index) => (
+        <li key={index}>{item}</li>
+      ))}
+    </ul>
+  );
+};
 
 export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onClose }) => {
   const taxonomy = useMemo(() => getResearchTaxonomy(), []);
-  const [presentationMode, setPresentationMode] = useState(false);
-  const [layout, setLayout] = useState<LayoutState>(() => ({
-    scale: 1,
-    columns: TRANSPARENCY_LAYOUT.baseColumns,
-    fontSize: TRANSPARENCY_LAYOUT.font.baseSize,
-    lineHeight: TRANSPARENCY_LAYOUT.font.baseLineHeight,
-    density: 'normal'
-  }));
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const rows = useMemo(() => buildTransparencyRows(taxonomy), [taxonomy]);
+  const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
+  const [activeRowIndex, setActiveRowIndex] = useState(0);
 
   const counts = useMemo(() => {
     let subtopics = 0;
@@ -52,102 +50,62 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
     return { verticals: taxonomy.verticals.length, subtopics, methods, tactics, fields };
   }, [taxonomy]);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    const container = containerRef.current;
-    const content = contentRef.current;
-    if (!container || !content) return;
-
-    const computeLayout = () => {
-      const containerWidth = container.clientWidth;
-      const containerHeight = container.clientHeight;
-      if (containerWidth === 0 || containerHeight === 0) return;
-
-      const baseFontSize = presentationMode ? TRANSPARENCY_LAYOUT.font.presentationSize : TRANSPARENCY_LAYOUT.font.baseSize;
-      const baseLineHeight = presentationMode ? TRANSPARENCY_LAYOUT.font.presentationLineHeight : TRANSPARENCY_LAYOUT.font.baseLineHeight;
-      const baseColumns = presentationMode ? TRANSPARENCY_LAYOUT.baseColumns : Math.min(TRANSPARENCY_LAYOUT.maxColumns, TRANSPARENCY_LAYOUT.baseColumns + 1);
-
-      const densitySteps: Array<{ key: LayoutDensity; fontScale: number; columnBoost: number; minScale: number; lineHeightScale: number }> = [
-        { key: 'normal', fontScale: 1, columnBoost: 0, minScale: TRANSPARENCY_LAYOUT.scale.targetMin, lineHeightScale: 1 },
-        { key: 'condensed', fontScale: 0.92, columnBoost: 1, minScale: TRANSPARENCY_LAYOUT.scale.targetMin * 0.92, lineHeightScale: 0.98 },
-        { key: 'ultra', fontScale: 0.85, columnBoost: 2, minScale: TRANSPARENCY_LAYOUT.scale.hardMin, lineHeightScale: 0.95 }
-      ];
-
-      const measure = (columns: number, fontSize: number, lineHeight: number) => {
-        content.style.columnCount = String(columns);
-        content.style.columnGap = `${TRANSPARENCY_LAYOUT.columnGap}px`;
-        content.style.fontSize = `${fontSize}px`;
-        content.style.lineHeight = String(lineHeight);
-        content.style.width = `${containerWidth}px`;
-        // Force reflow for accurate scroll measurements.
-        void content.getBoundingClientRect();
-        return { width: content.scrollWidth, height: content.scrollHeight };
-      };
-
-      let chosen: LayoutState | null = null;
-
-      for (const step of densitySteps) {
-        const minColumns = Math.max(2, baseColumns + step.columnBoost);
-        const maxColumns = Math.min(TRANSPARENCY_LAYOUT.maxColumns + step.columnBoost, 6);
-        let best = { scale: 0, columns: minColumns };
-        const fontSize = baseFontSize * step.fontScale;
-        const lineHeight = baseLineHeight * step.lineHeightScale;
-
-        for (let columns = minColumns; columns <= maxColumns; columns += 1) {
-          const { width, height } = measure(columns, fontSize, lineHeight);
-          const scale = Math.min(containerWidth / width, containerHeight / height, 1);
-          if (scale > best.scale) {
-            best = { scale, columns };
-          }
-        }
-
-        chosen = {
-          scale: Math.min(best.scale, 1),
-          columns: best.columns,
-          fontSize,
-          lineHeight,
-          density: step.key
-        };
-
-        if (best.scale >= step.minScale || step.key === 'ultra') break;
-      }
-
-      if (chosen) {
-        setLayout((prev) => {
-          if (
-            Math.abs(prev.scale - chosen.scale) < 0.001 &&
-            prev.columns === chosen.columns &&
-            Math.abs(prev.fontSize - chosen.fontSize) < 0.01 &&
-            Math.abs(prev.lineHeight - chosen.lineHeight) < 0.01 &&
-            prev.density === chosen.density
-          ) {
-            return prev;
-          }
-          return chosen;
-        });
-      }
-    };
-
-    const rafId = requestAnimationFrame(computeLayout);
-    const observer = new ResizeObserver(() => {
-      requestAnimationFrame(computeLayout);
-    });
-    observer.observe(container);
-    observer.observe(content);
-
-    return () => {
-      cancelAnimationFrame(rafId);
-      observer.disconnect();
-    };
-  }, [open, presentationMode, taxonomy]);
+  useEffect(() => {
+    if (activeRowIndex >= rows.length) {
+      setActiveRowIndex(0);
+    }
+  }, [activeRowIndex, rows.length]);
 
   if (!open) return null;
 
-  const scaledNote = layout.scale < 0.99 || layout.density !== 'normal';
+  const isHighVolume = rows.length > TRANSPARENCY_TABLE_PERF.expectedMaxRows;
+  const enableContentVisibility = rows.length >= TRANSPARENCY_TABLE_PERF.virtualizationThreshold;
+  const rowStyle: React.CSSProperties | undefined = enableContentVisibility
+    ? ({ contentVisibility: 'auto', containIntrinsicSize: `${TRANSPARENCY_TABLE_PERF.containIntrinsicRowSize}px` } as React.CSSProperties)
+    : undefined;
+
+  const focusRow = (index: number) => {
+    const row = rowRefs.current[index];
+    if (row) {
+      row.focus();
+    }
+  };
+
+  const handleRowKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>, index: number) => {
+    const maxIndex = rows.length - 1;
+    let nextIndex = index;
+
+    switch (event.key) {
+      case 'ArrowDown':
+        nextIndex = Math.min(maxIndex, index + 1);
+        break;
+      case 'ArrowUp':
+        nextIndex = Math.max(0, index - 1);
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = maxIndex;
+        break;
+      case 'PageDown':
+        nextIndex = Math.min(maxIndex, index + 6);
+        break;
+      case 'PageUp':
+        nextIndex = Math.max(0, index - 6);
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setActiveRowIndex(nextIndex);
+    focusRow(nextIndex);
+  };
 
   return (
     <div className="fixed inset-0 bg-black/80 z-[105] flex items-center justify-center p-4 print:bg-white print:p-0 print:items-start">
-      <div className="bg-cyber-gray border border-gray-700 rounded-lg w-[min(96vw,1600px)] h-[min(90vh,900px)] shadow-2xl relative overflow-hidden flex flex-col print:shadow-none print:border-gray-300 print:bg-white print:text-black">
+      <div className="bg-cyber-gray border border-gray-700 rounded-lg w-[min(98vw,1700px)] h-[min(92vh,950px)] shadow-2xl relative overflow-hidden flex flex-col print:shadow-none print:border-gray-300 print:bg-white print:text-black">
         <div className="absolute top-0 left-0 w-full h-1 bg-cyber-blue print:hidden"></div>
         <div className="px-4 pt-4 pb-3 border-b border-gray-800 flex items-center justify-between gap-3 print:border-gray-300">
           <div>
@@ -159,12 +117,11 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setPresentationMode((prev) => !prev)}
-              className="px-3 py-1.5 rounded border text-[10px] font-mono uppercase tracking-widest transition-colors border-gray-700 text-gray-400 hover:text-white hover:border-cyber-blue print:hidden"
-            >
-              {presentationMode ? 'COMPACT MODE' : 'PRESENTATION MODE'}
-            </button>
+            {isHighVolume && (
+              <div className="text-[10px] font-mono uppercase tracking-widest text-cyber-amber border border-cyber-amber/40 px-2 py-1 rounded">
+                High Volume Mode
+              </div>
+            )}
             <button
               onClick={onClose}
               className="text-gray-500 hover:text-white text-lg leading-none print:hidden"
@@ -175,69 +132,94 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
           </div>
         </div>
 
-        <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden relative">
-          <div className="absolute inset-0 p-3">
-            <div
-              className="origin-top-left"
-              style={{
-                transform: `scale(${layout.scale})`,
-                transformOrigin: 'top left'
-              }}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <p id={KEYBOARD_HELP_ID} className="sr-only">
+            Use Up and Down arrow keys to move between rows, Home and End to jump to the first or last row, and Page Up or Page Down to
+            move in larger steps.
+          </p>
+          <div className="h-full w-full overflow-auto">
+            <table
+              className="min-w-[1200px] w-full border-collapse text-[11px] md:text-[12px] font-mono text-gray-200 print:text-gray-900"
+              aria-label="Transparency Map"
+              aria-describedby={KEYBOARD_HELP_ID}
             >
-              <div
-                ref={contentRef}
-                className="font-mono text-gray-300 print:text-gray-900"
-                style={{
-                  columnCount: layout.columns,
-                  columnGap: `${TRANSPARENCY_LAYOUT.columnGap}px`,
-                  fontSize: `${layout.fontSize}px`,
-                  lineHeight: layout.lineHeight.toString()
-                }}
-              >
-                {taxonomy.verticals.map((vertical) => (
-                  <section key={vertical.id} className="break-inside-avoid mb-3">
-                    <div className="text-[11px] uppercase tracking-widest text-cyber-green print:text-black">
-                      {vertical.label}
-                      <span className="text-gray-600 print:text-gray-700"> ({vertical.id})</span>
-                    </div>
-                    {vertical.description && (
-                      <div className="text-[9px] text-gray-500 print:text-gray-700">{vertical.description}</div>
-                    )}
-                    <div className="text-[9px] text-gray-500 print:text-gray-700">
-                      Blueprint: {formatList(vertical.blueprintFields)}
-                    </div>
-                    <div className="text-[9px] text-gray-500 print:text-gray-700">
-                      Seed: {VERTICAL_SEED_QUERIES[vertical.id] || '{topic} overview'}
-                    </div>
-                    {vertical.subtopics.map((subtopic) => (
-                      <div key={subtopic.id} className="mt-1">
-                        <div className="text-[9px] uppercase tracking-wider text-cyber-blue print:text-gray-900">
-                          {subtopic.label}
-                          <span className="text-gray-600 print:text-gray-700"> ({subtopic.id})</span>
-                        </div>
-                        {subtopic.description && (
-                          <div className="text-[9px] text-gray-500 print:text-gray-700">{subtopic.description}</div>
-                        )}
-                        {subtopic.methods.map((method) => (
-                          <div key={method.id} className="text-[9px] text-gray-400 print:text-gray-800">
-                            <span className="text-gray-500 print:text-gray-700">{method.label}:</span>{' '}
-                            {formatList(method.tactics.map((tactic) => tactic.template))}
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </section>
+              <colgroup>
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '28%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '12%' }} />
+              </colgroup>
+              <thead>
+                <tr className="text-[10px] uppercase tracking-widest">
+                  {['Vertical', 'Blueprint Fields', 'Subtopics', 'Methods/Tactics', 'Seed Query', 'Hint Rules'].map((header) => (
+                    <th
+                      key={header}
+                      scope="col"
+                      className="sticky top-0 z-20 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-3 py-2 text-left text-gray-400 print:bg-white print:text-gray-700 print:border-gray-300"
+                    >
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr
+                    key={row.id}
+                    ref={(element) => {
+                      rowRefs.current[index] = element;
+                    }}
+                    tabIndex={index === activeRowIndex ? 0 : -1}
+                    onFocus={() => setActiveRowIndex(index)}
+                    onKeyDown={(event) => handleRowKeyDown(event, index)}
+                    className="border-b border-gray-800 even:bg-gray-900/40 focus:outline-none focus:ring-2 focus:ring-cyber-blue/50 print:border-gray-300 print:even:bg-gray-100"
+                    style={rowStyle}
+                  >
+                    <th scope="row" className="align-top px-3 py-3 text-left font-semibold text-cyber-green print:text-black">
+                      <div className="text-[11px] uppercase tracking-widest">{row.label}</div>
+                      <div className="text-[10px] text-gray-500 print:text-gray-700">{row.id}</div>
+                      {row.description && (
+                        <div className="mt-1 text-[10px] text-gray-400 print:text-gray-700">{row.description}</div>
+                      )}
+                    </th>
+                    <td className="align-top px-3 py-3">
+                      {renderList(row.blueprintFields, 'No blueprint fields defined.')}
+                    </td>
+                    <td className="align-top px-3 py-3">
+                      {renderList(row.subtopics, 'No subtopics defined.')}
+                    </td>
+                    <td className="align-top px-3 py-3">
+                      {renderList(row.methods, 'No methods or tactics defined.')}
+                    </td>
+                    <td className="align-top px-3 py-3 text-cyber-blue print:text-black">
+                      <span className="font-semibold">{row.seedQuery}</span>
+                    </td>
+                    <td className="align-top px-3 py-3">
+                      {renderList(
+                        row.hintRules.map((rule) => (
+                          <span key={rule.id}>
+                            {rule.signals}{' '}
+                            <span className="text-gray-500 print:text-gray-700">({rule.id})</span>
+                          </span>
+                        )),
+                        'No hint rules defined.'
+                      )}
+                    </td>
+                  </tr>
                 ))}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </div>
         </div>
 
-        {scaledNote && (
-          <div className="px-4 py-2 border-t border-gray-800 text-[10px] text-gray-500 font-mono print:hidden">
-            Auto-condensed to fit 16:9: {layout.columns} columns · {Math.round(layout.scale * 100)}% scale · {layout.density.toUpperCase()} density.
-          </div>
-        )}
+        <div className="px-4 py-2 border-t border-gray-800 text-[10px] text-gray-500 font-mono flex flex-wrap gap-3 print:border-gray-300 print:text-gray-700">
+          <span>Keyboard: ↑/↓ rows · Home/End jump · PgUp/PgDn step</span>
+          <span>
+            Rows: {rows.length} (expected ≤ {TRANSPARENCY_TABLE_PERF.expectedMaxRows}, optimization ≥ {TRANSPARENCY_TABLE_PERF.virtualizationThreshold})
+          </span>
+        </div>
       </div>
     </div>
   );

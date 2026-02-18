@@ -39,7 +39,7 @@
   - [ ] Add tests for settings serialization to verify no secrets are included in network payloads
   - [ ] Acceptance: Save closes the dialog on success, and changes made on one device are reflected on another device after reload
 
-- [ ] Epic: Redesign Transparency Map as a normalized table
+- [x] Epic: Redesign Transparency Map as a normalized table
   - [ ] Replace the current scaled layout with a 100% scale, full‑width normalized table
   - [ ] Table columns must include: `Vertical`, `Blueprint Fields`, `Subtopics`, `Methods/Tactics`, `Seed Query`, `Hint Rules`
   - [ ] Define the data‑mapping layer that transforms taxonomy + hint rules into normalized table rows

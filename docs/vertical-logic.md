@@ -5,6 +5,12 @@ This table is generated from the live taxonomy, seed map, and hint logic.
 - Taxonomy: `data/researchTaxonomy.ts`
 - Seed queries + hint rules: `data/verticalLogic.ts`
 
+## Transparency Map Panel
+
+- The Transparency Map renders one row per vertical in a normalized table with columns for Vertical, Blueprint Fields, Subtopics, Methods/Tactics, Seed Query, and Hint Rules.
+- Keyboard navigation: focus a row, then use ↑/↓ to move, Home/End to jump, and Page Up/Page Down to move in larger steps.
+- Performance: expected ≤ 24 rows; content-visibility optimization activates at 48+ rows. The table supports horizontal scrolling on narrow viewports and uses sticky headers for readability.
+
 Run `node scripts/vertical-logic-table.mjs` to regenerate.
 <!-- VERTICAL_LOGIC_TABLE:START -->
 | Vertical | Hint Signals | Subtopics + Example Tactic Themes | Seed Query Template |
