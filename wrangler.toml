@@ -9,5 +9,5 @@ compatibility_flags = ["nodejs_compat"]
 # `wrangler kv namespace create SETTINGS_KV` (and --preview for preview_id).
 kv_namespaces = [
   { binding = "ACCESS_ALLOWLIST_KV", id = "d34711020d7843d0932ef8a10323bb68" },
-  { binding = "SETTINGS_KV", id = "00000000000000000000000000000000" }
+  { binding = "SETTINGS_KV", id = "6486fb3de3cd4e90a46aead171c4bd92" }
 ]
