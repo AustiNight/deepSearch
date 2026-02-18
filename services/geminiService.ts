@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GEMINI_MODEL_FAST, GEMINI_MODEL_REASONING } from "../constants";
-import type { NormalizedSource, Skill, SourceNormalizationDiagnostics } from "../types";
+import type { ModelOverrides, ModelRole, NormalizedSource, Skill, SourceNormalizationDiagnostics } from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
 import { coerceReportData } from "./reportFormatter";
@@ -15,18 +15,23 @@ const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
 const USE_PROXY = PROXY_BASE_URL.length > 0;
 let genAI: GoogleGenAI | null = null;
 
+type RequestOptions = {
+  signal?: AbortSignal;
+};
+
 export const initializeGemini = (apiKey?: string) => {
   if (USE_PROXY) return;
   if (!apiKey) throw new Error("Gemini API key required");
   genAI = new GoogleGenAI({ apiKey });
 };
 
-const callGemini = async (payload: { model: string; contents: any; config?: any }) => {
+const callGemini = async (payload: { model: string; contents: any; config?: any }, options?: RequestOptions) => {
   if (USE_PROXY) {
     const res = await fetch(`${PROXY_BASE_URL}/api/gemini/generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: options?.signal
     });
     if (!res.ok) {
       const text = await res.text();
@@ -35,7 +40,7 @@ const callGemini = async (payload: { model: string; contents: any; config?: any 
     return res.json();
   }
   if (!genAI) throw new Error("Gemini not initialized");
-  return genAI.models.generateContent(payload as any);
+  return genAI.models.generateContent({ ...(payload as any), signal: options?.signal } as any);
 };
 
 const storeRawSynthesis = (raw: string, attempt: "initial" | "retry") => {
@@ -56,7 +61,7 @@ export const classifyResearchVertical = async (input: {
   taxonomySummary: Array<{ id: string; label: string; blueprintFields?: string[] }>;
   hintVerticalIds?: string[];
   contextText?: string;
-}) => {
+}, _modelOverrides?: ModelOverrides, options?: RequestOptions) => {
   const summaryLines = input.taxonomySummary.map((v) => {
     const fields = Array.isArray(v.blueprintFields) && v.blueprintFields.length > 0
       ? ` fields: ${v.blueprintFields.join(", ")}`
@@ -115,14 +120,20 @@ export const classifyResearchVertical = async (input: {
           }
         }
       }
-    });
+    }, options);
     return parseJsonFromText(response.text || "{}");
   } catch (error) {
     return { verticals: [], isUncertain: true, confidence: 0 };
   }
 };
 
-export const extractResearchMethods = async (topic: string, sourceText: string, contextText?: string) => {
+export const extractResearchMethods = async (
+  topic: string,
+  sourceText: string,
+  contextText?: string,
+  _modelOverrides?: ModelOverrides,
+  options?: RequestOptions
+) => {
   const prompt = `
     Topic: "${topic}"
     Research Context (taxonomy + blueprint):
@@ -158,7 +169,7 @@ export const extractResearchMethods = async (topic: string, sourceText: string, 
           }
         }
       }
-    });
+    }, options);
     return parseJsonFromText(response.text || "{}");
   } catch (error) {
     return { methods: [] };
@@ -172,7 +183,7 @@ export const proposeTaxonomyGrowth = async (input: {
   findingsText: string;
   taxonomySummary: Array<{ id: string; label: string; subtopics: Array<{ id: string; label: string }> }>;
   hintVerticalIds?: string[];
-}): Promise<TaxonomyProposalBundle> => {
+}, _modelOverrides?: ModelOverrides, options?: RequestOptions): Promise<TaxonomyProposalBundle> => {
   const summaryLines = input.taxonomySummary.map((v) => {
     const subs = v.subtopics.map(s => `${s.id} (${s.label})`).join(", ");
     return `${v.id} (${v.label}): ${subs}`;
@@ -285,14 +296,20 @@ export const proposeTaxonomyGrowth = async (input: {
           }
         }
       }
-    });
+    }, options);
     return parseJsonFromText(response.text || "{}");
   } catch (error) {
     return { tactics: [], subtopics: [], verticals: [] };
   }
 };
 
-export const validateReport = async (topic: string, report: any, allowedSources: string[] = []) => {
+export const validateReport = async (
+  topic: string,
+  report: any,
+  allowedSources: string[] = [],
+  _modelOverrides?: ModelOverrides,
+  options?: RequestOptions
+) => {
   const prompt = `
     Topic: "${topic}"
     Allowed Sources:
@@ -321,7 +338,7 @@ export const validateReport = async (topic: string, report: any, allowedSources:
           }
         }
       }
-    });
+    }, options);
     return parseJsonFromText(response.text || "{}");
   } catch (error) {
     return { isValid: false, issues: ["Validation failed."], confidence: 0 };
@@ -329,7 +346,13 @@ export const validateReport = async (topic: string, report: any, allowedSources:
 };
 
 // --- PHASE 1: SECTOR ANALYSIS ---
-export const generateSectorAnalysis = async (topic: string, skills: Skill[] = [], contextText?: string) => {
+export const generateSectorAnalysis = async (
+  topic: string,
+  skills: Skill[] = [],
+  contextText?: string,
+  _modelOverrides?: ModelOverrides,
+  options?: RequestOptions
+) => {
   const currentDate = new Date().toDateString();
 
   const prompt = `
@@ -372,7 +395,7 @@ export const generateSectorAnalysis = async (topic: string, skills: Skill[] = []
           }
         }
       }
-    });
+    }, options);
 
     return parseJsonFromText(response.text || "{}");
   } catch (error) {
@@ -402,14 +425,15 @@ const logSourceDiagnostics = (
 const singleSearch = async (
   query: string,
   context: string = "",
-  logCallback?: (msg: string) => void
+  logCallback?: (msg: string) => void,
+  options?: RequestOptions
 ): Promise<{ text: string; sources: NormalizedSource[] }> => {
     try {
         const response = await callGemini({
             model: GEMINI_MODEL_FAST,
             contents: `Context: ${context}\n\nTask: Search for "${query}".\nExtract hard data, dates, and specific names.`,
             config: searchToolConfig
-        });
+        }, options);
 
         const text = response.text || "";
         const normalization = normalizeGeminiResponseSources(response);
@@ -446,16 +470,26 @@ const singleSearch = async (
 
         return { text, sources };
     } catch (e) {
+        if ((e as any)?.name === 'AbortError') throw e;
         console.warn(`Search failed for ${query}`, e);
         return { text: "", sources: [] };
     }
+};
+
+type DeepResearchModelOptions = {
+  modelOverrides?: ModelOverrides;
+  role?: ModelRole;
+  l1Role?: ModelRole;
+  l2Role?: ModelRole;
+  signal?: AbortSignal;
 };
 
 export const performDeepResearch = async (
   agentName: string,
   focus: string,
   initialQuery: string,
-  logCallback: (msg: string) => void
+  logCallback: (msg: string) => void,
+  options?: DeepResearchModelOptions
 ) => {
     const currentDate = new Date().toDateString();
     
@@ -464,7 +498,8 @@ export const performDeepResearch = async (
     const level1 = await singleSearch(
       initialQuery,
       `Current Date: ${currentDate}. Agent: ${agentName}. Focus: ${focus}`,
-      logCallback
+      logCallback,
+      { signal: options?.signal }
     );
     
     if (!level1.text) return { text: "Search failed.", sources: [] };
@@ -496,7 +531,7 @@ export const performDeepResearch = async (
                     }
                 }
             }
-        });
+        }, { signal: options?.signal });
         const plan = parseJsonFromText(planResp.text || "{}");
         if (Array.isArray(plan.queries)) drillQueries = plan.queries;
     } catch (e) {
@@ -509,7 +544,7 @@ export const performDeepResearch = async (
     // Step 3: Execute Parallel Drill-Downs
     logCallback(`Level 2 Drill-Down: Executing ${drillQueries.length} verification searches...`);
     const level2Results = await Promise.all(
-        drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`, logCallback))
+        drillQueries.map(q => singleSearch(q, `Verifying claims for ${focus}`, logCallback, { signal: options?.signal }))
     );
 
     // Step 4: Synthesize Findings
@@ -534,7 +569,13 @@ export const performDeepResearch = async (
 };
 
 // --- PHASE 3: CRITIQUE (UNCHANGED BUT ROBUST) ---
-export const critiqueAndFindGaps = async (topic: string, currentFindings: string, contextText?: string) => {
+export const critiqueAndFindGaps = async (
+  topic: string,
+  currentFindings: string,
+  contextText?: string,
+  _modelOverrides?: ModelOverrides,
+  options?: RequestOptions
+) => {
   const currentDate = new Date().toDateString();
   const prompt = `
     Topic: ${topic}
@@ -581,7 +622,7 @@ export const critiqueAndFindGaps = async (topic: string, currentFindings: string
           }
         }
       }
-    });
+    }, options);
 
     return parseJsonFromText(response.text || "{}");
   } catch (error) {
@@ -590,7 +631,13 @@ export const critiqueAndFindGaps = async (topic: string, currentFindings: string
 };
 
 // --- PHASE 4: GRAND SYNTHESIS ---
-export const synthesizeGrandReport = async (topic: string, allFindings: any[], allowedSources: string[] = []) => {
+export const synthesizeGrandReport = async (
+  topic: string,
+  allFindings: any[],
+  allowedSources: string[] = [],
+  _modelOverrides?: ModelOverrides,
+  options?: RequestOptions
+) => {
   const currentDate = new Date().toDateString();
 
   // Combine huge amount of text
@@ -685,7 +732,7 @@ export const synthesizeGrandReport = async (topic: string, allFindings: any[], a
           }
         }
       }
-    });
+    }, options);
 
     return response.text || "";
   };

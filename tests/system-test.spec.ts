@@ -25,3 +25,17 @@ test('system test flow runs with minimal tokens across viewports', async ({ page
 
   expect(errors).toEqual([]);
 });
+
+test('new search resets an in-flight run and stops further logs', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('search-input').fill(`System Test ${SYSTEM_TEST_PHRASE}`);
+  await page.getByTestId('start-search').click();
+
+  await page.getByTestId('log-entry').first().waitFor();
+  await page.getByTestId('new-search').click();
+
+  await expect(page.getByTestId('search-input')).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(page.locator('[data-testid="log-entry"]')).toHaveCount(0);
+  await expect(page.getByTestId('log-terminal')).toHaveCount(0);
+});

@@ -459,7 +459,7 @@ const App: React.FC = () => {
     window.setTimeout(() => setAllowlistCopyStatus(''), 2000);
   };
 
-  const { agents, logs, report, isRunning, startResearch, skills } = useOverseer();
+  const { agents, logs, report, isRunning, startResearch, resetRun, skills } = useOverseer();
 
   const effectiveKeys = {
     google: keyOverrides.google || ENV_GEMINI_KEY,
@@ -529,8 +529,9 @@ const App: React.FC = () => {
     setAuthError('');
   };
 
-  const resetApp = () => {
-    window.location.reload();
+  const handleNewSearch = () => {
+    resetRun('user_reset');
+    setTopic('');
   };
 
   return (
@@ -554,6 +555,14 @@ const App: React.FC = () => {
                SKILLS: {skills.length}
              </button>
            )}
+           <button
+             onClick={handleNewSearch}
+             data-testid="new-search"
+             className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 hover:border-cyber-green transition-colors text-xs font-mono text-cyber-green"
+           >
+             <RotateCcw className="w-3 h-3" />
+             NEW SEARCH
+           </button>
            <button
              onClick={openSettings}
              className={`p-2 rounded-full hover:bg-gray-800 transition-colors ${!hasKey ? 'animate-pulse text-yellow-500' : 'text-gray-400'}`}
@@ -1122,10 +1131,10 @@ const App: React.FC = () => {
            <div className="animate-in fade-in duration-500">
               <div className="mb-6 flex justify-between items-center">
                  <button 
-                   onClick={resetApp}
+                   onClick={handleNewSearch}
                    className="text-gray-500 hover:text-white flex items-center gap-2 text-sm bg-gray-900 px-3 py-2 rounded border border-gray-800"
                  >
-                    <RotateCcw className="w-4 h-4" /> New Research
+                    <RotateCcw className="w-4 h-4" /> New Search
                  </button>
               </div>
               <ReportView report={report} />

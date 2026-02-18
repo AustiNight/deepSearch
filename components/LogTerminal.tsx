@@ -29,7 +29,10 @@ export const LogTerminal: React.FC<Props> = ({ logs }) => {
   };
 
   return (
-    <div className="h-full min-h-0 bg-cyber-black border border-gray-800 rounded-lg p-4 font-mono text-xs overflow-hidden flex flex-col shadow-inner">
+    <div
+      className="h-full min-h-0 bg-cyber-black border border-gray-800 rounded-lg p-4 font-mono text-xs overflow-hidden flex flex-col shadow-inner"
+      data-testid="log-terminal"
+    >
       <div className="uppercase text-gray-500 mb-2 border-b border-gray-800 pb-1 flex justify-between">
         <span className="font-bold">{'>'} OVERSEER_LOGS</span>
         <span className="text-cyber-green animate-pulse flex items-center gap-1">● LIVE_FEED</span>
@@ -40,7 +43,11 @@ export const LogTerminal: React.FC<Props> = ({ logs }) => {
         className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-gray-800 scrollbar-track-transparent"
       >
         {logs.map(log => (
-          <div key={log.id} className="flex gap-3 animate-in fade-in slide-in-from-left-2 duration-300 items-start">
+          <div
+            key={log.id}
+            className="flex gap-3 animate-in fade-in slide-in-from-left-2 duration-300 items-start"
+            data-testid="log-entry"
+          >
             <span className="text-gray-600 shrink-0 select-none border-r border-gray-800 pr-2">
               {formatTime(log.timestamp)}
             </span>

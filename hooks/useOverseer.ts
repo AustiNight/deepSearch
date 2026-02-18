@@ -40,7 +40,35 @@ const normalizeDomain = (url: string) => {
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const createAbortError = (reason: string) => {
+  const error = new Error(reason);
+  (error as any).name = 'AbortError';
+  return error;
+};
+
+const wait = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (!signal) {
+    setTimeout(() => resolve(), ms);
+    return;
+  }
+  if (signal.aborted) {
+    reject(createAbortError('Run aborted'));
+    return;
+  }
+  const timeout = setTimeout(() => {
+    cleanup();
+    resolve();
+  }, ms);
+  const onAbort = () => {
+    clearTimeout(timeout);
+    cleanup();
+    reject(createAbortError('Run aborted'));
+  };
+  const cleanup = () => {
+    signal.removeEventListener('abort', onAbort);
+  };
+  signal.addEventListener('abort', onAbort, { once: true });
+});
 
 const normalizeForMatch = (value: string) => {
   return value
@@ -944,6 +972,10 @@ export const useOverseer = () => {
   const [skills, setSkills] = useState<Skill[]>([]);
   
   const findingsRef = useRef<Finding[]>([]);
+  const runVersionRef = useRef(0);
+  const runIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isRunningRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -957,7 +989,11 @@ export const useOverseer = () => {
     }
   }, []);
 
-  const addLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
+  const appendLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
     setLogs(prev => [...prev, {
       id: generateId(),
       timestamp: Date.now(),
@@ -968,13 +1004,40 @@ export const useOverseer = () => {
     }]);
   };
 
-  const updateAgent = (id: string, updates: Partial<Agent>) => {
+  const applyAgentUpdate = (id: string, updates: Partial<Agent>) => {
     setAgents(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
   };
 
-  const addAgent = (agent: Agent) => {
+  const appendAgent = (agent: Agent) => {
     setAgents(prev => [...prev, agent]);
   };
+
+  const logResetEvent = (input: { reason: string; runId: string | null; cancellationStatus: string }) => {
+    console.info('[Overseer] run reset', input);
+  };
+
+  const resetRun = useCallback((reason = 'user_reset') => {
+    const activeRunId = runIdRef.current;
+    const controller = abortControllerRef.current;
+    let cancellationStatus = 'no-controller';
+    if (controller) {
+      if (!controller.signal.aborted) {
+        controller.abort(reason);
+      }
+      cancellationStatus = controller.signal.aborted ? 'aborted' : 'pending';
+    }
+    logResetEvent({ reason, runId: activeRunId, cancellationStatus });
+    runVersionRef.current += 1;
+    abortControllerRef.current = null;
+    runIdRef.current = null;
+    setIsRunning(false);
+    isRunningRef.current = false;
+    setAgents([]);
+    setLogs([]);
+    setReport(null);
+    setFindings([]);
+    findingsRef.current = [];
+  }, []);
 
   const startResearch = useCallback(async (topic: string, provider: LLMProvider, apiKey: string, runConfig?: {
     minAgents?: number;
@@ -989,7 +1052,65 @@ export const useOverseer = () => {
     earlyStopNewSources?: number;
     modelOverrides?: ModelOverrides;
   }) => {
-    setIsRunning(true);
+    const previousRunId = runIdRef.current;
+    const previousController = abortControllerRef.current;
+    if (previousController && !previousController.signal.aborted) {
+      previousController.abort('new_run');
+      logResetEvent({
+        reason: 'new_run',
+        runId: previousRunId,
+        cancellationStatus: previousController.signal.aborted ? 'aborted' : 'pending'
+      });
+    }
+
+    const runVersion = runVersionRef.current + 1;
+    runVersionRef.current = runVersion;
+    const runId = generateId();
+    runIdRef.current = runId;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
+
+    const isActive = () => runVersionRef.current === runVersion && !signal.aborted;
+    const ensureActive = () => {
+      if (!isActive()) {
+        throw createAbortError('Run aborted');
+      }
+    };
+    const runSafely = async <T,>(promise: Promise<T>) => {
+      ensureActive();
+      const result = await promise;
+      ensureActive();
+      return result;
+    };
+
+    const addLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
+      if (!isActive()) return;
+      appendLog(agentId, agentName, message, type);
+    };
+    const updateAgent = (id: string, updates: Partial<Agent>) => {
+      if (!isActive()) return;
+      applyAgentUpdate(id, updates);
+    };
+    const addAgent = (agent: Agent) => {
+      if (!isActive()) return;
+      appendAgent(agent);
+    };
+    const setReportSafe = (nextReport: FinalReport | null) => {
+      if (!isActive()) return;
+      setReport(nextReport);
+    };
+    const setIsRunningSafe = (value: boolean) => {
+      if (runVersionRef.current !== runVersion) return;
+      isRunningRef.current = value;
+      setIsRunning(value);
+    };
+    const pushFinding = (finding: Finding | any) => {
+      if (!isActive()) return;
+      findingsRef.current.push(finding);
+    };
+
+    setIsRunningSafe(true);
     setAgents([]);
     setLogs([]);
     setReport(null);
@@ -1027,6 +1148,7 @@ export const useOverseer = () => {
     const earlyStopNewDomains = Math.max(0, resolveNumber(runConfig?.earlyStopNewDomains, EARLY_STOP_NEW_DOMAINS));
     const earlyStopNewSources = Math.max(0, resolveNumber(runConfig?.earlyStopNewSources, EARLY_STOP_NEW_SOURCES));
     const modelOverrides = runConfig?.modelOverrides;
+    const requestOptions = { signal };
     const knowledgeBase = loadKnowledgeBase();
     const usedQueries = new Set<string>();
     const methodCandidateQueries: string[] = [];
@@ -1082,124 +1204,122 @@ export const useOverseer = () => {
       addLog(overseerId, overseer.name, buildNarrativeMessage(phase, decision, action, outcome), type);
     };
     logOverseer('PHASE 0: INIT', 'start run', 'initialize providers + taxonomy', `topic "${topic}"`, 'action');
-
-    if (isSystemTestTopic(topic)) {
-      logOverseer(
-        'PHASE 0: SYSTEM TEST',
-        'detected test phrase',
-        'bypass external LLM and run smoke flow',
-        `vertical ${SYSTEM_TEST_VERTICAL_ID}`,
-        'success'
-      );
-
-      const testSource = {
-        uri: 'https://example.com/system-test',
-        title: 'System Test Source',
-        domain: 'example.com',
-        provider: 'system',
-        kind: 'web'
-      };
-      const testFinding: Finding = {
-        source: 'System Test Researcher',
-        content: 'System test search executed with minimal tokens.',
-        confidence: 1,
-        url: testSource.uri
-      };
-
-      const researcherId = generateId();
-      const researcher: Agent = {
-        id: researcherId,
-        name: 'System Test Researcher',
-        type: AgentType.RESEARCHER,
-        status: AgentStatus.SEARCHING,
-        task: 'System test search',
-        reasoning: [`Test phrase: ${SYSTEM_TEST_PHRASE}`],
-        findings: [],
-        parentId: overseerId
-      };
-      addAgent(researcher);
-      addLog(researcherId, researcher.name, 'Deployed for system test.', 'info');
-      await wait(60);
-      updateAgent(researcherId, {
-        status: AgentStatus.COMPLETE,
-        findings: [testFinding],
-        reasoning: ['Completed minimal token search.']
-      });
-      addLog(researcherId, researcher.name, 'System test search complete.', 'success');
-      findingsRef.current.push({ ...testFinding, rawSources: [testSource] } as any);
-
-      const criticId = generateId();
-      const critic: Agent = {
-        id: criticId,
-        name: 'System Test Critic',
-        type: AgentType.CRITIC,
-        status: AgentStatus.ANALYZING,
-        task: 'System test critique',
-        reasoning: ['Validate minimal agent coverage.'],
-        findings: [],
-        parentId: overseerId
-      };
-      addAgent(critic);
-      addLog(criticId, critic.name, 'Running critique pass.', 'info');
-      await wait(40);
-      updateAgent(criticId, {
-        status: AgentStatus.COMPLETE,
-        reasoning: ['No gaps detected in system test.']
-      });
-      addLog(criticId, critic.name, 'Critique complete.', 'success');
-
-      const synthesizerId = generateId();
-      const synthesizer: Agent = {
-        id: synthesizerId,
-        name: 'System Test Synthesizer',
-        type: AgentType.SYNTHESIZER,
-        status: AgentStatus.THINKING,
-        task: 'System test synthesis',
-        reasoning: ['Compile system test report.'],
-        findings: [],
-        parentId: overseerId
-      };
-      addAgent(synthesizer);
-      addLog(synthesizerId, synthesizer.name, 'Synthesizing system test report.', 'info');
-      await wait(40);
-      updateAgent(synthesizerId, {
-        status: AgentStatus.COMPLETE,
-        reasoning: ['Report ready.']
-      });
-      addLog(synthesizerId, synthesizer.name, 'Synthesis complete.', 'success');
-
-      const agentSummary = 'Agents spawned: Overseer Alpha, System Test Researcher, System Test Critic, System Test Synthesizer.';
-      setReport({
-        title: 'System Test Report',
-        summary: `System test mode executed. ${agentSummary}`,
-        sections: [
-          {
-            title: 'System Test Summary',
-            content: `Test phrase detected. Vertical ${SYSTEM_TEST_VERTICAL_ID} selected. ${agentSummary}`,
-            sources: [testSource.uri]
-          }
-        ],
-        visualizations: [],
-        provenance: {
-          totalSources: 1,
-          methodAudit: 'System test run'
-        },
-        schemaVersion: 1
-      });
-
-      updateAgent(overseerId, { status: AgentStatus.COMPLETE });
-      logOverseer(
-        'PHASE 0: SYSTEM TEST',
-        'complete',
-        'deliver system test report',
-        'minimal token path executed',
-        'success'
-      );
-      setIsRunning(false);
-      return;
-    }
-
     try {
+      if (isSystemTestTopic(topic)) {
+        logOverseer(
+          'PHASE 0: SYSTEM TEST',
+          'detected test phrase',
+          'bypass external LLM and run smoke flow',
+          `vertical ${SYSTEM_TEST_VERTICAL_ID}`,
+          'success'
+        );
+
+        const testSource = {
+          uri: 'https://example.com/system-test',
+          title: 'System Test Source',
+          domain: 'example.com',
+          provider: 'system',
+          kind: 'web'
+        };
+        const testFinding: Finding = {
+          source: 'System Test Researcher',
+          content: 'System test search executed with minimal tokens.',
+          confidence: 1,
+          url: testSource.uri
+        };
+
+        const researcherId = generateId();
+        const researcher: Agent = {
+          id: researcherId,
+          name: 'System Test Researcher',
+          type: AgentType.RESEARCHER,
+          status: AgentStatus.SEARCHING,
+          task: 'System test search',
+          reasoning: [`Test phrase: ${SYSTEM_TEST_PHRASE}`],
+          findings: [],
+          parentId: overseerId
+        };
+        addAgent(researcher);
+        addLog(researcherId, researcher.name, 'Deployed for system test.', 'info');
+        await wait(60, signal);
+        updateAgent(researcherId, {
+          status: AgentStatus.COMPLETE,
+          findings: [testFinding],
+          reasoning: ['Completed minimal token search.']
+        });
+        addLog(researcherId, researcher.name, 'System test search complete.', 'success');
+        pushFinding({ ...testFinding, rawSources: [testSource] } as any);
+
+        const criticId = generateId();
+        const critic: Agent = {
+          id: criticId,
+          name: 'System Test Critic',
+          type: AgentType.CRITIC,
+          status: AgentStatus.ANALYZING,
+          task: 'System test critique',
+          reasoning: ['Validate minimal agent coverage.'],
+          findings: [],
+          parentId: overseerId
+        };
+        addAgent(critic);
+        addLog(criticId, critic.name, 'Running critique pass.', 'info');
+        await wait(40, signal);
+        updateAgent(criticId, {
+          status: AgentStatus.COMPLETE,
+          reasoning: ['No gaps detected in system test.']
+        });
+        addLog(criticId, critic.name, 'Critique complete.', 'success');
+
+        const synthesizerId = generateId();
+        const synthesizer: Agent = {
+          id: synthesizerId,
+          name: 'System Test Synthesizer',
+          type: AgentType.SYNTHESIZER,
+          status: AgentStatus.THINKING,
+          task: 'System test synthesis',
+          reasoning: ['Compile system test report.'],
+          findings: [],
+          parentId: overseerId
+        };
+        addAgent(synthesizer);
+        addLog(synthesizerId, synthesizer.name, 'Synthesizing system test report.', 'info');
+        await wait(40, signal);
+        updateAgent(synthesizerId, {
+          status: AgentStatus.COMPLETE,
+          reasoning: ['Report ready.']
+        });
+        addLog(synthesizerId, synthesizer.name, 'Synthesis complete.', 'success');
+
+        const agentSummary = 'Agents spawned: Overseer Alpha, System Test Researcher, System Test Critic, System Test Synthesizer.';
+        setReportSafe({
+          title: 'System Test Report',
+          summary: `System test mode executed. ${agentSummary}`,
+          sections: [
+            {
+              title: 'System Test Summary',
+              content: `Test phrase detected. Vertical ${SYSTEM_TEST_VERTICAL_ID} selected. ${agentSummary}`,
+              sources: [testSource.uri]
+            }
+          ],
+          visualizations: [],
+          provenance: {
+            totalSources: 1,
+            methodAudit: 'System test run'
+          },
+          schemaVersion: 1
+        });
+
+        updateAgent(overseerId, { status: AgentStatus.COMPLETE });
+        logOverseer(
+          'PHASE 0: SYSTEM TEST',
+          'complete',
+          'deliver system test report',
+          'minimal token path executed',
+          'success'
+        );
+        setIsRunningSafe(false);
+        return;
+      }
       if (provider === 'openai') {
         initializeOpenAI(apiKey);
       } else {
@@ -1217,11 +1337,11 @@ export const useOverseer = () => {
 
       const validVerticalIds = new Set(taxonomy.verticals.map(v => v.id));
       const hintVerticals = inferVerticalHints(topic);
-      let classificationRaw = await classifyResearchVertical({
+      let classificationRaw = await runSafely(classifyResearchVertical({
         topic,
         taxonomySummary: taxonomySummaryForClassifier,
         hintVerticalIds: hintVerticals
-      }, modelOverrides);
+      }, modelOverrides, requestOptions));
       let classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
       const weightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
       const selectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
@@ -1248,6 +1368,7 @@ export const useOverseer = () => {
           );
           const discoveryTexts: string[] = [];
           for (let i = 0; i < discoveryQueries.length; i++) {
+            ensureActive();
             const query = discoveryQueries[i];
             const agentId = generateId();
             const agent: Agent = {
@@ -1263,13 +1384,13 @@ export const useOverseer = () => {
             addAgent(agent);
             addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-            const result = await performDeepResearch(
+            const result = await runSafely(performDeepResearch(
               agent.name,
               'General discovery',
               query,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
-              { modelOverrides }
-            );
+              { modelOverrides, signal }
+            ));
 
             updateAgent(agentId, {
               status: AgentStatus.COMPLETE,
@@ -1282,12 +1403,12 @@ export const useOverseer = () => {
 
           const contextText = discoveryTexts.join('\n').substring(0, 12000);
           if (contextText.trim()) {
-            classificationRaw = await classifyResearchVertical({
+            classificationRaw = await runSafely(classifyResearchVertical({
               topic,
               taxonomySummary: taxonomySummaryForClassifier,
               hintVerticalIds: hintVerticals,
               contextText
-            }, modelOverrides);
+            }, modelOverrides, requestOptions));
             classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
             const reweightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
             const reselectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
@@ -1456,15 +1577,16 @@ export const useOverseer = () => {
         const snippet = context.resultText.substring(0, 8000);
 
         taxonomyGrowthQueue = taxonomyGrowthQueue.then(async () => {
+          if (!isActive()) return;
           try {
-            const proposals = await proposeTaxonomyGrowth({
+            const proposals = await runSafely(proposeTaxonomyGrowth({
               topic,
               agentName: context.agentName,
               agentFocus: context.focus,
               findingsText: snippet,
               taxonomySummary,
               hintVerticalIds: hintVerticals
-            }, modelOverrides);
+            }, modelOverrides, requestOptions));
             const vetResult = vetAndPersistTaxonomyProposals(proposals, {
               topic,
               agentId: context.agentId,
@@ -1534,8 +1656,9 @@ export const useOverseer = () => {
           `queries ${discoveryQueries.join(' | ')}`,
           'action'
         );
-        const discoveryPromises = discoveryQueries.map(async (query: string, index: number) => {
-          await new Promise(resolve => setTimeout(resolve, index * 600));
+          const discoveryPromises = discoveryQueries.map(async (query: string, index: number) => {
+          await wait(index * 600, signal);
+          ensureActive();
           const agentId = generateId();
           const agent: Agent = {
             id: agentId,
@@ -1550,13 +1673,13 @@ export const useOverseer = () => {
           addAgent(agent);
           addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-          const result = await performDeepResearch(
+          const result = await runSafely(performDeepResearch(
             agent.name,
             'Method discovery',
             query,
             (msg) => addLog(agentId, agent.name, msg, 'info'),
-            { modelOverrides, role: 'method_discovery' }
-          );
+            { modelOverrides, role: 'method_discovery', signal }
+          ));
 
           enqueueTaxonomyGrowth({
             agentId,
@@ -1571,7 +1694,13 @@ export const useOverseer = () => {
           });
           addLog(agentId, agent.name, `Method Discovery Complete. Sources Vetted: ${result.sources.length}`, 'success');
 
-          const methods = await extractResearchMethods(topic, result.text, researchContextText, modelOverrides);
+          const methods = await runSafely(extractResearchMethods(
+            topic,
+            result.text,
+            researchContextText,
+            modelOverrides,
+            requestOptions
+          ));
           const extracted = Array.isArray(methods?.methods) ? methods.methods : [];
           const extractedQueries = extracted.map((m: any) => m?.query).filter(Boolean);
           extractedQueries.forEach((q: string) => registerMethodQuery(q, { source: 'llm_method_discovery' }));
@@ -1579,7 +1708,7 @@ export const useOverseer = () => {
           usedQueries.add(query);
         });
 
-        await Promise.all(discoveryPromises);
+        await runSafely(Promise.all(discoveryPromises));
       }
 
       // --- PHASE 1: DIMENSIONAL MAPPING (SECTORS) ---
@@ -1590,7 +1719,13 @@ export const useOverseer = () => {
         undefined,
         'action'
       );
-      const sectorPlan = await generateSectorAnalysis(topic, skills, researchContextText, modelOverrides);
+      const sectorPlan = await runSafely(generateSectorAnalysis(
+        topic,
+        skills,
+        researchContextText,
+        modelOverrides,
+        requestOptions
+      ));
       const rawSectors = sectorPlan && Array.isArray(sectorPlan.sectors) ? sectorPlan.sectors : [];
       const weightMap = new Map(selectedVerticals.map(v => [v.id, v.weight]));
       const orderedPacks = [...tacticPacks].sort((a, b) => {
@@ -1719,6 +1854,7 @@ export const useOverseer = () => {
       let loopStopRound: number | null = null;
 
       for (let round = 1; round <= maxRounds; round += 1) {
+        ensureActive();
         const roundQueries: string[] = [];
         const roundSources: string[] = [];
         const roundSectors = round === 1 ? sectors : [];
@@ -1734,7 +1870,8 @@ export const useOverseer = () => {
           roundSectors.forEach((s: any) => roundQueries.push(s.initialQuery));
           const agentPromises = roundSectors.map(async (sector: any, index: number) => {
             // Stagger starts slightly to avoid instant rate limit hits (though unlikely with client-side)
-            await new Promise(resolve => setTimeout(resolve, index * 1000));
+            await wait(index * 1000, signal);
+            ensureActive();
 
             const agentId = generateId();
             const agent: Agent = {
@@ -1751,13 +1888,13 @@ export const useOverseer = () => {
             addLog(agentId, agent.name, `Deployed for: ${sector.focus}`, 'info');
 
             // The "10x" Loop: Broad -> Analyze -> verify -> verification searches
-            const result = await performDeepResearch(
+            const result = await runSafely(performDeepResearch(
               agent.name,
               sector.focus,
               sector.initialQuery,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
-              { modelOverrides, l1Role: 'deep_research_l1', l2Role: 'deep_research_l2' }
-            );
+              { modelOverrides, l1Role: 'deep_research_l1', l2Role: 'deep_research_l2', signal }
+            ));
             roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
 
             enqueueTaxonomyGrowth({
@@ -1781,10 +1918,10 @@ export const useOverseer = () => {
             });
 
             addLog(agentId, agent.name, `Sector Analysis Complete. Sources Vetted: ${result.sources.length}`, 'success');
-            findingsRef.current.push({ ...newFinding, ...{ rawSources: result.sources } } as any);
+            pushFinding({ ...newFinding, ...{ rawSources: result.sources } } as any);
           });
 
-          await Promise.all(agentPromises);
+          await runSafely(Promise.all(agentPromises));
         }
 
         const maxAdditionalAgents = Math.max(0, maxAgents - roundSectors.length);
@@ -1805,7 +1942,8 @@ export const useOverseer = () => {
             'action'
           );
           const methodAgentPromises = methodQueriesToRun.map(async (query: string, index: number) => {
-            await new Promise(resolve => setTimeout(resolve, index * 700));
+            await wait(index * 700, signal);
+            ensureActive();
             const agentId = generateId();
             const agent: Agent = {
               id: agentId,
@@ -1820,13 +1958,13 @@ export const useOverseer = () => {
             addAgent(agent);
             addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-            const result = await performDeepResearch(
+            const result = await runSafely(performDeepResearch(
               agent.name,
               'Independent method audit',
               query,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
-              { modelOverrides, role: 'method_audit' }
-            );
+              { modelOverrides, role: 'method_audit', signal }
+            ));
             roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
             enqueueTaxonomyGrowth({
               agentId,
@@ -1850,10 +1988,10 @@ export const useOverseer = () => {
             });
 
             addLog(agentId, agent.name, `Method Audit Complete. Sources Vetted: ${result.sources.length}`, 'success');
-            findingsRef.current.push({ ...newFinding, ...{ rawSources: result.sources } } as any);
+            pushFinding({ ...newFinding, ...{ rawSources: result.sources } } as any);
           });
 
-          await Promise.all(methodAgentPromises);
+          await runSafely(Promise.all(methodAgentPromises));
         } else if (round === 1) {
           logOverseer(
             'PHASE 2B: METHOD AUDIT',
@@ -1935,7 +2073,13 @@ export const useOverseer = () => {
       );
       
       const allFindingsText = findingsRef.current.map(f => f.content).join('\n');
-      const critique = await critiqueAndFindGaps(topic, allFindingsText, researchContextText, modelOverrides);
+      const critique = await runSafely(critiqueAndFindGaps(
+        topic,
+        allFindingsText,
+        researchContextText,
+        modelOverrides,
+        requestOptions
+      ));
       const latestMetrics = exhaustionTracker.rounds[exhaustionTracker.rounds.length - 1];
       const exhaustionScore = latestMetrics ? computeExhaustionScore(latestMetrics) : 0;
       const isExhausted = latestMetrics ? exhaustionScore >= earlyStopDiminishingScore : false;
@@ -1964,13 +2108,13 @@ export const useOverseer = () => {
          
          const gapSources: string[] = [];
          // Use Deep Research even for the gap fill
-         const gapResult = await performDeepResearch(
+         const gapResult = await runSafely(performDeepResearch(
              gapAgent.name, 
              critique.newMethod.task, 
              critique.newMethod.query, 
              (msg) => addLog(gapAgentId, gapAgent.name, msg, 'info'),
-             { modelOverrides, role: 'gap_hunter' }
-         );
+             { modelOverrides, role: 'gap_hunter', signal }
+         ));
          gapSources.push(...gapResult.sources.map(s => s.uri).filter(Boolean));
 
          enqueueTaxonomyGrowth({
@@ -1987,7 +2131,7 @@ export const useOverseer = () => {
              rawSources: gapResult.sources
          };
          updateAgent(gapAgentId, { status: AgentStatus.COMPLETE });
-         findingsRef.current.push(gapFinding as any);
+         pushFinding(gapFinding as any);
          recordExhaustionRound(
            exhaustionTracker,
            'gap_fill',
@@ -2042,7 +2186,8 @@ export const useOverseer = () => {
           );
           const phase3BSources: string[] = [];
           const exhaustPromises = exhaustQueries.map(async (query: string, index: number) => {
-            await new Promise(resolve => setTimeout(resolve, index * 700));
+            await wait(index * 700, signal);
+            ensureActive();
             const agentId = generateId();
             const agent: Agent = {
               id: agentId,
@@ -2057,13 +2202,13 @@ export const useOverseer = () => {
             addAgent(agent);
             addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-            const result = await performDeepResearch(
+            const result = await runSafely(performDeepResearch(
               agent.name,
               'Exhaustion test',
               query,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
-              { modelOverrides, role: 'exhaustion_scout' }
-            );
+              { modelOverrides, role: 'exhaustion_scout', signal }
+            ));
             phase3BSources.push(...result.sources.map(s => s.uri).filter(Boolean));
             enqueueTaxonomyGrowth({
               agentId,
@@ -2087,11 +2232,11 @@ export const useOverseer = () => {
             });
 
             addLog(agentId, agent.name, `Exhaustion Scout Complete. Sources Vetted: ${result.sources.length}`, 'success');
-            findingsRef.current.push({ ...newFinding, ...{ rawSources: result.sources } } as any);
+            pushFinding({ ...newFinding, ...{ rawSources: result.sources } } as any);
             usedQueries.add(query);
           });
 
-          await Promise.all(exhaustPromises);
+          await runSafely(Promise.all(exhaustPromises));
           recordExhaustionRound(exhaustionTracker, 'exhaustion_test', exhaustQueries, phase3BSources);
         } else {
           logOverseer(
@@ -2116,7 +2261,13 @@ export const useOverseer = () => {
 
       const allRawSources = findingsRef.current.flatMap((f: any) => f.rawSources || []);
       const allowedSources = uniqueList(allRawSources.map((s: any) => s.uri).filter(Boolean));
-      const finalReportData = await synthesizeGrandReport(topic, findingsRef.current, allowedSources, modelOverrides);
+      const finalReportData = await runSafely(synthesizeGrandReport(
+        topic,
+        findingsRef.current,
+        allowedSources,
+        modelOverrides,
+        requestOptions
+      ));
       const rawText = (finalReportData as any)?.__rawText;
       if (rawText) {
         const providerLabel = provider === 'openai' ? 'openai' : 'gemini';
@@ -2250,7 +2401,13 @@ export const useOverseer = () => {
         schemaVersion: typeof (normalizedReport as any)?.schemaVersion === 'number' ? (normalizedReport as any).schemaVersion : 1
       };
 
-      const validation = await validateReport(topic, reportCandidate, allowedSources, modelOverrides);
+      const validation = await runSafely(validateReport(
+        topic,
+        reportCandidate,
+        allowedSources,
+        modelOverrides,
+        requestOptions
+      ));
       const isValid = validation?.isValid === true;
       if (!isValid) {
         const issues = Array.isArray(validation?.issues) ? validation.issues : [];
@@ -2298,7 +2455,7 @@ export const useOverseer = () => {
         );
       }
 
-      setReport(reportCandidate);
+      setReportSafe(reportCandidate);
       
       updateAgent(overseerId, { status: AgentStatus.COMPLETE });
       logOverseer(
@@ -2310,6 +2467,9 @@ export const useOverseer = () => {
       );
 
     } catch (e: any) {
+      if (signal.aborted || runVersionRef.current !== runVersion || e?.name === 'AbortError') {
+        return;
+      }
       console.error(e);
       logOverseer(
         'PHASE 4: FAILURE',
@@ -2320,10 +2480,10 @@ export const useOverseer = () => {
       );
       updateAgent(overseerId, { status: AgentStatus.FAILED });
       if (e.message && (e.message.toLowerCase().includes("api key") || e.message.includes("401"))) {
-        setIsRunning(false);
+        setIsRunningSafe(false);
       }
     }
   }, [skills]);
 
-  return { agents, logs, report, isRunning, startResearch, skills };
+  return { agents, logs, report, isRunning, startResearch, resetRun, skills };
 };

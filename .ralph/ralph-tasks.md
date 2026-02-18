@@ -12,16 +12,16 @@
   - [x] Add provider snapshot tests to validate normalization across OpenAI + Gemini payload variants
   - [x] Acceptance: running a default model search returns >0 sources for a stable test topic and logs sources in the report UI with normalized sources visible
 
-- [ ] Epic: Always-available “New Search” reset button
-  - [ ] Add a persistent “New Search” control in the primary UI (visible even during errors or ongoing runs)
-  - [ ] Implement a per‑run `AbortController` and ensure all streams, tool calls, and async loops respect cancellation
-  - [ ] Add run‑versioning so late events from prior runs are ignored after reset
-  - [ ] On click, reset run state (agents, logs, report, findings, progress flags) and cancel any in‑flight run safely
-  - [ ] Add a regression test to ensure no further logs or streaming updates appear after a reset
-  - [ ] Add a UI smoke test step that triggers “New Search” mid‑run and verifies no new logs appear afterward
-  - [ ] Add reset observability: log reset reason, run id, and cancellation status
-  - [ ] Ensure the reset does not clear saved settings or API keys
-  - [ ] Acceptance: user can abort or recover from any state by clicking “New Search” and immediately start a fresh run
+- [x] Epic: Always-available “New Search” reset button
+  - [x] Add a persistent “New Search” control in the primary UI (visible even during errors or ongoing runs)
+  - [x] Implement a per‑run `AbortController` and ensure all streams, tool calls, and async loops respect cancellation
+  - [x] Add run‑versioning so late events from prior runs are ignored after reset
+  - [x] On click, reset run state (agents, logs, report, findings, progress flags) and cancel any in‑flight run safely
+  - [x] Add a regression test to ensure no further logs or streaming updates appear after a reset
+  - [x] Add a UI smoke test step that triggers “New Search” mid‑run and verifies no new logs appear afterward
+  - [x] Add reset observability: log reset reason, run id, and cancellation status
+  - [x] Ensure the reset does not clear saved settings or API keys
+  - [x] Acceptance: user can abort or recover from any state by clicking “New Search” and immediately start a fresh run
 
 - [ ] Epic: Universal settings sync (cross-device) + Save behavior
   - [ ] Verify current Save behavior and identify why the dialog remains open
