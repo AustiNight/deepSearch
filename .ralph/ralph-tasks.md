@@ -35,7 +35,7 @@
   - [x] Add unit/integration tests for address normalization, parcel resolution (multi-parcel, unit-only, rural), evidence gating, and `PropertyDossier` population
   - [x] Add failure-mode test suite (schema drift, portal 429/503, stale datasets, mixed parcel formats, missing geometry)
   - [x] Add E2E golden-fixture tests for address reports using frozen datasets
-  - [ ] Add migration/backfill plan for cached reports and dataset index when schemas change
+  - [x] Add migration/backfill plan for cached reports and dataset index when schemas change
   - [ ] Add security review for key storage, logging, and redaction in telemetry
   - [ ] Define performance constraints (max external calls, portal discovery caps, latency budgets) and enforce with guardrails
   - [ ] Acceptance: evidence threshold constants are defined and enforced (with tests that fail/pass around the thresholds), address reports include a populated `PropertyDossier` with required fields when available, primary-record coverage (or explicit unavailability) is shown, confidence tags render for each section, and Data Gaps include exact source pointers
