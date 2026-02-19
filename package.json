@@ -14,6 +14,7 @@
     "test:sources": "node scripts/source-normalization.test.mjs",
     "test:settings": "node scripts/settings-serialization.test.mjs",
     "test:address-quality": "node --loader ./scripts/ts-loader.mjs scripts/address-quality.test.mjs",
+    "test:address-report": "node --loader ./scripts/ts-loader.mjs scripts/address-report.e2e.test.mjs",
     "test:failure-modes": "node --loader ./scripts/ts-loader.mjs scripts/failure-modes.test.mjs",
     "test:ui": "playwright test"
   },

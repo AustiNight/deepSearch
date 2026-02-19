@@ -1,0 +1,337 @@
+{
+  "topic": "123 Main Street, Springfield, IL 62704",
+  "report": {
+    "title": "Property Dossier: 123 Main Street, Springfield, IL",
+    "summary": "Snapshot report assembled from frozen assessor, recorder, tax, zoning, and permits datasets.",
+    "sections": [
+      {
+        "title": "Parcel & Legal",
+        "content": "Assessor parcel 123-456-789 lists situs 123 Main Street with a 0.23-acre lot and a 1987 build year. Legal description references Lot 12, Block 3.",
+        "sources": [
+          "https://assessor.springfield.gov/parcel/123-456-789"
+        ],
+        "confidence": 0.7775
+      },
+      {
+        "title": "Ownership/Transfers",
+        "content": "Recorder index shows the most recent deed recorded in 2021 for the current owner, with instrument 2021-12345.",
+        "sources": [
+          "https://recorder.springfield.gov/documents/2021-12345"
+        ],
+        "confidence": 0.7775
+      },
+      {
+        "title": "Tax & Appraisal",
+        "content": "The 2024 tax roll lists assessed value and confirms the parcel account remains active with the tax collector.",
+        "sources": [
+          "https://tax.springfield.gov/tax-roll/2024/123-456-789"
+        ],
+        "confidence": 0.7775
+      },
+      {
+        "title": "Zoning/Land Use",
+        "content": "Zoning GIS indicates R-1 single-family residential classification with standard lot coverage limits.",
+        "sources": [
+          "https://gis.springfield.gov/arcgis/rest/services/Zoning/FeatureServer/0"
+        ],
+        "confidence": 0.7775
+      },
+      {
+        "title": "Permits & Code",
+        "content": "Permit history includes a reroof permit in 2019. No code enforcement case files were surfaced in the permit portal.",
+        "sources": [
+          "https://permits.springfield.gov/permits?address=123+Main+St"
+        ],
+        "confidence": 0.7775
+      },
+      {
+        "title": "Neighborhood Context",
+        "content": "Neighborhood statistics show stable occupancy and median home values trending upward over the last three years.",
+        "sources": [
+          "https://data.springfield.gov/resource/neighborhood-stats.json"
+        ],
+        "confidence": 0.6525
+      },
+      {
+        "title": "Data Gaps & Next Steps",
+        "content": "Code enforcement case history was not located in the permit portal. Confirm with the Springfield code enforcement office or request records through the city clerk.",
+        "sources": [
+          "https://permits.springfield.gov/permits?address=123+Main+St"
+        ],
+        "confidence": 0.7775
+      }
+    ],
+    "visualizations": [],
+    "provenance": {
+      "totalSources": 6,
+      "methodAudit": "Fixture: frozen dataset run.",
+      "primaryRecordCoverage": {
+        "complete": false,
+        "entries": [
+          {
+            "recordType": "assessor_parcel",
+            "status": "covered",
+            "availabilityStatus": "unknown",
+            "matchedSources": [
+              "https://assessor.springfield.gov/parcel/123-456-789"
+            ]
+          },
+          {
+            "recordType": "tax_collector",
+            "status": "covered",
+            "availabilityStatus": "unknown",
+            "matchedSources": [
+              "https://tax.springfield.gov/tax-roll/2024/123-456-789"
+            ]
+          },
+          {
+            "recordType": "deed_recorder",
+            "status": "covered",
+            "availabilityStatus": "unknown",
+            "matchedSources": [
+              "https://recorder.springfield.gov/documents/2021-12345"
+            ]
+          },
+          {
+            "recordType": "zoning_gis",
+            "status": "covered",
+            "availabilityStatus": "unknown",
+            "matchedSources": [
+              "https://gis.springfield.gov/arcgis/rest/services/Zoning/FeatureServer/0"
+            ]
+          },
+          {
+            "recordType": "permits",
+            "status": "covered",
+            "availabilityStatus": "unknown",
+            "matchedSources": [
+              "https://permits.springfield.gov/permits?address=123+Main+St"
+            ]
+          },
+          {
+            "recordType": "code_enforcement",
+            "status": "unknown",
+            "availabilityStatus": "unknown",
+            "matchedSources": []
+          }
+        ],
+        "missing": [
+          "code_enforcement"
+        ],
+        "unavailable": [],
+        "generatedAt": "2025-02-01"
+      },
+      "datasetCompliance": [
+        {
+          "datasetId": "neighborhood-stats",
+          "title": "Springfield Neighborhood Statistics",
+          "portalType": "socrata",
+          "portalUrl": "https://data.springfield.gov",
+          "dataUrl": "https://data.springfield.gov/resource/neighborhood-stats.json",
+          "homepageUrl": "https://data.springfield.gov/datasets/neighborhood-stats",
+          "source": "Springfield Open Data",
+          "license": "Open Data License",
+          "licenseUrl": "https://data.springfield.gov/license",
+          "termsOfService": "Open data for public use with attribution required.",
+          "termsUrl": "https://data.springfield.gov/terms",
+          "accessConstraints": [
+            "Attribution required"
+          ],
+          "retrievedAt": "2025-01-15T12:00:00Z",
+          "lastUpdated": "2024-12-20",
+          "attribution": "Springfield Open Data — \"Springfield Neighborhood Statistics\" (data.springfield.gov)",
+          "attributionRequired": true,
+          "attributionStatus": "ok",
+          "complianceAction": "allow",
+          "complianceNotes": []
+        }
+      ],
+      "compliance": {
+        "mode": "enforce",
+        "signoffRequired": true,
+        "signoffProvided": false,
+        "gateStatus": "signoff_required",
+        "blockedSources": [],
+        "zeroCostMode": true,
+        "reviewRequired": false,
+        "notes": [
+          "Compliance sign-off required before rollout."
+        ]
+      }
+    },
+    "schemaVersion": 1,
+    "propertyDossier": {
+      "schemaVersion": 1,
+      "subject": {
+        "address": "123 Main Street, Springfield, IL 62704",
+        "normalizedAddress": "123 Main St, Springfield, IL 62704",
+        "jurisdiction": {
+          "country": "US",
+          "state": "IL",
+          "county": "Sangamon",
+          "city": "Springfield"
+        }
+      },
+      "dataGaps": [
+        {
+          "id": "gap-m6m556o0-931ezr",
+          "recordType": "code_enforcement",
+          "description": "Primary record code enforcement is unknown.",
+          "reason": "unknown",
+          "expectedSources": [
+            {
+              "label": "Code enforcement case search",
+              "portalUrl": "https://springfield.il.gov/code-enforcement"
+            }
+          ],
+          "severity": "minor",
+          "status": "unknown",
+          "detectedAt": "2025-02-01",
+          "impact": "Record coverage is incomplete for this section."
+        }
+      ],
+      "claims": [
+        {
+          "id": "claim-1",
+          "fieldPath": "/parcel",
+          "claim": "Assessor parcel 123-456-789 lists situs 123 Main Street with a 0.23-acre lot and a 1987 build year.",
+          "citations": [
+            {
+              "sourceId": "src-1"
+            }
+          ],
+          "confidence": 0.7775,
+          "createdAt": "2025-02-01"
+        },
+        {
+          "id": "claim-2",
+          "fieldPath": "/ownership",
+          "claim": "Recorder index shows the most recent deed recorded in 2021 for the current owner, with instrument 2021-12345.",
+          "citations": [
+            {
+              "sourceId": "src-2"
+            }
+          ],
+          "confidence": 0.7775,
+          "createdAt": "2025-02-01"
+        },
+        {
+          "id": "claim-3",
+          "fieldPath": "/taxAppraisal",
+          "claim": "The 2024 tax roll lists assessed value and confirms the parcel account remains active with the tax collector.",
+          "citations": [
+            {
+              "sourceId": "src-3"
+            }
+          ],
+          "confidence": 0.7775,
+          "createdAt": "2025-02-01"
+        },
+        {
+          "id": "claim-4",
+          "fieldPath": "/zoningLandUse",
+          "claim": "Zoning GIS indicates R-1 single-family residential classification with standard lot coverage limits.",
+          "citations": [
+            {
+              "sourceId": "src-4"
+            }
+          ],
+          "confidence": 0.7775,
+          "createdAt": "2025-02-01"
+        },
+        {
+          "id": "claim-5",
+          "fieldPath": "/permitsAndCode",
+          "claim": "Permit history includes a reroof permit in 2019.",
+          "citations": [
+            {
+              "sourceId": "src-5"
+            }
+          ],
+          "confidence": 0.7775,
+          "createdAt": "2025-02-01"
+        },
+        {
+          "id": "claim-6",
+          "fieldPath": "/neighborhoodContext",
+          "claim": "Neighborhood statistics show stable occupancy and median home values trending upward over the last three years.",
+          "citations": [
+            {
+              "sourceId": "src-6"
+            }
+          ],
+          "confidence": 0.6525,
+          "createdAt": "2025-02-01"
+        },
+        {
+          "id": "claim-7",
+          "fieldPath": "/dataGaps",
+          "claim": "Code enforcement case history was not located in the permit portal.",
+          "citations": [
+            {
+              "sourceId": "src-5"
+            }
+          ],
+          "confidence": 0.7775,
+          "createdAt": "2025-02-01"
+        }
+      ],
+      "sources": [
+        {
+          "id": "src-1",
+          "url": "https://assessor.springfield.gov/parcel/123-456-789",
+          "title": "Springfield County Assessor Parcel Record",
+          "publisher": "assessor.springfield.gov",
+          "sourceType": "authoritative"
+        },
+        {
+          "id": "src-2",
+          "url": "https://recorder.springfield.gov/documents/2021-12345",
+          "title": "Sangamon County Recorder Deed 2021-12345",
+          "publisher": "recorder.springfield.gov",
+          "sourceType": "authoritative"
+        },
+        {
+          "id": "src-3",
+          "url": "https://tax.springfield.gov/tax-roll/2024/123-456-789",
+          "title": "Springfield County Tax Roll 2024",
+          "publisher": "tax.springfield.gov",
+          "sourceType": "authoritative"
+        },
+        {
+          "id": "src-4",
+          "url": "https://gis.springfield.gov/arcgis/rest/services/Zoning/FeatureServer/0",
+          "title": "Springfield Zoning GIS Map",
+          "publisher": "gis.springfield.gov",
+          "sourceType": "authoritative"
+        },
+        {
+          "id": "src-5",
+          "url": "https://permits.springfield.gov/permits?address=123+Main+St",
+          "title": "Springfield Building Permit Search",
+          "publisher": "permits.springfield.gov",
+          "sourceType": "authoritative"
+        },
+        {
+          "id": "src-6",
+          "url": "https://data.springfield.gov/resource/neighborhood-stats.json",
+          "title": "Springfield Neighborhood Statistics 2024",
+          "publisher": "data.springfield.gov",
+          "sourceType": "quasi_official"
+        }
+      ]
+    }
+  },
+  "evidence": {
+    "status": {
+      "totalSources": 6,
+      "authoritativeSources": 6,
+      "maxAuthorityScore": 100,
+      "meetsTotal": true,
+      "meetsAuthoritative": true,
+      "meetsAuthorityScore": true,
+      "meetsAll": true
+    },
+    "reasons": []
+  }
+}
