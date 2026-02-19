@@ -1501,6 +1501,38 @@ export const useOverseer = () => {
       const companyDomainHint = Array.isArray(slotValuesAny.companyDomain) ? String(slotValuesAny.companyDomain[0] || '') : '';
       const brandDomainHint = Array.isArray(slotValuesAny.brandDomain) ? String(slotValuesAny.brandDomain[0] || '') : '';
       const { packs: tacticPacks, expandedAll: expandedTactics } = buildTacticPacks(taxonomy, selectedVerticalIds, slotValues);
+      const addressLike = isAddressLike(topic);
+      const addressDirectQueries = addressLike
+        ? buildAddressDirectQueries(slotValues as Record<string, unknown>)
+        : [];
+      if (addressDirectQueries.length > 0) {
+        const parcelPackIndex = tacticPacks.findIndex(pack => pack.verticalId === 'location' && pack.subtopicId === 'parcel_real_estate');
+        const addressExpanded = addressDirectQueries.map((query, index) => ({
+          id: `location-parcel-address-direct-${index + 1}`,
+          template: query,
+          query,
+          verticalId: 'location',
+          subtopicId: 'parcel_real_estate',
+          methodId: 'address_direct',
+          verticalLabel: 'Location (City / Region / Property)',
+          subtopicLabel: 'Parcel/Real Estate',
+          methodLabel: 'Address Direct'
+        }));
+        if (parcelPackIndex >= 0) {
+          tacticPacks[parcelPackIndex].expanded.push(...addressExpanded);
+        } else if (selectedVerticalIds.includes('location')) {
+          tacticPacks.push({
+            verticalId: 'location',
+            verticalLabel: 'Location (City / Region / Property)',
+            subtopicId: 'parcel_real_estate',
+            subtopicLabel: 'Parcel/Real Estate',
+            methodId: 'address_direct',
+            methodLabel: 'Address Direct',
+            expanded: addressExpanded
+          });
+        }
+        expandedTactics.push(...addressExpanded);
+      }
       const tacticPackQueries = uniqueList(expandedTactics.map(t => t.query));
       const subtopicSeedQueries = uniqueList(
         tacticPacks.map(pack => pack.expanded[0]?.query).filter(Boolean) as string[]
@@ -1667,14 +1699,10 @@ export const useOverseer = () => {
       const tacticDiscoveryQueries = uniqueList(
         tacticPacks.flatMap(pack => pack.expanded.slice(1, 3).map(t => t.query))
       );
-      const addressDirectQueries = isAddressLike(topic)
-        ? buildAddressDirectQueries(slotValues as Record<string, unknown>)
-        : [];
       const forcedDiscoveryQueries = discoveryTemplateQueries
         .filter(q => q.toLowerCase().includes('public records'))
         .slice(0, 1);
       const discoveryQueries = uniqueList([
-        ...addressDirectQueries,
         ...forcedDiscoveryQueries,
         ...(tacticDiscoveryQueries.length > 0 ? tacticDiscoveryQueries : subtopicSeedQueries),
         ...discoveryTemplateQueries
