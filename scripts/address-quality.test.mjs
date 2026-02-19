@@ -4,6 +4,7 @@ import { normalizeAddressVariants } from "../services/addressNormalization.ts";
 import { resolveParcelWorkflow } from "../services/parcelResolution.ts";
 import { buildCitationRegistry, buildPropertyDossier } from "../services/propertyDossier.ts";
 import { evaluateEvidence, buildEvidenceGateReasons } from "../services/evidenceGating.ts";
+import { classifyAddressScope } from "../services/addressScope.ts";
 import {
   MIN_EVIDENCE_TOTAL_SOURCES,
   MIN_EVIDENCE_AUTHORITATIVE_SOURCES,
@@ -228,5 +229,31 @@ assert.ok(
   dossier.dataGaps.some((gap) => gap.recordType === "permits"),
   "Expected primary record coverage gap for permits."
 );
+
+const usScope = classifyAddressScope({
+  topic: "1600 Pennsylvania Ave NW, Washington, DC 20500"
+});
+assert.equal(usScope.scope, "us");
+
+const ukScope = classifyAddressScope({
+  topic: "10 Downing Street, London SW1A 2AA, UK"
+});
+assert.equal(ukScope.scope, "non_us");
+
+const caScope = classifyAddressScope({
+  topic: "111 Richmond St W, Toronto, ON M5V 3L9, Canada"
+});
+assert.equal(caScope.scope, "non_us");
+
+const euScope = classifyAddressScope({
+  topic: "Unter den Linden 77, DE-10117 Berlin"
+});
+assert.equal(euScope.scope, "non_us");
+
+const slotScope = classifyAddressScope({
+  topic: "Broadway 1",
+  slots: { country: ["Canada"] }
+});
+assert.equal(slotScope.scope, "non_us");
 
 console.log("address-quality.test.mjs: ok");

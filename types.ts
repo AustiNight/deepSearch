@@ -352,7 +352,8 @@ export type DataGapReasonCode =
   | 'data_unavailable'
   | 'parcel_ambiguous'
   | 'authoritative_sources_missing'
-  | 'confidence_below_minimum';
+  | 'confidence_below_minimum'
+  | 'unsupported_jurisdiction';
 
 export interface DataGap {
   id: string;
@@ -552,6 +553,7 @@ export type OpenDataFeatureFlags = {
   autoIngestion: boolean;
   evidenceRecovery: boolean;
   gatingEnforcement: boolean;
+  usOnlyAddressPolicy: boolean;
 };
 
 export type OpenDataAuthConfig = {

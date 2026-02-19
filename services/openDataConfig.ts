@@ -19,7 +19,8 @@ const hasStorage = (storage?: Storage) => {
 const defaultFlags: OpenDataFeatureFlags = {
   autoIngestion: false,
   evidenceRecovery: true,
-  gatingEnforcement: true
+  gatingEnforcement: true,
+  usOnlyAddressPolicy: true
 };
 
 const defaultAuth: OpenDataAuthConfig = {};
@@ -69,7 +70,10 @@ const mergeConfig = (input: Partial<OpenDataRuntimeConfig>): OpenDataRuntimeConf
         : defaultConfig.featureFlags.evidenceRecovery,
       gatingEnforcement: typeof input.featureFlags?.gatingEnforcement === "boolean"
         ? input.featureFlags.gatingEnforcement
-        : defaultConfig.featureFlags.gatingEnforcement
+        : defaultConfig.featureFlags.gatingEnforcement,
+      usOnlyAddressPolicy: typeof input.featureFlags?.usOnlyAddressPolicy === "boolean"
+        ? input.featureFlags.usOnlyAddressPolicy
+        : defaultConfig.featureFlags.usOnlyAddressPolicy
     },
     auth: {
       socrataAppToken: input.auth?.socrataAppToken,

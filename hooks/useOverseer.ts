@@ -37,6 +37,8 @@ import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUE
 import { normalizeAddressVariants } from '../services/addressNormalization';
 import { evaluatePrimaryRecordCoverage } from '../services/primaryRecordCoverage';
 import { getOpenDatasetHints } from '../services/openDataPortalService';
+import { buildUnsupportedJurisdictionGap, classifyAddressScope, AddressScopeClassification } from '../services/addressScope';
+import { getOpenDataConfig } from '../services/openDataConfig';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -332,20 +334,27 @@ const rankSourcesByAuthorityAndRecency = (sources: NormalizedSource[]) => {
 const getSlotValue = (slots: Record<string, unknown>, key: string) =>
   Array.isArray(slots[key]) ? String(slots[key]?.[0] || '').trim() : '';
 
-const buildJurisdictionFromSlots = (slots: Record<string, unknown>, addressLike: boolean): Jurisdiction | undefined => {
+const buildJurisdictionFromSlots = (
+  slots: Record<string, unknown>,
+  addressLike: boolean,
+  addressScope?: AddressScopeClassification
+): Jurisdiction | undefined => {
   if (!addressLike) return undefined;
   const state = getSlotValue(slots, 'state');
   const county = getSlotValue(slots, 'countyPrimary') || getSlotValue(slots, 'county');
   const city = getSlotValue(slots, 'city');
   const hasAny = Boolean(state || county || city);
+  const country = addressScope?.scope === 'non_us'
+    ? (addressScope.country || 'non-US')
+    : 'US';
   return hasAny
     ? {
-        country: 'US',
+        country,
         state: state || undefined,
         county: county || undefined,
         city: city || undefined
       }
-    : { country: 'US' };
+    : country ? { country } : undefined;
 };
 
 const roundMetric = (value: number, digits = 3) => {
@@ -2044,13 +2053,28 @@ export const useOverseer = () => {
 
       const slotValues = buildSlotValues(topic, nameVariants, addressLike);
       const slotValuesAny = slotValues as Record<string, unknown>;
+      const addressScope = addressLike ? classifyAddressScope({ topic, slots: slotValuesAny }) : undefined;
+      const usOnlyAddressPolicy = getOpenDataConfig().featureFlags.usOnlyAddressPolicy;
+      const enforceUsOnlyPolicy = Boolean(addressLike && usOnlyAddressPolicy && addressScope?.scope === 'non_us');
+      const unsupportedJurisdictionGap = enforceUsOnlyPolicy && addressScope
+        ? buildUnsupportedJurisdictionGap({ classification: addressScope })
+        : null;
+      if (enforceUsOnlyPolicy) {
+        logOverseer(
+          'PHASE 0: US-ONLY POLICY',
+          'non-US address detected',
+          'skip US-specific record gates and portal queries',
+          addressScope?.country ? `country ${addressScope.country}` : 'country unknown',
+          'warning'
+        );
+      }
       const companyDomainHint = Array.isArray(slotValuesAny.companyDomain) ? String(slotValuesAny.companyDomain[0] || '') : '';
       const brandDomainHint = Array.isArray(slotValuesAny.brandDomain) ? String(slotValuesAny.brandDomain[0] || '') : '';
       const { packs: tacticPacks, expandedAll: expandedTactics } = buildTacticPacks(taxonomy, selectedVerticalIds, slotValues);
       const topicVariants = addressLike && Array.isArray(slotValuesAny.topic)
         ? slotValuesAny.topic.map(value => String(value || '').trim()).filter(Boolean)
         : [topic];
-      const addressDirectQueries = addressLike
+      const addressDirectQueries = addressLike && !enforceUsOnlyPolicy
         ? buildAddressDirectQueries(slotValues as Record<string, unknown>)
         : [];
       if (addressDirectQueries.length > 0) {
@@ -2255,7 +2279,7 @@ export const useOverseer = () => {
         ...(tacticDiscoveryQueries.length > 0 ? tacticDiscoveryQueries : subtopicSeedQueries),
         ...discoveryTemplateQueries
       ]).slice(0, Math.min(6, maxMethodAgents));
-      const openDataDiscoveryHints = addressLike
+      const openDataDiscoveryHints = addressLike && !enforceUsOnlyPolicy
         ? getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"]).slice(0, 4)
         : [];
       const openDataDiscoveryQueries = openDataDiscoveryHints.map((dataset) => `${dataset.portalUrl} "${dataset.title}"`);
@@ -2920,7 +2944,7 @@ export const useOverseer = () => {
 
       // --- PHASE 3C: EVIDENCE RECOVERY (ADDRESS-LIKE) ---
       let evidenceRecoveryMetrics: EvidenceRecoveryMetrics | undefined;
-      if (addressLike) {
+      if (addressLike && !enforceUsOnlyPolicy) {
         const evidenceRecoveryStart = Date.now();
         const collectSources = () => findingsRef.current.flatMap((f: any) => Array.isArray(f.rawSources) ? f.rawSources : []);
         let evidenceStatus = evaluateEvidence(collectSources());
@@ -3212,6 +3236,19 @@ export const useOverseer = () => {
         preSynthesisGatePassed = evidenceStatus.meetsAll;
         evidenceRecoveryMetrics.latencyMs = Date.now() - evidenceRecoveryStart;
         runMetrics.evidenceRecovery = evidenceRecoveryMetrics;
+      } else if (addressLike && enforceUsOnlyPolicy) {
+        logOverseer(
+          'PHASE 3C: EVIDENCE RECOVERY',
+          'skip recovery for non-US address',
+          'US-only policy active',
+          addressScope?.country ? `country ${addressScope.country}` : undefined,
+          'warning'
+        );
+        runMetrics.evidenceRecovery = {
+          needed: false,
+          attempted: false,
+          success: true
+        };
       }
 
       // --- PHASE 4: GRAND SYNTHESIS ---
@@ -3410,7 +3447,7 @@ export const useOverseer = () => {
         return problem === 'missing_citation' || problem === 'missing_citations';
       }).length;
       const postSynthesisPassed = isValid && validationIssues.length === 0;
-      if (addressLike) {
+      if (addressLike && !enforceUsOnlyPolicy) {
         const reasons: string[] = [];
         if (!isValid) reasons.push('validation_failed');
         if (missingCitationCount > 0) reasons.push(`missing_citations:${missingCitationCount}`);
@@ -3486,8 +3523,8 @@ export const useOverseer = () => {
           }
         };
       }
-      const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike);
-      const primaryRecordCoverage = addressLike
+      const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike, addressScope);
+      const primaryRecordCoverage = addressLike && !enforceUsOnlyPolicy
         ? evaluatePrimaryRecordCoverage(reportSourceDetails, jurisdiction)
         : undefined;
       if (primaryRecordCoverage) {
@@ -3508,7 +3545,7 @@ export const useOverseer = () => {
           );
         }
       }
-      const parcelResolutionMetrics = deriveParcelResolutionMetrics(primaryRecordCoverage, addressLike);
+      const parcelResolutionMetrics = deriveParcelResolutionMetrics(primaryRecordCoverage, addressLike && !enforceUsOnlyPolicy);
       if (parcelResolutionMetrics) {
         runMetrics.parcelResolution = parcelResolutionMetrics;
       }
@@ -3542,14 +3579,15 @@ export const useOverseer = () => {
             jurisdiction,
             sections: reportCandidate.sections,
             registry: citationRegistry,
-            primaryRecordCoverage
+            primaryRecordCoverage,
+            dataGaps: unsupportedJurisdictionGap ? [unsupportedJurisdictionGap] : []
           })
         : undefined;
       const reportWithConfidence = {
         ...reportCandidate,
         sections: applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier?.dataGaps || [])
       };
-      if (addressLike) {
+      if (addressLike && !enforceUsOnlyPolicy) {
         const preRenderPassed = (preSynthesisGatePassed ?? true) && (postSynthesisGatePassed ?? true);
         const reasons: string[] = [];
         if (preSynthesisGatePassed === false) reasons.push('pre_synthesis_soft_fail');

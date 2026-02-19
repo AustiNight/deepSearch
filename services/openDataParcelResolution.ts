@@ -7,6 +7,8 @@ import { getOpenDatasetIndex } from "./openDataDiscovery";
 import { evaluateDatasetUsage } from "./openDataUsage";
 import { normalizeAddressVariants } from "./addressNormalization";
 import { validateDataSourceContracts } from "../data/dataSourceContracts";
+import { getOpenDataConfig } from "./openDataConfig";
+import { isNonUsJurisdiction } from "./addressScope";
 
 const isoDateToday = () => new Date().toISOString().slice(0, 10);
 
@@ -106,9 +108,28 @@ export const resolveParcelFromOpenDataPortal = async (input: {
   portalType?: "socrata" | "arcgis" | "dcat" | "unknown";
   jurisdiction?: Jurisdiction;
 }) => {
+  const config = getOpenDataConfig();
+  const dataGaps: DataGap[] = [];
+
+  if (config.featureFlags.usOnlyAddressPolicy && isNonUsJurisdiction(input.jurisdiction)) {
+    dataGaps.push(buildDataGap(
+      "Open-data parcel lookup skipped for non-US address.",
+      "US-only address policy is enabled for open-data parcel resolution.",
+      "unavailable",
+      buildExpectedSources(input.portalUrl)
+    ));
+    return {
+      parcel: undefined,
+      geocode: undefined,
+      dataGaps,
+      datasetsUsed: [],
+      sources: [],
+      claims: []
+    };
+  }
+
   const provider = getOpenDataProviderForPortal(input.portalUrl, input.portalType);
   const normalizedAddress = normalizeAddressVariants(input.address)[0] || input.address;
-  const dataGaps: DataGap[] = [];
 
   const contractValidation = validateDataSourceContracts();
   if (!contractValidation.valid) {

@@ -106,14 +106,14 @@
   - [ ] Add a lightweight integrity check to verify the map includes all known verticals/subtopics and flags missing items
   - [ ] Acceptance: Transparency Map renders at 80% scale by default and stays current when new verticals/methods/tactics are added without manual edits
 
-- [ ] Epic: US-Only Address Policy
-  - [ ] Add an address-scope classifier that detects non-US inputs (country tokens, postal code formats, or explicit country fields)
-  - [ ] Define US-only policy behavior: for non-US addresses, skip US-specific record gates and render a scoped report with `DataGap` entries that explain unsupported jurisdiction
-  - [ ] Ensure the US-only classifier runs before evidence recovery and provider calls to avoid wasted portal requests
-  - [ ] Add a feature flag to enable/disable US-only enforcement and document defaults
-  - [ ] Update settings/help text to explain the policy and how non-US inputs are handled
-  - [ ] Add tests for US vs non-US address inputs (UK, CA, EU formats) and verify correct policy behavior
-  - [ ] Acceptance: non-US address inputs are explicitly flagged as out-of-scope, evidence recovery and provider calls are skipped, and US-only record gates are not applied
+- [x] Epic: US-Only Address Policy
+  - [x] Add an address-scope classifier that detects non-US inputs (country tokens, postal code formats, or explicit country fields)
+  - [x] Define US-only policy behavior: for non-US addresses, skip US-specific record gates and render a scoped report with `DataGap` entries that explain unsupported jurisdiction
+  - [x] Ensure the US-only classifier runs before evidence recovery and provider calls to avoid wasted portal requests
+  - [x] Add a feature flag to enable/disable US-only enforcement and document defaults
+  - [x] Update settings/help text to explain the policy and how non-US inputs are handled
+  - [x] Add tests for US vs non-US address inputs (UK, CA, EU formats) and verify correct policy behavior
+  - [x] Acceptance: non-US address inputs are explicitly flagged as out-of-scope, evidence recovery and provider calls are skipped, and US-only record gates are not applied
 
 - [ ] Epic: Constraint Check (Guardrails)
   - [ ] Add an automated guardrail check that validates new tasks/changes against the Guardrails section before execution

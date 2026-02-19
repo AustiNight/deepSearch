@@ -359,6 +359,7 @@ export type PropertyDossierBuildInput = {
   sections: ReportSection[];
   registry: CitationRegistry;
   primaryRecordCoverage?: PrimaryRecordCoverage;
+  dataGaps?: DataGap[];
 };
 
 export const buildPropertyDossier = (input: PropertyDossierBuildInput): PropertyDossier => {
@@ -371,7 +372,10 @@ export const buildPropertyDossier = (input: PropertyDossierBuildInput): Property
     jurisdiction: input.jurisdiction
   };
 
-  const dataGaps = buildCoverageDataGaps(input.primaryRecordCoverage, input.jurisdiction);
+  const dataGaps = [
+    ...buildCoverageDataGaps(input.primaryRecordCoverage, input.jurisdiction),
+    ...(input.dataGaps || [])
+  ];
   const claims: ClaimCitation[] = [];
   const claimFieldPaths = new Set<string>();
 

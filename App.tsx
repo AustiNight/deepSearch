@@ -1020,6 +1020,10 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-gray-500">
                   Stored locally in this browser (sessionStorage by default), never synced to cloud settings or persisted in Worker/KV. No telemetry.
                 </p>
+                <p className="text-[10px] text-gray-500">
+                  US-only address policy is enabled by default. Non-US addresses are flagged as out-of-scope and skip US record gates + portal queries. Toggle via
+                  <span className="font-mono"> featureFlags.usOnlyAddressPolicy</span>.
+                </p>
                 <div>
                   <label className="block text-[10px] font-mono text-gray-500 mb-1">SOCRATA_APP_TOKEN</label>
                   <input
