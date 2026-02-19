@@ -30,3 +30,8 @@ playwright-report
 .ralph/ralph-history.json
 .ralph/ralph-loop.state.json
 .ralph/ralph-context.md
+
+.ralph/ralph-last-output.txt
+.ralph/ralph-history.json
+.ralph/ralph-loop.state.json
+.ralph/ralph-context.md
