@@ -1,0 +1,27 @@
+{
+  "title": "Socrata RAG Index",
+  "version": "1.0",
+  "artifacts": [
+    {
+      "doc_id": "socrata_discovery",
+      "source_file": "docs/Discovery_API.md",
+      "rag_json": "docs/Discovery_API.rag.json",
+      "chunks_jsonl": "docs/Discovery_API.rag.chunks.jsonl",
+      "endpoints_jsonl": "docs/Discovery_API.rag.endpoints.jsonl"
+    },
+    {
+      "doc_id": "socrata_soda_api",
+      "source_file": "docs/Discovery_API_2.txt",
+      "rag_json": "docs/Discovery_API_2.rag.json",
+      "chunks_jsonl": "docs/Discovery_API_2.rag.chunks.jsonl"
+    },
+    {
+      "doc_id": "socrata_bundle",
+      "source_file": [
+        "docs/Discovery_API.rag.chunks.jsonl",
+        "docs/Discovery_API_2.rag.chunks.jsonl"
+      ],
+      "chunks_jsonl": "docs/Socrata.rag.bundle.jsonl"
+    }
+  ]
+}

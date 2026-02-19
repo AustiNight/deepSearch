@@ -11,7 +11,13 @@ import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistServi
 import { fetchUniversalSettings, updateUniversalSettings } from './services/universalSettingsService';
 import { buildUniversalSettingsPayload, normalizeUniversalSettingsPayload } from './services/universalSettingsPayload';
 import { isSystemTestTopic } from './data/verticalLogic';
-import { getOpenDataConfig, updateOpenDataConfig } from './services/openDataConfig';
+import {
+  clearOpenDataPersistentConfig,
+  getOpenDataConfig,
+  getOpenDataPersistencePreference,
+  setOpenDataPersistencePreference,
+  updateOpenDataConfig
+} from './services/openDataConfig';
 import {
   MODEL_OVERRIDE_STORAGE_KEY,
   SETTINGS_UPDATED_AT_KEY,
@@ -155,6 +161,7 @@ const App: React.FC = () => {
   const [draftRunConfig, setDraftRunConfig] = useState<RunConfig>({ ...DEFAULT_RUN_CONFIG });
   const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
   const [draftOpenDataAuth, setDraftOpenDataAuth] = useState<OpenDataAuthConfig>(() => ({ ...getOpenDataConfig().auth }));
+  const [openDataPersist, setOpenDataPersist] = useState<boolean>(() => getOpenDataPersistencePreference());
   const [bulkModelValue, setBulkModelValue] = useState('');
   const [accessAllowlist, setAccessAllowlist] = useState<string[]>([]);
   const [draftAllowlistText, setDraftAllowlistText] = useState('');
@@ -515,7 +522,13 @@ const App: React.FC = () => {
     }
 
     const nextOpenDataAuth = sanitizeOpenDataAuth(draftOpenDataAuth);
-    updateOpenDataConfig({ auth: nextOpenDataAuth });
+    updateOpenDataConfig({ auth: nextOpenDataAuth }, { persist: openDataPersist });
+    if (openDataPersist) {
+      setOpenDataPersistencePreference(true);
+    } else {
+      setOpenDataPersistencePreference(false);
+      clearOpenDataPersistentConfig();
+    }
 
     const sanitizedOverrides = sanitizeModelOverrideDraft(draftModelOverrides);
     setModelOverrides(sanitizedOverrides);
@@ -638,6 +651,7 @@ const App: React.FC = () => {
     setDraftRunConfig(runConfig);
     setDraftModelOverrides(modelOverrides);
     setDraftOpenDataAuth({ ...getOpenDataConfig().auth });
+    setOpenDataPersist(getOpenDataPersistencePreference());
     setBulkModelValue('');
     setDraftAllowlistText(accessAllowlist.join('\n'));
     setAllowlistInput('');
@@ -677,6 +691,16 @@ const App: React.FC = () => {
   const handleResetModelOverrides = () => {
     setDraftModelOverrides({});
     setBulkModelValue('');
+  };
+
+  const handleOpenDataPersistToggle = (next: boolean) => {
+    if (next) {
+      const confirmed = window.confirm(
+        'Persist optional open-data keys in localStorage across browser restarts? This is optional and stores keys only on this device.'
+      );
+      if (!confirmed) return;
+    }
+    setOpenDataPersist(next);
   };
 
   const socrataToken = (draftOpenDataAuth.socrataAppToken || '').trim();
@@ -1015,12 +1039,26 @@ const App: React.FC = () => {
               )}
 
               <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-3">
-                <label className="block text-xs font-mono text-gray-400">OPEN DATA KEYS (OPTIONAL)</label>
+                <label className="block text-xs font-mono text-gray-400">OPEN DATA KEYS (NOT REQUIRED)</label>
                 <p className="text-[10px] text-gray-500">
-                  Zero-cost mode uses anonymous public endpoints by default. Adding keys only improves rate limits, reliability, and throughput without changing core functionality.
+                  Not required. Zero-cost mode uses anonymous public endpoints by default. Adding keys only improves rate limits, reliability, and throughput; core functionality stays the same.
                 </p>
                 <p className="text-[10px] text-gray-500">
-                  Stored locally in this browser (sessionStorage by default), never synced to cloud settings or persisted in Worker/KV. No telemetry.
+                  Keys stay client-only in this browser. Never synced to cloud settings, never sent to Worker/KV, and never included in telemetry.
+                </p>
+                <p className="text-[10px] text-gray-500">
+                  Default storage is sessionStorage (clears on tab close). Enable persistence to keep keys across browser restarts.
+                </p>
+                <label className="flex items-center gap-2 text-[10px] font-mono text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={openDataPersist}
+                    onChange={(e) => handleOpenDataPersistToggle(e.target.checked)}
+                  />
+                  PERSIST OPTIONAL KEYS (LOCALSTORAGE, OFF BY DEFAULT)
+                </label>
+                <p className="text-[10px] text-gray-500">
+                  Requires explicit consent. Turn off to keep keys session-only and clear any persistent copy.
                 </p>
                 <p className="text-[10px] text-gray-500">
                   US-only address policy is enabled by default. Non-US addresses are flagged as out-of-scope and skip US record gates + portal queries. Toggle via
@@ -1036,12 +1074,12 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Paste the `X-App-Token` value (no prefix). <a href="https://dev.socrata.com/docs/app-tokens.html" target="_blank" className="underline hover:text-cyber-green">Socrata setup</a>.
+                    Paste the `X-App-Token` value (no prefix). Create it in the Socrata developer portal. <a href="https://dev.socrata.com/docs/app-tokens.html" target="_blank" className="underline hover:text-cyber-green">Socrata setup</a>.
                   </p>
                   {socrataToken ? (
-                    <p className="text-[10px] text-cyber-green font-mono">Token configured — higher rate limits.</p>
+                    <p className="text-[10px] text-cyber-green font-mono">Token configured. Higher rate limits enabled.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Anonymous access has stricter rate limits.</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: running without a token (rate limited).</p>
                   )}
                 </div>
                 <div>
@@ -1054,12 +1092,12 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Create an API key and paste the token (often starts with `AAPK`). <a href="https://developers.arcgis.com/documentation/security-and-authentication/api-keys/" target="_blank" className="underline hover:text-cyber-green">ArcGIS API keys</a>.
+                    Create an API key in the ArcGIS developer console and paste the full token (often starts with `AAPK`). <a href="https://developers.arcgis.com/documentation/security-and-authentication/api-keys/" target="_blank" className="underline hover:text-cyber-green">ArcGIS API keys</a>.
                   </p>
                   {arcgisApiKey ? (
-                    <p className="text-[10px] text-cyber-green font-mono">Key configured — higher throughput.</p>
+                    <p className="text-[10px] text-cyber-green font-mono">Key configured. Higher throughput enabled.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Anonymous access has stricter rate limits.</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: anonymous mode (rate limited).</p>
                   )}
                 </div>
                 <div>
@@ -1072,12 +1110,12 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Optional contact email for Nominatim usage compliance. <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" className="underline hover:text-cyber-green">Nominatim policy</a>.
+                    Optional contact email for Nominatim usage compliance (format: you@example.com). <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" className="underline hover:text-cyber-green">Nominatim policy</a>.
                   </p>
                   {geocodingEmail ? (
                     <p className="text-[10px] text-cyber-green font-mono">Contact email configured.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Keyless geocoding runs at strict rate limits.</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: keyless geocoding (rate limited).</p>
                   )}
                 </div>
                 <div>
@@ -1090,12 +1128,12 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Reserved for key-based geocoders (not enabled by default). Leave blank for Nominatim. <a href="https://nominatim.org/release-docs/latest/api/Overview/" target="_blank" className="underline hover:text-cyber-green">Nominatim overview</a>.
+                    Reserved for key-based geocoders (not enabled by default). Paste provider token if supported; leave blank for Nominatim. <a href="https://nominatim.org/release-docs/latest/api/Overview/" target="_blank" className="underline hover:text-cyber-green">Nominatim overview</a>.
                   </p>
                   {geocodingKey ? (
                     <p className="text-[10px] text-cyber-green font-mono">Key stored locally for supported providers.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Keyless mode remains active with strict rate limits.</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: keyless mode remains active (rate limited).</p>
                   )}
                 </div>
               </div>

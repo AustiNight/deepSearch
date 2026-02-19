@@ -3,6 +3,40 @@ import { COMPLIANCE_POLICY } from "../data/compliancePolicy";
 
 const STORAGE_KEY = "overseer_open_data_config";
 const SESSION_STORAGE_KEY = "overseer_open_data_config_session";
+const PERSISTENCE_KEY = "overseer_open_data_persist";
+
+const getPersistPreference = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(PERSISTENCE_KEY) === "true";
+  } catch (_) {
+    return false;
+  }
+};
+
+export const getOpenDataPersistencePreference = () => getPersistPreference();
+
+export const setOpenDataPersistencePreference = (persist: boolean) => {
+  if (typeof window === "undefined") return;
+  try {
+    if (persist) {
+      window.localStorage.setItem(PERSISTENCE_KEY, "true");
+    } else {
+      window.localStorage.removeItem(PERSISTENCE_KEY);
+    }
+  } catch (_) {
+    // ignore
+  }
+};
+
+export const clearOpenDataPersistentConfig = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch (_) {
+    // ignore
+  }
+};
 
 const hasStorage = (storage?: Storage) => {
   if (!storage) return false;
@@ -36,10 +70,14 @@ let memoryConfig: OpenDataRuntimeConfig | null = null;
 
 const loadFromStorage = (): OpenDataRuntimeConfig | null => {
   if (typeof window === "undefined") return null;
-  const storage = hasStorage(window.sessionStorage) ? window.sessionStorage : hasStorage(window.localStorage) ? window.localStorage : null;
-  if (!storage) return null;
-  const key = storage === window.sessionStorage ? SESSION_STORAGE_KEY : STORAGE_KEY;
-  const raw = storage.getItem(key);
+  const hasSession = hasStorage(window.sessionStorage);
+  const hasLocal = hasStorage(window.localStorage);
+  const preferPersistent = hasLocal && getPersistPreference();
+  const sessionRaw = hasSession ? window.sessionStorage.getItem(SESSION_STORAGE_KEY) : null;
+  const localRaw = hasLocal ? window.localStorage.getItem(STORAGE_KEY) : null;
+  const raw = preferPersistent
+    ? (localRaw || sessionRaw)
+    : (sessionRaw || (!hasSession ? localRaw : null));
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -87,7 +125,7 @@ const mergeConfig = (input: Partial<OpenDataRuntimeConfig>): OpenDataRuntimeConf
 const persistConfig = (config: OpenDataRuntimeConfig, options?: { persist?: boolean }) => {
   if (typeof window === "undefined") return;
   // Store in sessionStorage by default to reduce persistence of optional keys.
-  const persist = options?.persist === true;
+  const persist = options?.persist === true || (options?.persist === undefined && getPersistPreference());
   const storage = persist && hasStorage(window.localStorage)
     ? window.localStorage
     : hasStorage(window.sessionStorage)

@@ -1,0 +1,1041 @@
+{
+  "title": "API Endpoints",
+  "sections": [
+    {
+      "id": "api-endpoints",
+      "title": "API Endpoints",
+      "paragraphs": [
+        "API Endpoints What is an API Endpoint? The \u201cendpoint\u201d of a SODA API is simply a unique URL that represents an object or collection of objects. Every Socrata dataset, and even every individual data record, has its own endpoint. The endpoint is what you\u2019ll point your HTTP client at to interact with data resources. All resources are accessed through a common endpoint of /api/v3/views/IDENTIFIER/query.json along with their dataset identifier. This paradigm holds true for every dataset in every SODA API. All datasets have a unique identifier - eight alphanumeric characters split into two four-character phrases by a dash. For example, ydr8-5enu is the identifier for the Building Permits. This identifier can then be inserted into the /api/v3/views/IDENTIFIER/query endpoint to construct the API endpoint. The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. Once you\u2019ve got your API endpoint, you can make requests with SoQL to filter and manipulate your dataset. Locating the API endpoint for a dataset You can also find API endpoints, and links to detailed developer documentation for each dataset, in a number of different places, depending on where you are: If you\u2019re viewing a dataset listing within the Open Data Network, there will be a prominent \u201cAPI\u201d button that will take you directly to the API documentation for that dataset.  See this If you\u2019re viewing a dataset directly, there will be an \u201cAPI Documentation\u201d button under \u201cExport\u201d and then \u201cSODA API\u201d.  See this"
+      ]
+    },
+    {
+      "id": "endpoint-versioning",
+      "title": "Endpoint Versioning",
+      "paragraphs": [
+        "SODA and SoQL are very flexible and allow us to add functionality over time without needing to completely deprecate and replace our APIs. We can do so in several different ways: By introducing new SoQL functions that provide new functionality. We could, for example, add a new function that allows you to filter or aggregate a dataset in a new way. By adding new datatypes to represent new data, like a new datatype for a new class of geospatial data. This allows us to introduce additional capabilities while still allowing you to issue the same kinds of queries in a backwards-compatible manner. We can extend SODA APIs without needing all developers to migrate their code to a new version. However, some functionalities are not available on all of our API endpoints, which is why we differentiate between versions of a dataset\u2019s API. Functions made available on a newer version might not be available on an API endpoint of an older version. In the sidebar of our automatic API documentation, we list the version that that endpoint complies with, as well as other useful information.  See this Throughout the documentation on this developer portal you\u2019ll notice version toggles and info boxes that will help you understand the difference between SODA endpoint versions."
+      ]
+    },
+    {
+      "id": "version-3-0-latest",
+      "title": "Version 3.0 (Latest)",
+      "paragraphs": [
+        "The next iteration of SODA will be released in 2025 and changes the endpoint from /resource/IDENTIFIER.json to /api/v3/IDENTIFIER/query.json. Notable changes: Query requests must be either authenticated by a user or marked with a valid application token. We have separated the endpoint into two: /query for querying (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/query.json) Query primarily supports machine-readability and has more options for customizing the request. /export for exports (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/export.csv) Export supports more formats and focuses on generating something readable by humans. We strongly prefer that use the HTTP POST method when requesting queries, as this allows for longer queries and clearer options."
+      ]
+    },
+    {
+      "id": "version-2-1",
+      "title": "Version 2.1",
+      "paragraphs": [
+        "The first SODA 2.1 APIs (previously referred to as our \u201chigh-performance Socrata Open Data APIs\u201d) were released in April of 2015, and in November of 2015 they received the \u201c2.1\u201d version designation for clarity. SODA 2.1 introduces a number of new datatypes as well as numerous new SoQL functions: Tons of new advanced SoQL functions to introduce powerful filtering and analysis into your queries New geospatial datatypes like Point , Line , and Polygon replace the Location datatype Support for the standardized GeoJSON output format, for direct use within geospatial tools like Leaflet Closer compliance with SQL semantics, such as Text comparisons becoming case-sensitive Currently only the JSON, CSV, and GeoJSON output formats are supported New functionality will be added to this version over time. For more information: SoQL functions that work with version 2.1 Datatypes that are available in version 2.1"
+      ]
+    },
+    {
+      "id": "version-2-0",
+      "title": "Version 2.0",
+      "paragraphs": [
+        "SODA 2.0 was originally released in 2011. Although 2.1 is backwards-compatible with 2.0, there are a number of differences between the two APIs: 2.0 supports fewer SoQL functions than 2.1. The only geospatial datatype supported is the Location datatype Text comparisons are case-insensitive For more information: SoQL functions that work with version 2.0 Datatypes that are available in version 2.0 Versioning HTTP headers The simplest way to tell the difference between a 2.0 API and a 2.1 API is via the X-SODA2-Legacy-Types header, which will be true if you\u2019re accessing a legacy 2.0 API. When we will increment endpoint versions From time to time, we\u2019ll introduce new SoQL functions and datatypes to the latest version of the SODA API. Those changes will be non-breaking, and old queries and applications will continue to function unchanged. The SODA API is designed to make it easy to introduce new functionality over time without making breaking changes."
+      ]
+    },
+    {
+      "id": "row-identifiers",
+      "title": "Row Identifiers",
+      "paragraphs": [
+        "What is a Row Identifier? Socrata datasets are essentially a collection of rows. Each row can be uniquely designated by its \u201crow identifier\u201d, much like a driver\u2019s license number or social security number identifies an individual. For those familiar with database concepts, they essentially act the same way as primary keys. Internal Identifiers vs Publisher-Specified Identifiers Row identifiers come in two flavors: Internal identifiers are auto-generated by the Socrata platform every time a new row is created. Publisher-specified identifiers are configured by the dataset owner and use a field of unique values within the dataset as the row identifier. Depending on what dataset you're accessing, internal row identifiers may be simple integers, or alphanumeric strings. There's no difference between the two in how you use them. To learn more about how to access internal row identifiers, read the System Fields documentation. Establishing a Publisher-Specified Identifier Setting a row identifier requires that you are either the owner of a dataset, or that you've been granted a role of Publisher or Administrator on a Socrata customer site. Basically, if you can't modify the dataset, you can't set a row identifier. A publisher-specified row identifier can be established for any Socrata dataset. A common column to use as a row identifier is an \u2018ID\u2019 column with some kind of number or code that uniquely identifies that row of data. For example, the \u2018Inspection ID\u2019 column of Chicago\u2019s Food Inspections dataset is a Publisher-specified row identifier. How to Set a Row Identifier See this helpful guide on how to set a row identifier in Socrata. RESTful Verbs The Socrata API follows the REST (REpresentational State Transfer) design pattern. This means that the CRUD (Create, Read, Update, and Delete) operations are specified by using HTTP methods. These are referred to as RESTful verbs. GET Use the HTTP GET method to obtain data. As described in the Endpoints section, GET can be used to retrieve column data from multiple rows or from one single row. The Queries section describes how to do sophisticated queries, all with the GET method. For SODA3, you must authenticate or use an application token in order to query for or export data. You may preferentially use POST, which is useful if your SoQL query is very long. POST Use the HTTP POST method to add new rows in a dataset. See the SODA Producer API section for more details on how to add data. Note that you will need to authenticate in order to make changes. See the Authentication section for more information on how to do this. PUT Use the HTTP PUT method to modify data. Like POST, you will need authentication. Again, see the SODA Producer API and Authentication sections for more information. DELETE Use the HTTP DELETE method to remove data. Like POST and PUT, you will need authentication. Again, see the SODA Producer API and Authentication sections for more information."
+      ]
+    },
+    {
+      "id": "application-tokens",
+      "title": "Application Tokens",
+      "paragraphs": [
+        "The Socrata Open Data API uses application tokens for two purposes: Using an application token allows us to throttle by application, rather than via IP address, which gives you a higher throttling limit Authentication using OAuth Throttling limits Without an application token, we can only track usage and perform throttling based on a few simple criteria, mainly source IP address. As such, requests that aren\u2019t using an application token come from a shared pool via IP address. IP addresses that make too many requests during a given period may be subject to throttling. When requests are made using an application token, we can actually attribute each request to a particular application and developer, granting each their own pool of API requests. Currently we do not throttle API requests that are using an application token, unless those requests are determined to be abusive or malicious. We reserve the right to change these throttling limits with notice, and we will post an update to announce any such change. If you are throttled for any reason, you will receive a status code 429 response. Don\u2019t be a jerk! Dont do that! Yes, I know it says you get unlimited requests. But keep in mind that you\u2019re using a shared platform, and you should still be deliberate in how you design your application to use our API. Applications that are determined to be abusive or malicious, or that otherwise monopolize the use of our API may be throttled. If we detect that your application is nearing the point where we may have to throttle it, we will likely pro-actively reach out to you to discuss how you can optimize your usage. If you have any questions, feel free to contact us and we\u2019d be glad to help! Obtaining an Application Token You can obtain an application token by registering for one in your Socrata profile. Using your Application Token While it is possible to perform simple unauthenticated queries against the Socrata Open Data API without making use of an application token, you\u2019ll receive much higher throttling limits if you include an application token in your requests. If you elect not to use an application token, you\u2019ll be subjected to a much lower throttling limit for all requests originating from your IP address. Here\u2019s how you include the application token in the request: SODA Version\tMethod 3.0, 2.x\tUse the X-App-Token HTTP header. 2.1, 2.0\tUse the $$app_token parameter in your request. 1.0\tUse the app_token parameter in your request. Using the header is the preferred method. Note: Application tokens are not necessarily used for authentication, but you should still preserve the security of your application token by always using HTTPS requests. If your application token is duplicated by another developer, their requests will count against your quota. The following is an example of using the X-App-Token HTTP header to pass an application token: POST /api/v3/views/kzjm-xkqj/query.json HTTP/1.1 Host: data.seattle.gov Accept: application/json X-App-Token: [REDACTED] The same application token could also be passed as a URL parameter: The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. Using the Application Token as part of the OAuth 2.0 authentication process Application tokens can also be used for authentication using OAuth 2.0. For more information, see the authentication section."
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "paragraphs": [
+        "There are two methods available for authentication: HTTP Basic and OAuth 2.0. For non-interactive applications, we only support HTTP Basic Authentication. We encourage all our developers of interactive applications to use the OAuth 2.0 workflow to authenticate their users. HTTP Basic Authentication is required when you are authenticating from a script that runs without interaction with the user, like your ETL tool, an update script, or any other data management automation. OAuth 2.0 is the preferred option for cases where you are building a web or mobile application that needs to perform actions on behalf of the user, like accessing data, and the interaction model allows you to present the user with a form to obtain their permission for the app to do so. Authenticating using HTTP Basic Authentication Requests can be authenticated using HTTP Basic Authentication. You can use your HTTP library\u2019s Basic Auth feature to pass your credentials. All HTTP-basic-authenticated requests must be performed over a secure (https) connection. Authenticated requests made over an insecure connection will be denied. Users may use their username and password or an API key and secret pair to authenticate using Basic Authentication. Documentation on how to create and manage API keys can be found here. We recommend using API keys! They provide the following benefits: Access Socrata APIs without the risk of embedding your username and password in scripts or code Users on domains that require SSO (and thus without passwords) can access Socrata APIs Create individual keys for different apps or jobs so that if any one needs to be revoked or rotated, other apps are unaffected Change your account password without disrupting apps or rotate API keys without disrupting logins Here is a sample HTTP session that uses HTTP Basic Authentication: POST /api/v3/views/4tka-6guv/query.json HTTP/1.1 Host: soda.demo.socrata.com Authorization: Basic [REDACTED] Content-Type: application/json X-App-Token: [REDACTED] Note that the Authorization header in this request will usually be generated via your HTTP library\u2019s Basic Auth feature (as opposed to manually constructing the Base64 encoding of your credentials yourself). For example, if you\u2019re using Python\u2019s requests module, it supports Basic Authentication out of the box. Similarly, an API tool like Postman also handles Basic Authentication. OAuth 2.0 Note: When developing applications that make use of OAuth, you must provide a web-accessible callback URL when registering your application token. This can make it difficult to develop on a machine that isn't directly exposed to the Internet. One great option is to use a tool like ngrok to create a secure tunnel to expose your web application in a secure manner."
+      ]
+    },
+    {
+      "id": "workflow",
+      "title": "Workflow",
+      "paragraphs": [
+        "We support a subset of OAuth 2.0 \u2014 the server-based flow with a callback URL \u2014 which we believe is more secure than the other flows in the specification. This OAuth flow is used by several other popular API services on the web. We have made the authentication flow similar to Google AuthSub. To authenticate with OAuth 2.0, you will first need to register your application, which will create an app token and a secret token. When registering your application, you must preregister your server by filling out the Callback Prefix field), so that we can be sure that access through your application is secure even if both your tokens are stolen. The Callback Prefix is the beginning of the URL that you will use as your redirect URL. Generally, you\u2019ll want to provide as much of your callback URL as you can. For example, if your authentication callback is https://my-website.com/socrata-app/auth/callback, you might want to specify https://my-website.com/socrata-app as your callback URL. Once you have an application and a secret token, you\u2019ll be able to authenticate with the SODA OAuth 2.0 endpoint. You\u2019ll first need to redirect the user to the Socrata-powered site you wish to access so that they may log in and approve your application. For example: https://soda.demo.socrata.com/oauth/authorize?client_id=YOUR_AUTH_TOKEN&response_type=code &redirect_uri=YOUR_REDIRECT_URI Note that the redirect_uri here must be an absolute, secure (https:) URI which starts with the Callback Prefix you specified when you registered your application. If any of these cases fail, the user will be shown an error indicating as much. Should the user authorize your application, they will be redirected back to the your redirect_uri. For example, if I provide https://my-website.com/socrata-app/auth/callback as my redirect_uri, the user will be redirected to this URL: https://my-website.com/socrata-app/auth/callback?code=CODE where CODE is an authorization code that you will use later. If your redirect_uri contains a querystring, it will be preserved, and the code parameter will be added onto the end of it. Likewise, if you provide the optional state parameter in the original redirect to /authenticate, it will be preserved and sent back to you. Now that the user has authorized your application, the next step is to retrieve an access_token so that you can perform operations on their behalf. You can do this by making the following POST request from your server: https://soda.demo.socrata.com/oauth/access_token \"client_id\": YOUR_AUTH_TOKEN, \"client_secret\": YOUR_SECRET_TOKEN, \"grant_type\": \"authorization_code\", \"redirect_uri\": YOUR_REDIRECT_URI, \"code\": CODE where YOUR_AUTH_TOKEN and YOUR_SECRET_TOKEN are the tokens you received when registering your app, YOUR_REDIRECT_URI is the same value as what you used previously, and CODE is the value of the code query parameter of the URL that the user was redirected to. You\u2019ll receive the following response: { access_token: ACCESS_TOKEN } Use this access_token in your requests when you have to do work on behalf of the now-authenticated user, as described below in the Using an OAuth 2.0 Access Token section. We have a sample app available on GitHub that illustrates how to do all of the above with the Ruby OAuth2 gem. Using an OAuth 2.0 Access Token Once you have obtained an access_token, you should include it on requests which need to happen on behalf of the user. The token must be included in the Authorization HTTP Header field as follows: Authorization: OAuth YOUR_ACCESS_TOKEN Note: All authenticated requests must be performed over a secure connection (https). Any attempt to use an access_token over a non-secure connection will result in immediate revocation of the token. Who am I? One quirk of authenticating via OAuth 2.0 is that the entire process happens without the 3rd party application (that\u2019s you!) having any knowledge of who, exactly, the user is that just authorized the application. To remedy this, we have set up an endpoint that simply returns the information of the current user. To return the data in JSON: https://soda.demo.socrata.com/api/users/current.json To return the data in XML: https://soda.demo.socrata.com/users/current.xml"
+      ]
+    },
+    {
+      "id": "response-codes-headers",
+      "title": "Response Codes & Headers",
+      "paragraphs": []
+    },
+    {
+      "id": "response-codes",
+      "title": "Response Codes",
+      "paragraphs": [
+        "The Socrata Open Data API responds with standard HTTP Status Codes for both successful requests and for errors. The table below lists the response codes you should expect to see. 200\tOK\tYour request was successful 202\tRequest Processing\tYou can retry your request, and when it\u2019s complete, you\u2019ll get a 200 instead 400\tBad Request\tProbably your request was malformed. See the error message in the body for details 401\tUnauthorized\tYou attempted to authenticate but something went wrong. Make sure you follow the instructions to authenticate properly 403\tForbidden\tYou\u2019re not authorized to access this resource. Make sure you authenticate to access private datasets 404\tNot Found\tThe resource requested doesn\u2019t exist 429\tToo Many Requests\tYour client is currently being rate limited. Make sure you\u2019re using an app token 500\tServer Error\tOur bad! Something has gone wrong with Socrata\u2019s platform. Please let us know if you encounter a 500 error"
+      ]
+    },
+    {
+      "id": "headers",
+      "title": "Headers",
+      "paragraphs": [
+        "For SODA 2.1 API calls, we include a few response headers that may be useful: X-Socrata-RequestId\taqe1bgaxzvhitfgrsvy6semhi\tA unique ID for this particular request. Very useful to include when asking for help, as it allows us to track your error down in our system Access-Control-Allow-Origin\t*\tAllows browsers to make cross-origin requests for data X-SODA2-Fields\t[\"business\",\"category\", ...] (truncated)\tAn array of the field names that may be included in this response X-SODA2-Types\t[\"text\",\"text\",...] (truncated)\tAn array of the data types for fields included in this response Last-Modified\tTue, 24 Feb 2015 18:51:22 GMT\tWhen the dataset backing this request was updated; may be used for caching ETag\t\"YWxwaGEuNTQzNV8...-gzip\" (truncated)\tAn HTTP ETag which may be used for cache validation There may be other headers included in responses, but they should not be relied upon and may change without notice. HTTP Headers are limited by practical constraints to a maximum size of 4K. In order to keep our request header sizes below that limit, the X-SODA2-Fields and X-SODA2-Types headers may be omitted for datasets with a very large number of columns."
+      ]
+    },
+    {
+      "id": "error-messages",
+      "title": "Error Messages",
+      "paragraphs": [
+        "For any variety of error, we return a standard error message format that looks like the following: \"code\" : \"soql.analyzer.typechecker.type-mismatch\", \"error\" : true, \"message\" : \"Type mismatch: expected text, but found number\", \"status\" : 400, \"data\" : { \"found\" : \"number\", \"expected\" : [ \"text\" ]"
+      ]
+    },
+    {
+      "id": "section",
+      "title": "},",
+      "paragraphs": [
+        "\"source\" : { \"position\" : { \"column\" : 30, \"row\" : 1, \"text\" : \"select * where string_column > 42\" \"type\" : \"anonymous\" In particular: code: An enumeration for the particular class of error you have encountered error: A boolean flag you can check in your code if your library masks the HTTP error code. Ex: if(response.error) { // handle error } message: A human-readable error message that will help you debug what caused the error data: Machine-readable data about the error, most importantly the query generated by our SoQL parser based on your inputs"
+      ]
+    },
+    {
+      "id": "system-fields",
+      "title": "System Fields",
+      "paragraphs": [
+        "In addition to the fields provided by the dataset owner, Socrata also provides a number of useful system fields you can make use of. They\u2019re very useful for detecting when datasets have changed. :id\tThe internal Socrata identifier for this record. :created_at\tA Fixed Timestamp representing when this record was created. :updated_at\tA Fixed Timestamp representing when this record was last updated. System fields are not included by default, and the method that you use to request the inclusion of the hidden system fields depends on what version of the SODA API specification the API you are accessing complies with. To learn more about API versioning, see the API Endpoint documentation."
+      ]
+    },
+    {
+      "id": "version-2-1",
+      "title": "Version 2.1",
+      "paragraphs": [
+        "With version 2.1 APIs, accessing the system fields is as simple as including them in your $select parameter, either explicitly or via a wildcard. You can either $select=:id, :updated_at, name, address, or you could be even more broad and simply select :*, * to retrieve both all of the hidden internal fields and the fields from the dataset itself. For example: The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. Since :created_at and :updated_at are Fixed Timestamp, you can query them to get recent updates to a dataset using the $where query parameter, like this example: The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. A note on how datasets are updated Data providers use many different methods to update datasets. In some cases, they use tools like DataSync or the SODA Producer API to update datasets, and we can tell which records within the dataset have actually been modified, and only update them accordingly. When data providers perform a full replace of the dataset using the SODA Producer Replace API, all of its records will be updated within a short period of time, in which case a query based on :updated_at will show that all of the records have changed."
+      ]
+    },
+    {
+      "id": "version-2-0",
+      "title": "Version 2.0",
+      "paragraphs": [
+        "Getting the SODA API to return system fields is as simple as adding the parameter $$exclude_system_fields=false to your request. The double dollar sign ($$) is significant - it denotes a Socrata-specific parameter that is not part of the SODA standard. The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. CORS & JSONP For security reasons, web browsers prevent what are called \u201ccross-origin\u201d or \u201ccross-site\u201d requests from one domain to another. JavaScript XMLHTTPRequests (commonly called \u201cAJAX\u201d requests) inherit all of the authentication context of the currently logged in user, so a malicious web page could attempt to make malicious requests that cross domain contexts and cause trouble. Historically, that has made it difficult for web developers to build web applications making use of third-party APIs. Fortunately, techniques have since been developed that allow developers to securely access APIs cross-domain. The two most popular ones, and the techniques that Socrata supports, are CORS and JSONP. A note on CORS, JSONP, and dataset permissions In order to prevent the aforementioned malicious cross-site attacks, Socrata automatically drops all authentication and authorization on requests that come in via CORS and JSONP. As a result, these techniques can only be used to access public datasets in a read-only fashion. Cross-Origin Resource Sharing (CORS) CORS is a proposed standard for allowing your web browser and a web server to negotiate and allow requests to be made across domain contexts. CORS is currently supported in modern Chrome, Firefox, Safari, and Internet Explorer (10+) web browsers. The standard itself is working its way through the W3C on its way to becoming official. You don\u2019t need to do anything special to use CORS with JavaScript in a modern browser. Your web browser and our servers will automatically negotiate the cross-origin request. For example, to make a CORS request with jQuery, you\u2019d make your request just like you were performing it within the context of your own domain. $.ajax({ url: \"https://data.chattlibrary.org/api/v3/views/e968-fnk9/query.json\", method: \"POST\", dataType: \"json\", data: JSON.stringify({ \"query\": \"SELECT * WHERE status = 'CLOSED'\", \"page\": { \"pageNumber\": 1, \"pageSize\": 1000"
+      ]
+    },
+    {
+      "id": "section",
+      "title": "},",
+      "paragraphs": [
+        "\"includeSynthetic\": false"
+      ]
+    },
+    {
+      "id": "section",
+      "title": "}),",
+      "paragraphs": [
+        "headers: { 'Content-Type': 'application/json', 'X-App-Token': app_token"
+      ]
+    },
+    {
+      "id": "section",
+      "title": "},",
+      "paragraphs": [
+        "success: function( data, status, jqxhr ){ console.log( \"Request received:\", data ); error: function( jqxhr, status, error ){ console.log( \"Something went wrong!\" );"
+      ]
+    },
+    {
+      "id": "section",
+      "title": "});",
+      "paragraphs": [
+        "\u201cJavaScript with Padding\u201d (JSONP) If you\u2019re developing for older browsers, or you just feel like being nostalgic, you can also make use of our support for JSONP. Also called \u201cJSON with Padding\u201d, it is a technique for fooling a web browser into performing cross-origin requests using a special <script> tag that uses the src attribute to make a special API request. Instead of responding with just a JSON object, the server responds with JavaScript code that calls a client-declared callback function, passing the data as that function\u2019s first parameter. With the Socrata API, the name of that callback function is declared using the $jsonp parameter. Sounds hacky, huh? Fortunately, tools like jQuery make it easy to use JSONP: $.ajax({ url: \"https://data.chattlibrary.org/resource/e968-fnk9.json\", jsonp: \"$jsonp\", dataType: \"jsonp\" }).done(function(data) { console.log(\"Request received: \" + data); But, as we mentioned, you should only need to use JSONP as a fallback in cases where you\u2019re working with a browser that doesn\u2019t support CORS. Queries using SODA3 The Socrata APIs provide rich query functionality through a query language we call the \u201cSocrata Query Language\u201d or \u201cSoQL\u201d. As its name might suggest, it borrows heavily from Structured Query Language (SQL), used by many relational database systems. Its paradigms should be familiar to most developers who have previously worked with SQL, and are easy to learn for those who are new to it. Requests must be either authenticated by a user or marked with a valid application token. Developers should now use the HTTP POST method when requesting queries, as this allows for longer queries and clearer options. The endpoints are split into two: /query for querying (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/query.json) Query has more options for customizing the request so that you can fine-tune what data you want back. /export for exports (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/export.csv) Export focuses on providing the entire dataset to be consumed by humans or Microsoft Excel or similar programs. You can click on each option to see more information about them: Request Option\t/query\t/export\tDescription query\tavailable\tavailable\tThe SoQL query to run page\tavailable\tnot available\t{ pageNumber: 1, pageSize: 1000 } to indicate which page (1-indexed) and how many rows per page parameters\tavailable\tavailable\tSome views require parameters to be provided by the user. Details to be provided at a later date timeout\tdefault: 600\tdefault: 600\tThe number of seconds before timing out the request. Default: 600 (10 minutes) includeSystem\tdefault: true\tnot available\tWhether or not to include system columns includeSynthetic\tdefault: true\tnot available\tWhether or not to include not-explicitly-requested columns, such as system fields orderingSpecifier\tdefault: total\tdefault: total\tCan be set to discard if you do not care about order and just want the data. Can improve performance significantly serializationOptions\tnot available\tavailable\tDifferent formats have specific customization options."
+      ]
+    },
+    {
+      "id": "example",
+      "title": "Example",
+      "paragraphs": [
+        "You might use the popular program cURL to make the request with the appropriate payload, or use an appropriate HTTP client library in your preferred programming language. Query for the first 100 rows of a dataset: curl --header 'X-App-Token: your-application-token' \\ --json '{ \"query\": \"SELECT *\", \"page\": { \"pageNumber\": 1, \"pageSize\": 100"
+      ]
+    },
+    {
+      "id": "section",
+      "title": "},",
+      "paragraphs": [
+        "\"includeSynthetic\": false"
+      ]
+    },
+    {
+      "id": "section",
+      "title": "}' \\",
+      "paragraphs": [
+        "https://soda.demo.socrata.com/api/v3/views/4tka-6guv/query.json Export the dataset as CSV with a byte-order mark and a separator character of TAB: curl --header 'X-App-Token: your-application-token' \\ --json '{ \"serializationOptions\": { \"separator\": \"\\t\", \"bom\": true https://soda.demo.socrata.com/api/v3/views/4tka-6guv/export.csv SoQL Function and Keyword Listing The following are all the functions and keywords available in SoQL. Some only work on the the latest version of our API endpoints, while some work on legacy versions as well. You can filter them by endpoint version and datatype using the filters below. For a list of valid operators, see the Datatypes documentation. distinct\tReturns distinct set of records\t2.1 and 3.0 avg(...)\tReturns the average of a given set of numbers\t2.0, 2.1, and 3.0 between ... and ...\tReturns TRUE for values in a given range\t2.1 and 3.0 case(...)\tReturns different values based on the evaluation of boolean comparisons\t2.1 and 3.0 convex_hull(...)\tReturns the minimum convex geometry that encloses all of another geometry\t2.1 and 3.0 count(...)\tReturns a count of a given set of records\t2.0, 2.1, and 3.0 date_extract_d(...)\tExtracts the day from the date as an integer.\t2.1 and 3.0 date_extract_dow(...)\tExtracts the day of the week as an integer between 0 and 6 (inclusive).\t2.1 and 3.0 date_extract_hh(...)\tExtracts the hour of the day as an integer between 0 and 23 (inclusive).\t2.1 and 3.0 date_extract_m(...)\tExtracts the month as an integer.\t2.1 and 3.0 date_extract_mm(...)\tExtracts the minute from the time as an integer.\t2.1 and 3.0 date_extract_ss(...)\tExtracts the second from the time as an integer.\t2.1 and 3.0 date_extract_woy(...)\tExtracts the week of the year as an integer between 0 and 51 (inclusive).\t2.1 and 3.0 date_extract_y(...)\tExtracts the year as an integer.\t2.1 and 3.0 date_trunc_y(...)\tTruncates a calendar date at the year threshold\t2.0, 2.1, and 3.0 date_trunc_ym(...)\tTruncates a calendar date at the year/month threshold\t2.0, 2.1, and 3.0 date_trunc_ymd(...)\tTruncates a calendar date at the year/month/date threshold\t2.0, 2.1, and 3.0 distance_in_meters(...)\tReturns the distance between two Points in meters\t2.1 and 3.0 extent(...)\tReturns a bounding box that encloses a set of geometries\t2.1 and 3.0 greatest(...)\tReturns the largest value among its arguments, ignoring NULLs.\t2.1 and 3.0 in(...)\tMatches values in a given set of options\t2.1 and 3.0 intersects(...)\tAllows you to compare two geospatial types to see if they intersect or overlap each other\t2.1 and 3.0 least(...)\tReturns the smallest value among its arguments, ignoring NULLs.\t2.1 and 3.0 like '...'\tAllows for substring searches in text strings\t2.1 and 3.0 ln(...)\tReturns the natural log of a number\t2.1 and 3.0 lower(...)\tReturns the lowercase equivalent of a string of text\t2.1 and 3.0 max(...)\tReturns the maximum of a given set of numbers\t2.1 and 3.0 min(...)\tReturns the minimum of a given set of numbers\t2.1 and 3.0 not between ... and ...\tReturns TRUE for values not in a given range\t2.1 and 3.0 not in(...)\tMatches values not in a given set of options\t2.1 and 3.0 not like '...'\tAllows for matching text fields that do not contain a substring\t2.1 and 3.0 num_points(...)\tReturns the number of vertices in a geospatial data record\t2.1 and 3.0 regr_intercept(...)\tReturns the y-intercept of the linear least squares fit\t2.1 and 3.0 regr_r2(...)\tReturns the square of the correlation coefficient (r\u00b2)\t2.1 and 3.0 regr_slope(...)\tReturns the slope of the linear least squares fit\t2.1 and 3.0 simplify(...)\tReduces the number of vertices in a line or polygon\t2.1 and 3.0 simplify_preserve_topology(...)\tReduces the number of vertices in a line or polygon, preserving topology\t2.1 and 3.0 starts_with(...)\tMatches on text strings that start with a given substring\t2.1 and 3.0 stddev_pop(...)\tReturns the population standard deviation of a given set of numbers\t2.1 and 3.0 stddev_samp(...)\tReturns a sampled standard deviation of a given set of numbers\t2.1 and 3.0 sum(...)\tReturns the sum of a given set of numbers\t2.1 and 3.0 unaccent(...)\tRemoves accents (diacritical marks) from a string.\t2.1 and 3.0 upper(...)\tReturns the uppercase equivalent of a string of text\t2.1 and 3.0 within_box(...)\tReturns the rows that have geodata within the specified box, defined by latitude, longitude corners\t2.0, 2.1, and 3.0 within_circle(...)\tReturns the rows that have locations within a specified circle, measured in meters\t2.0, 2.1, and 3.0 within_polygon(...)\tReturns the rows that have locations within the specified box, defined by latitude, longitude corners\t2.1 and 3.0"
+      ]
+    },
+    {
+      "id": "data-transform-listing",
+      "title": "Data Transform Listing",
+      "paragraphs": [
+        "These are the transformation functions available in the Dataset Management API. These functions can be used to transform and validate your data before you publish your dataset for consumption. These functions can be used in the \u201cData Transforms\u201d editor of the the Dataset Management Experience interface. Check out some of the examples on our Support Portal here! See the Dataset Management API docs for more info on how to use the transform functions as an API user. +\tKeep a number\u2019s sign and\tLogical and of two boolean values ||\tconcatenate two strings /\tDivide a number by another =\tReturn true if the left side equals the right ==\tReturn true if the left side equals the right ^\tNo documentation is available. >\tReturn true if the value on the left is greater than the value on the right >=\tReturn true if the value on the left is greater than or equal to the value on the right <\tReturn true if the value on the left is less than the value on the right <=\tReturn true if the value on the left is less than or equal to the value on the right %\tFind the remainder(modulus) of one number divided by another *\tMultiply two numbers together not\tInvert a boolean <>\tReturn true if the left side does not equal the right !=\tReturn true if the left side does not equal the right or\tLogical or of two boolean values -\tSubtract a number from another abs\tProduce the absolute value of a number between\tReturn true if the left is within the range of the right values case\tEvaluate a series of true/false expressions (predicates) and return the next consequent. centroid\treturns the geometric centroid of a polygon or multipolygon. Please refer to coalesce\tTake the leftmost non-null value. contains\ttell whether or not a string contains another string county_boundary\tReturns the boundary of the US county as a multipolygon. The state name is not case sensitive. date_extract_d\tExtract the day from the date as an integer date_extract_dow\tExtracts the day of the week as an integer between 0 and 6 where date_extract_hh\tExtract the hour the date as an integer date_extract_m\tExtract the month as an integer date_extract_mm\tExtract the minute from the date as an integer date_extract_ss\tExtract the second from the date as an integer date_extract_woy\tExtracts the week of the year as an integer between 0 and 51 date_extract_y\tExtract the year as an integer date_trunc_y\tTruncates a calendar date at the year threshold date_trunc_ym\tTruncates a calendar date at the year/month threshold date_trunc_ymd\tTruncates a calendar date at the year/month/day threshold datetime_add_d\tAdds or subtracts the specified number of days to the timestamp datetime_add_hh\tAdds or subtracts the specified number of hours to the timestamp datetime_add_mm\tAdds or subtracts the specified number of minutes to the timestamp datetime_add_ss\tAdds or subtracts the specified number of seconds to the timestamp datetime_diff\tCalculates the difference between two dates in seconds, minutes, hours, days, business days, weeks, calendar weeks, months, or years. domain_categories\tReturns the categories currently configured on the domain. Useful primarily domain_licenses\tReturns the licenses currently configured on the domain. Useful primarily email_parse\tParse an email. This is best effort as most things are actually ensure_within\tensure_within is a function which takes a point and a multipolygon error\tMake an error. This is useful in conjunction with a case function, floating_timestamp_day\tExtract the day from a calendar date floating_timestamp_day_of_week\tExtract the day of the week as an integer between 0 and 6 where Sunday is 0. floating_timestamp_hour\tExtract the hour from a calendar date floating_timestamp_minute\tExtract the minute from a calendar date floating_timestamp_month\tExtract the month from a calendar date floating_timestamp_second\tExtract the second from a calendar date floating_timestamp_week_of_year\tExtract the week from a calendar date as an integer between 0 and 51. floating_timestamp_year\tExtract the year from a calendar date forgive\tforgive can take an optional default argument from_polyline\tconvert a linestring encode in Google\u2019s polyline format with the given precision to a Line geocode\tgeocode is a function which takes human readable addresses geocode_esri\tgeocode_esri is a function which takes human readable addresses grapheme_length\tthe length of a piece of text in unicode grapheme clusters. greatest\treturn the largest value among its arguments (ignoring null) hash\tConstruct a hash value from a string value using either the md5 or sha256 algorithm. haversine_distance\tReturn the distance of the line using haversine formula http_get\tMake an HTTP Get request to a URL. The response is returned. If the server in\tWhether or not a value is in a set of other values is_empty\tReturns whether or not the input is empty. Empty means null values, is_not_null\tWhether or not a value is not null is_null\tWhether or not a value is null is_within\tis_within is a function which takes a point and a multipolygon json_array_contains\tTest if a json array contains an item. If the JSON passed to this function is not an array, json_pluck\tPluck a value out of a JSON string. The returned value will be a SoQL Json value. json_pluck_boolean\tPluck a boolean value out of a JSON string. The returned value must be a boolean, otherwise json_pluck_number\tPluck a number value out of a JSON string. The returned value must be a number, otherwise json_pluck_text\tPluck a text value out of a JSON string. The returned value may be a primitive like a least\treturn the smallest value among its arguments (ignoring null) left_pad\tPad text with the minimum number of copies of pad to reach desired_length. length\tthe length of a piece of text in unicode code points. This is usually, but not like\tIf a string is like another string. location_address\tExtract the address from a location location_city\tExtract the city from a location location_point\tExtract the point from a location location_state\tExtract the state from a location location_to_point\tTurn a location value into a point location_zip\tExtract the zip from a location lower\tlowercase a string make_location\tThis function has been deprecated. Please use the make_point function instead. make_point\tfunction to make a point out of a Y (latitude) and X (longitude) coordinate. make_url\tNo documentation is available. not_between\tReturn true if the left is not within the range of the right values not_in\tWhether or not a value is absent from a set of other values not_like\tIf a string is not like another string. parse_address\tExtract a street address from a full US address. parse_city\tExtract a city from a full US address. parse_point\tExtract the point from a full US address with point. parse_state\tExtract a state from a full US address. parse_zip\tExtract a ZIP code from a full US address. point_latitude\tExtract the latitude from a point point_longitude\tExtract the longitude from a point polylabel\tReturns a point that must exist within the polygon borders. It uses the recursive grid-based algorithm described here: https://github.com/mapbox/polylabel#how-the-algorithm-works. When given a multipolygon, the point it returns is within the largest (by area) sub-polygon. random_number_between\tReturns a random float using a uniform distribution between the lower and upper values supplied: random_number_between(lower, upper) random_number_normal\tReturns a random float using a normal distribution with the mean and variance supplied: random_number_normal(mean, variance) regex_capture\tfunction to capture a piece of text based on a regular expression regex_named_capture\tcapture a piece of text based on a regular expression regex_replace\tfunction to replace a piece of text based on a regular expression region_code\tTurn a point into the ID of a region, based on which region the point falls within. For example, if this dataset can produce region_code_label\tIdentical to region_code, but returns a text value. repair_geometry\tAttempt to repair the geometry. replace\treplace text with another piece of text replace_first\treplace the first occurrence of a piece of text with another piece of text reproject\treproject a geometry from one projection to another. reproject_to_wgs84\tfunction to reproject a geometry to WGS84. This will allow the geometry right_pad\tPad text with the minimum number of copies of pad to reach desired_length. round\tRound a number to a given precision. Trailing zeros are removed by default. Negative precisions round numbers to the left of the decimal. set_projection\tfunction to explicitly set the projection value on geometries which do not have projection simplify\tReturns a simplified version of the Line, Polygon, MultiLine, or MultiPolygon using simplify_preserve_topology\tReturns a simplified version of the Line, Polygon, MultiLine, or MultiPolygon using slice\tGet a substring of a specified length of a text from a start index source_created_at\tGet the fixed timestamp that this data source was created (ie: started uploading or importing). split_select\tfunction to split a piece of text on a token, and then select starts_with\ttell whether or a not a string is prefixed with another string state_boundary\treturns the boundary of the US state title_case\tMake string title case with the exception of small words as defined by NYT Style Guide: to_boolean\tcast a value to a true or false to_checkbox\tNo documentation is available. to_fixed_timestamp\tTurn a text value into a datetime with a fixed timezone. to_floating_timestamp\tTurn a text value into a floating datetime. \u201cFloating\u201d means the timezone to_json\tcast a text value to json to_line\tparse a WKT (text) representation of a line into a line value to_location\tThis function has been deprecated. Please use the to_point function instead. to_multiline\tconvert a line into a multiline to_multipoint\tconvert a point into a multipoint to_multipolygon\tconvert a polygon into a multipolygon to_number\tcast a value to a number to_point\tparse a WKT (text) representation of a point into a point value to_polygon\tparse a WKT (text) representation of a polygon into a polygon value to_text\tNo documentation is available. to_url\tNo documentation is available. trim\ttrim characters off the start and end of a string trim_leading\ttrim characters off the start of a string trim_trailing\ttrim characters off the end of a string upper\tuppercase a string uri_parse\tParse a URI. url_decode\tURL Decode a value url_description\tExtract the description part of a link. url_encode\tURL Encode a value. url_url\tExtract the url part of a link. validate_geometry\tTest that the geometry is valid. xml_pluck\tPluck a value out of an XML string using XPath. The returned value will be a string."
+      ]
+    },
+    {
+      "id": "output-formats",
+      "title": "Output Formats",
+      "paragraphs": [
+        "The Socrata Open Data API supports a number of different response formats that can be specified either via response type extensions on the API endpoint or HTTP Accept headers. CSV\tcsv\ttext/csv; charset=utf-8\t2.0, 2.1, and 3.0 GeoJSON\tgeojson\tapplication/vnd.geo+json;charset=utf-8\t2.1 and 3.0 JSON\tjson\tapplication/json;charset=utf-8\t2.0, 2.1, and 3.0 RDF-XML\trdf\tapplication/rdf+xml; charset=utf-8\t2.0 XML\txml\ttext/xml; charset=utf-8\t2.0 and 3.0 Neither type is better than the other - simply select the one that works best for your framework and application."
+      ]
+    },
+    {
+      "id": "extensions",
+      "title": "Extensions",
+      "paragraphs": [
+        "The simplest way to specify the response format is by appending a response type extension to the URL. This allows you to set the response format without requiring the ability to set headers in your HTTP client. Simply add the extension to the endpoint. For example, if your resource endpoint is /resource/644b-gaut, and you wanted to get CSV output, your path would be /resource/644b-gaut.csv. HTTP Accept Headers HTTP Accept headers allow applications to automatically negotiate content types with a web service. With SODA, this also means you can request content types using Accept headers without needing to provide a response type extension. Simply send an Accept header along with the desired mimetype for the desired response type. For example, to request JSON, you\u2019d use a header of Accept: application/json. The SODA API response will also include a Content-type header to specify the format of the data that it is returning."
+      ]
+    },
+    {
+      "id": "datatypes",
+      "title": "Datatypes",
+      "paragraphs": [
+        "There are many core datatypes in SODA. What datatypes you may find depends on the version of your API endpoint: Checkbox\t2.0, 2.1, and 3.0 Fixed Timestamp\t2.0, 2.1, and 3.0 Floating Timestamp\t2.0 and 2.1 Line\t2.1 and 3.0 Location\t2.0, 2.1, and 3.0 MultiLine\t2.1 and 3.0 MultiPoint\t2.1 and 3.0 MultiPolygon\t2.1 and 3.0 Number\t2.0, 2.1, and 3.0 Point\t2.1 and 3.0 Polygon\t2.1 and 3.0 Text\t2.0, 2.1, and 3.0 URL\t2.0, 2.1, and 3.0 Other APIs"
+      ]
+    },
+    {
+      "id": "dataset-management",
+      "title": "Dataset Management",
+      "paragraphs": []
+    },
+    {
+      "id": "approvals",
+      "title": "Approvals",
+      "paragraphs": []
+    },
+    {
+      "id": "curated-region-jobs",
+      "title": "Curated Region Jobs",
+      "paragraphs": []
+    },
+    {
+      "id": "curated-regions",
+      "title": "Curated Regions",
+      "paragraphs": []
+    },
+    {
+      "id": "metadata",
+      "title": "Metadata",
+      "paragraphs": []
+    },
+    {
+      "id": "publishing",
+      "title": "Publishing",
+      "paragraphs": [
+        "Search and Discovery"
+      ]
+    },
+    {
+      "id": "discovery",
+      "title": "Discovery",
+      "paragraphs": []
+    },
+    {
+      "id": "team-search",
+      "title": "Team Search",
+      "paragraphs": []
+    },
+    {
+      "id": "user-search",
+      "title": "User Search",
+      "paragraphs": [
+        "Export and Integration OData V2 ODN"
+      ]
+    },
+    {
+      "id": "authentication",
+      "title": "Authentication",
+      "paragraphs": [
+        "API Keys"
+      ]
+    },
+    {
+      "id": "permissions",
+      "title": "Permissions",
+      "paragraphs": []
+    }
+  ],
+  "endpoints": [],
+  "chunks": [
+    {
+      "id": "section-api-endpoints-1",
+      "type": "section",
+      "title": "API Endpoints",
+      "path": [
+        "API Endpoints",
+        "API Endpoints"
+      ],
+      "text": "API Endpoints",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-api-endpoints-2",
+      "type": "section",
+      "title": "API Endpoints",
+      "path": [
+        "API Endpoints",
+        "API Endpoints"
+      ],
+      "text": "API Endpoints What is an API Endpoint? The \u201cendpoint\u201d of a SODA API is simply a unique URL that represents an object or collection of objects. Every Socrata dataset, and even every individual data record, has its own endpoint. The endpoint is what you\u2019ll point your HTTP client at to interact with data resources. All resources are accessed through a common endpoint of /api/v3/views/IDENTIFIER/query.json along with their dataset identifier. This paradigm holds true for every dataset in every SODA API. All datasets have a unique identifier - eight alphanumeric characters split into two four-character phrases by a dash. For example, ydr8-5enu is the identifier for the Building Permits. This identifier can then be inserted into the /api/v3/views/IDENTIFIER/query endpoint to construct the API endpoint. The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. Once you\u2019ve got your API endpoint, you can make requests with SoQL to filter and manipulate your dataset. Locating the API endpoint for a dataset You can also find API endpoints, and links to detailed developer documentation for each dataset, in a number of different places, depending on where you are: If you\u2019re viewing a dataset listing within the Open Data Network, there will be a prominent \u201cAPI\u201d button that will take you directly to the API documentation for that dataset.  See this If you\u2019re viewing a dataset directly, there will be an \u201cAPI Documentation\u201d button under \u201cExport\u201d and then \u201cSODA API\u201d.  See this",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-endpoint-versioning-1",
+      "type": "section",
+      "title": "Endpoint Versioning",
+      "path": [
+        "API Endpoints",
+        "Endpoint Versioning"
+      ],
+      "text": "Endpoint Versioning\nSODA and SoQL are very flexible and allow us to add functionality over time without needing to completely deprecate and replace our APIs. We can do so in several different ways: By introducing new SoQL functions that provide new functionality. We could, for example, add a new function that allows you to filter or aggregate a dataset in a new way. By adding new datatypes to represent new data, like a new datatype for a new class of geospatial data. This allows us to introduce additional capabilities while still allowing you to issue the same kinds of queries in a backwards-compatible manner. We can extend SODA APIs without needing all developers to migrate their code to a new version. However, some functionalities are not available on all of our API endpoints, which is why we differentiate between versions of a dataset\u2019s API. Functions made available on a newer version might not be available on an API endpoint of an older version. In the sidebar of our automatic API documentation, we list the version that that endpoint complies with, as well as other useful information.  See this Throughout the documentation on this developer portal you\u2019ll notice version toggles and info boxes that will help you understand the difference between SODA endpoint versions.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-version-3-0-latest-1",
+      "type": "section",
+      "title": "Version 3.0 (Latest)",
+      "path": [
+        "API Endpoints",
+        "Version 3.0 (Latest)"
+      ],
+      "text": "Version 3.0 (Latest)\nThe next iteration of SODA will be released in 2025 and changes the endpoint from /resource/IDENTIFIER.json to /api/v3/IDENTIFIER/query.json. Notable changes: Query requests must be either authenticated by a user or marked with a valid application token. We have separated the endpoint into two: /query for querying (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/query.json) Query primarily supports machine-readability and has more options for customizing the request. /export for exports (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/export.csv) Export supports more formats and focuses on generating something readable by humans. We strongly prefer that use the HTTP POST method when requesting queries, as this allows for longer queries and clearer options.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-version-2-1-1",
+      "type": "section",
+      "title": "Version 2.1",
+      "path": [
+        "API Endpoints",
+        "Version 2.1"
+      ],
+      "text": "Version 2.1\nThe first SODA 2.1 APIs (previously referred to as our \u201chigh-performance Socrata Open Data APIs\u201d) were released in April of 2015, and in November of 2015 they received the \u201c2.1\u201d version designation for clarity. SODA 2.1 introduces a number of new datatypes as well as numerous new SoQL functions: Tons of new advanced SoQL functions to introduce powerful filtering and analysis into your queries New geospatial datatypes like Point , Line , and Polygon replace the Location datatype Support for the standardized GeoJSON output format, for direct use within geospatial tools like Leaflet Closer compliance with SQL semantics, such as Text comparisons becoming case-sensitive Currently only the JSON, CSV, and GeoJSON output formats are supported New functionality will be added to this version over time. For more information: SoQL functions that work with version 2.1 Datatypes that are available in version 2.1",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-version-2-0-1",
+      "type": "section",
+      "title": "Version 2.0",
+      "path": [
+        "API Endpoints",
+        "Version 2.0"
+      ],
+      "text": "Version 2.0\nSODA 2.0 was originally released in 2011. Although 2.1 is backwards-compatible with 2.0, there are a number of differences between the two APIs: 2.0 supports fewer SoQL functions than 2.1. The only geospatial datatype supported is the Location datatype Text comparisons are case-insensitive For more information: SoQL functions that work with version 2.0 Datatypes that are available in version 2.0 Versioning HTTP headers The simplest way to tell the difference between a 2.0 API and a 2.1 API is via the X-SODA2-Legacy-Types header, which will be true if you\u2019re accessing a legacy 2.0 API. When we will increment endpoint versions From time to time, we\u2019ll introduce new SoQL functions and datatypes to the latest version of the SODA API. Those changes will be non-breaking, and old queries and applications will continue to function unchanged. The SODA API is designed to make it easy to introduce new functionality over time without making breaking changes.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-row-identifiers-1",
+      "type": "section",
+      "title": "Row Identifiers",
+      "path": [
+        "API Endpoints",
+        "Row Identifiers"
+      ],
+      "text": "Row Identifiers",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-row-identifiers-2",
+      "type": "section",
+      "title": "Row Identifiers",
+      "path": [
+        "API Endpoints",
+        "Row Identifiers"
+      ],
+      "text": "What is a Row Identifier? Socrata datasets are essentially a collection of rows. Each row can be uniquely designated by its \u201crow identifier\u201d, much like a driver\u2019s license number or social security number identifies an individual. For those familiar with database concepts, they essentially act the same way as primary keys. Internal Identifiers vs Publisher-Specified Identifiers Row identifiers come in two flavors: Internal identifiers are auto-generated by the Socrata platform every time a new row is created. Publisher-specified identifiers are configured by the dataset owner and use a field of unique values within the dataset as the row identifier. Depending on what dataset you're accessing, internal row identifiers may be simple integers, or alphanumeric strings. There's no difference between the two in how you use them. To learn more about how to access internal row identifiers, read the System Fields documentation. Establishing a Publisher-Specified Identifier Setting a row identifier requires that you are either the owner of a dataset, or that you've been granted a role of Publisher or Administrator on a Socrata customer site. Basically, if you can't modify the dataset, you can't set a row identifier. A publisher-specified row identifier can be established for any Socrata dataset. A common column to use as a row identifier is an \u2018ID\u2019 column with some kind of number or code that uniquely identifies that row of data. For example, the \u2018Inspection ID\u2019 column of Chicago\u2019s Food Inspections dataset is a Publisher-specified row identifier. How to Set a Row Identifier See this helpful guide on how to set a row identifier in Socrata. RESTful Verbs The Socrata API follows the REST (REpresentational State Transfer) design pattern. This means that the CRUD (Create, Read, Update, and Delete) operations are specified by using HTTP methods. These are referred to as RESTful verbs. GET Use the HTTP GET method to obtain data. As described in the Endpoints section, GET can be used to retrieve column data from multiple rows or from one single row. The Queries section describes how to do sophisticated queries, all with the GET method. For SODA3, you must authenticate or use an application token in order to query for or export data. You may preferentially use POST, which is useful if your SoQL query is very long. POST Use the HTTP POST method to add new rows in a dataset. See the SODA Producer API section for more details on how to add data. Note that you will need to authenticate in order to make changes. See the Authentication section for more information on how to do this. PUT Use the HTTP PUT method to modify data. Like POST, you will need authentication. Again, see the SODA Producer API and Authentication sections for more information. DELETE Use the HTTP DELETE method to remove data. Like POST and PUT, you will need authentication. Again, see the SODA Producer API and Authentication sections for more information.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-application-tokens-1",
+      "type": "section",
+      "title": "Application Tokens",
+      "path": [
+        "API Endpoints",
+        "Application Tokens"
+      ],
+      "text": "Application Tokens",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-application-tokens-2",
+      "type": "section",
+      "title": "Application Tokens",
+      "path": [
+        "API Endpoints",
+        "Application Tokens"
+      ],
+      "text": "The Socrata Open Data API uses application tokens for two purposes: Using an application token allows us to throttle by application, rather than via IP address, which gives you a higher throttling limit Authentication using OAuth Throttling limits Without an application token, we can only track usage and perform throttling based on a few simple criteria, mainly source IP address. As such, requests that aren\u2019t using an application token come from a shared pool via IP address. IP addresses that make too many requests during a given period may be subject to throttling. When requests are made using an application token, we can actually attribute each request to a particular application and developer, granting each their own pool of API requests. Currently we do not throttle API requests that are using an application token, unless those requests are determined to be abusive or malicious. We reserve the right to change these throttling limits with notice, and we will post an update to announce any such change. If you are throttled for any reason, you will receive a status code 429 response. Don\u2019t be a jerk! Dont do that! Yes, I know it says you get unlimited requests. But keep in mind that you\u2019re using a shared platform, and you should still be deliberate in how you design your application to use our API. Applications that are determined to be abusive or malicious, or that otherwise monopolize the use of our API may be throttled. If we detect that your application is nearing the point where we may have to throttle it, we will likely pro-actively reach out to you to discuss how you can optimize your usage. If you have any questions, feel free to contact us and we\u2019d be glad to help! Obtaining an Application Token You can obtain an application token by registering for one in your Socrata profile. Using your Application Token While it is possible to perform simple unauthenticated queries against the Socrata Open Data API without making use of an application token, you\u2019ll receive much higher throttling limits if you include an application token in your requests. If you elect not to use an application token, you\u2019ll be subjected to a much lower throttling limit for all requests originating from your IP address. Here\u2019s how you include the application token in the request: SODA Version\tMethod 3.0, 2.x\tUse the X-App-Token HTTP header. 2.1, 2.0\tUse the $$app_token parameter in your request. 1.0\tUse the app_token parameter in your request. Using the header is the preferred method. Note: Application tokens are not necessarily used for authentication, but you should still preserve the security of your application token by always using HTTPS requests. If your application token is duplicated by another developer, their requests will count against your quota. The following is an example of using the X-App-Token HTTP header to pass an application token: POST /api/v3/views/kzjm-xkqj/query.json HTTP/1.1 Host: data.seattle.gov Accept: application/json X-App-Token: [REDACTED] The same application token could also be passed as a URL parameter: The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. Using the Application Token as part of the OAuth 2.0 authentication process Application tokens can also be used for authentication using OAuth 2.0. For more information, see the authentication section.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-authentication-1",
+      "type": "section",
+      "title": "Authentication",
+      "path": [
+        "API Endpoints",
+        "Authentication"
+      ],
+      "text": "Authentication",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-authentication-2",
+      "type": "section",
+      "title": "Authentication",
+      "path": [
+        "API Endpoints",
+        "Authentication"
+      ],
+      "text": "There are two methods available for authentication: HTTP Basic and OAuth 2.0. For non-interactive applications, we only support HTTP Basic Authentication. We encourage all our developers of interactive applications to use the OAuth 2.0 workflow to authenticate their users. HTTP Basic Authentication is required when you are authenticating from a script that runs without interaction with the user, like your ETL tool, an update script, or any other data management automation. OAuth 2.0 is the preferred option for cases where you are building a web or mobile application that needs to perform actions on behalf of the user, like accessing data, and the interaction model allows you to present the user with a form to obtain their permission for the app to do so. Authenticating using HTTP Basic Authentication Requests can be authenticated using HTTP Basic Authentication. You can use your HTTP library\u2019s Basic Auth feature to pass your credentials. All HTTP-basic-authenticated requests must be performed over a secure (https) connection. Authenticated requests made over an insecure connection will be denied. Users may use their username and password or an API key and secret pair to authenticate using Basic Authentication. Documentation on how to create and manage API keys can be found here. We recommend using API keys! They provide the following benefits: Access Socrata APIs without the risk of embedding your username and password in scripts or code Users on domains that require SSO (and thus without passwords) can access Socrata APIs Create individual keys for different apps or jobs so that if any one needs to be revoked or rotated, other apps are unaffected Change your account password without disrupting apps or rotate API keys without disrupting logins Here is a sample HTTP session that uses HTTP Basic Authentication: POST /api/v3/views/4tka-6guv/query.json HTTP/1.1 Host: soda.demo.socrata.com Authorization: Basic [REDACTED] Content-Type: application/json X-App-Token: [REDACTED] Note that the Authorization header in this request will usually be generated via your HTTP library\u2019s Basic Auth feature (as opposed to manually constructing the Base64 encoding of your credentials yourself). For example, if you\u2019re using Python\u2019s requests module, it supports Basic Authentication out of the box. Similarly, an API tool like Postman also handles Basic Authentication. OAuth 2.0 Note: When developing applications that make use of OAuth, you must provide a web-accessible callback URL when registering your application token. This can make it difficult to develop on a machine that isn't directly exposed to the Internet. One great option is to use a tool like ngrok to create a secure tunnel to expose your web application in a secure manner.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-workflow-1",
+      "type": "section",
+      "title": "Workflow",
+      "path": [
+        "API Endpoints",
+        "Workflow"
+      ],
+      "text": "Workflow",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-workflow-2",
+      "type": "section",
+      "title": "Workflow",
+      "path": [
+        "API Endpoints",
+        "Workflow"
+      ],
+      "text": "We support a subset of OAuth 2.0 \u2014 the server-based flow with a callback URL \u2014 which we believe is more secure than the other flows in the specification. This OAuth flow is used by several other popular API services on the web. We have made the authentication flow similar to Google AuthSub. To authenticate with OAuth 2.0, you will first need to register your application, which will create an app token and a secret token. When registering your application, you must preregister your server by filling out the Callback Prefix field), so that we can be sure that access through your application is secure even if both your tokens are stolen. The Callback Prefix is the beginning of the URL that you will use as your redirect URL. Generally, you\u2019ll want to provide as much of your callback URL as you can. For example, if your authentication callback is https://my-website.com/socrata-app/auth/callback, you might want to specify https://my-website.com/socrata-app as your callback URL. Once you have an application and a secret token, you\u2019ll be able to authenticate with the SODA OAuth 2.0 endpoint. You\u2019ll first need to redirect the user to the Socrata-powered site you wish to access so that they may log in and approve your application. For example: https://soda.demo.socrata.com/oauth/authorize?client_id=YOUR_AUTH_TOKEN&response_type=code &redirect_uri=YOUR_REDIRECT_URI Note that the redirect_uri here must be an absolute, secure (https:) URI which starts with the Callback Prefix you specified when you registered your application. If any of these cases fail, the user will be shown an error indicating as much. Should the user authorize your application, they will be redirected back to the your redirect_uri. For example, if I provide https://my-website.com/socrata-app/auth/callback as my redirect_uri, the user will be redirected to this URL: https://my-website.com/socrata-app/auth/callback?code=CODE where CODE is an authorization code that you will use later. If your redirect_uri contains a querystring, it will be preserved, and the code parameter will be added onto the end of it. Likewise, if you provide the optional state parameter in the original redirect to /authenticate, it will be preserved and sent back to you. Now that the user has authorized your application, the next step is to retrieve an access_token so that you can perform operations on their behalf. You can do this by making the following POST request from your server: https://soda.demo.socrata.com/oauth/access_token \"client_id\": YOUR_AUTH_TOKEN, \"client_secret\": YOUR_SECRET_TOKEN, \"grant_type\": \"authorization_code\", \"redirect_uri\": YOUR_REDIRECT_URI, \"code\": CODE where YOUR_AUTH_TOKEN and YOUR_SECRET_TOKEN are the tokens you received when registering your app, YOUR_REDIRECT_URI is the same value as what you used previously, and CODE is the value of the code query parameter of the URL that the user was redirected to. You\u2019ll receive the following response: { access_token: ACCESS_TOKEN } Use this access_token in your requests when you have to do work on behalf of the now-authenticated user, as described below in the Using an OAuth 2.0 Access Token section. We have a sample app available on GitHub that illustrates how to do all of the above with the Ruby OAuth2 gem. Using an OAuth 2.0 Access Token Once you have obtained an access_token, you should include it on requests which need to happen on behalf of the user. The token must be included in the Authorization HTTP Header field as follows: Authorization: OAuth YOUR_ACCESS_TOKEN Note: All authenticated requests must be performed over a secure connection (https). Any attempt to use an access_token over a non-secure connection will result in immediate revocation of the token. Who am I? One quirk of authenticating via OAuth 2.0 is that the entire process happens without the 3rd party application (that\u2019s you!) having any knowledge of who, exactly, the user is that just authorized the application. To remedy this, we have set up an endpoint that simply returns the information of the current user. To return the data in JSON: https://soda.demo.socrata.com/api/users/current.json To return the data in XML: https://soda.demo.socrata.com/users/current.xml",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-response-codes-headers-1",
+      "type": "section",
+      "title": "Response Codes & Headers",
+      "path": [
+        "API Endpoints",
+        "Response Codes & Headers"
+      ],
+      "text": "Response Codes & Headers",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-response-codes-1",
+      "type": "section",
+      "title": "Response Codes",
+      "path": [
+        "API Endpoints",
+        "Response Codes"
+      ],
+      "text": "Response Codes\nThe Socrata Open Data API responds with standard HTTP Status Codes for both successful requests and for errors. The table below lists the response codes you should expect to see. 200\tOK\tYour request was successful 202\tRequest Processing\tYou can retry your request, and when it\u2019s complete, you\u2019ll get a 200 instead 400\tBad Request\tProbably your request was malformed. See the error message in the body for details 401\tUnauthorized\tYou attempted to authenticate but something went wrong. Make sure you follow the instructions to authenticate properly 403\tForbidden\tYou\u2019re not authorized to access this resource. Make sure you authenticate to access private datasets 404\tNot Found\tThe resource requested doesn\u2019t exist 429\tToo Many Requests\tYour client is currently being rate limited. Make sure you\u2019re using an app token 500\tServer Error\tOur bad! Something has gone wrong with Socrata\u2019s platform. Please let us know if you encounter a 500 error",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-headers-1",
+      "type": "section",
+      "title": "Headers",
+      "path": [
+        "API Endpoints",
+        "Headers"
+      ],
+      "text": "Headers\nFor SODA 2.1 API calls, we include a few response headers that may be useful: X-Socrata-RequestId\taqe1bgaxzvhitfgrsvy6semhi\tA unique ID for this particular request. Very useful to include when asking for help, as it allows us to track your error down in our system Access-Control-Allow-Origin\t*\tAllows browsers to make cross-origin requests for data X-SODA2-Fields\t[\"business\",\"category\", ...] (truncated)\tAn array of the field names that may be included in this response X-SODA2-Types\t[\"text\",\"text\",...] (truncated)\tAn array of the data types for fields included in this response Last-Modified\tTue, 24 Feb 2015 18:51:22 GMT\tWhen the dataset backing this request was updated; may be used for caching ETag\t\"YWxwaGEuNTQzNV8...-gzip\" (truncated)\tAn HTTP ETag which may be used for cache validation There may be other headers included in responses, but they should not be relied upon and may change without notice. HTTP Headers are limited by practical constraints to a maximum size of 4K. In order to keep our request header sizes below that limit, the X-SODA2-Fields and X-SODA2-Types headers may be omitted for datasets with a very large number of columns.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-error-messages-1",
+      "type": "section",
+      "title": "Error Messages",
+      "path": [
+        "API Endpoints",
+        "Error Messages"
+      ],
+      "text": "Error Messages\nFor any variety of error, we return a standard error message format that looks like the following: \"code\" : \"soql.analyzer.typechecker.type-mismatch\", \"error\" : true, \"message\" : \"Type mismatch: expected text, but found number\", \"status\" : 400, \"data\" : { \"found\" : \"number\", \"expected\" : [ \"text\" ]",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-1",
+      "type": "section",
+      "title": "},",
+      "path": [
+        "API Endpoints",
+        "},"
+      ],
+      "text": "},\n\"source\" : { \"position\" : { \"column\" : 30, \"row\" : 1, \"text\" : \"select * where string_column > 42\" \"type\" : \"anonymous\" In particular: code: An enumeration for the particular class of error you have encountered error: A boolean flag you can check in your code if your library masks the HTTP error code. Ex: if(response.error) { // handle error } message: A human-readable error message that will help you debug what caused the error data: Machine-readable data about the error, most importantly the query generated by our SoQL parser based on your inputs",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-system-fields-1",
+      "type": "section",
+      "title": "System Fields",
+      "path": [
+        "API Endpoints",
+        "System Fields"
+      ],
+      "text": "System Fields\nIn addition to the fields provided by the dataset owner, Socrata also provides a number of useful system fields you can make use of. They\u2019re very useful for detecting when datasets have changed. :id\tThe internal Socrata identifier for this record. :created_at\tA Fixed Timestamp representing when this record was created. :updated_at\tA Fixed Timestamp representing when this record was last updated. System fields are not included by default, and the method that you use to request the inclusion of the hidden system fields depends on what version of the SODA API specification the API you are accessing complies with. To learn more about API versioning, see the API Endpoint documentation.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-version-2-1-1",
+      "type": "section",
+      "title": "Version 2.1",
+      "path": [
+        "API Endpoints",
+        "Version 2.1"
+      ],
+      "text": "Version 2.1\nWith version 2.1 APIs, accessing the system fields is as simple as including them in your $select parameter, either explicitly or via a wildcard. You can either $select=:id, :updated_at, name, address, or you could be even more broad and simply select :*, * to retrieve both all of the hidden internal fields and the fields from the dataset itself. For example: The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. Since :created_at and :updated_at are Fixed Timestamp, you can query them to get recent updates to a dataset using the $where query parameter, like this example: The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. A note on how datasets are updated Data providers use many different methods to update datasets. In some cases, they use tools like DataSync or the SODA Producer API to update datasets, and we can tell which records within the dataset have actually been modified, and only update them accordingly. When data providers perform a full replace of the dataset using the SODA Producer Replace API, all of its records will be updated within a short period of time, in which case a query based on :updated_at will show that all of the records have changed.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-version-2-0-1",
+      "type": "section",
+      "title": "Version 2.0",
+      "path": [
+        "API Endpoints",
+        "Version 2.0"
+      ],
+      "text": "Version 2.0",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-version-2-0-2",
+      "type": "section",
+      "title": "Version 2.0",
+      "path": [
+        "API Endpoints",
+        "Version 2.0"
+      ],
+      "text": "Getting the SODA API to return system fields is as simple as adding the parameter $$exclude_system_fields=false to your request. The double dollar sign ($$) is significant - it denotes a Socrata-specific parameter that is not part of the SODA standard. The TryIt macro has been disabled until future notice while we upgrade this site to SODA3. CORS & JSONP For security reasons, web browsers prevent what are called \u201ccross-origin\u201d or \u201ccross-site\u201d requests from one domain to another. JavaScript XMLHTTPRequests (commonly called \u201cAJAX\u201d requests) inherit all of the authentication context of the currently logged in user, so a malicious web page could attempt to make malicious requests that cross domain contexts and cause trouble. Historically, that has made it difficult for web developers to build web applications making use of third-party APIs. Fortunately, techniques have since been developed that allow developers to securely access APIs cross-domain. The two most popular ones, and the techniques that Socrata supports, are CORS and JSONP. A note on CORS, JSONP, and dataset permissions In order to prevent the aforementioned malicious cross-site attacks, Socrata automatically drops all authentication and authorization on requests that come in via CORS and JSONP. As a result, these techniques can only be used to access public datasets in a read-only fashion. Cross-Origin Resource Sharing (CORS) CORS is a proposed standard for allowing your web browser and a web server to negotiate and allow requests to be made across domain contexts. CORS is currently supported in modern Chrome, Firefox, Safari, and Internet Explorer (10+) web browsers. The standard itself is working its way through the W3C on its way to becoming official. You don\u2019t need to do anything special to use CORS with JavaScript in a modern browser. Your web browser and our servers will automatically negotiate the cross-origin request. For example, to make a CORS request with jQuery, you\u2019d make your request just like you were performing it within the context of your own domain. $.ajax({ url: \"https://data.chattlibrary.org/api/v3/views/e968-fnk9/query.json\", method: \"POST\", dataType: \"json\", data: JSON.stringify({ \"query\": \"SELECT * WHERE status = 'CLOSED'\", \"page\": { \"pageNumber\": 1, \"pageSize\": 1000",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-1",
+      "type": "section",
+      "title": "},",
+      "path": [
+        "API Endpoints",
+        "},"
+      ],
+      "text": "},\n\"includeSynthetic\": false",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-1",
+      "type": "section",
+      "title": "}),",
+      "path": [
+        "API Endpoints",
+        "}),"
+      ],
+      "text": "}),\nheaders: { 'Content-Type': 'application/json', 'X-App-Token': app_token",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-1",
+      "type": "section",
+      "title": "},",
+      "path": [
+        "API Endpoints",
+        "},"
+      ],
+      "text": "},\nsuccess: function( data, status, jqxhr ){ console.log( \"Request received:\", data ); error: function( jqxhr, status, error ){ console.log( \"Something went wrong!\" );",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-1",
+      "type": "section",
+      "title": "});",
+      "path": [
+        "API Endpoints",
+        "});"
+      ],
+      "text": "});",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-2",
+      "type": "section",
+      "title": "});",
+      "path": [
+        "API Endpoints",
+        "});"
+      ],
+      "text": "\u201cJavaScript with Padding\u201d (JSONP) If you\u2019re developing for older browsers, or you just feel like being nostalgic, you can also make use of our support for JSONP. Also called \u201cJSON with Padding\u201d, it is a technique for fooling a web browser into performing cross-origin requests using a special <script> tag that uses the src attribute to make a special API request. Instead of responding with just a JSON object, the server responds with JavaScript code that calls a client-declared callback function, passing the data as that function\u2019s first parameter. With the Socrata API, the name of that callback function is declared using the $jsonp parameter. Sounds hacky, huh? Fortunately, tools like jQuery make it easy to use JSONP: $.ajax({ url: \"https://data.chattlibrary.org/resource/e968-fnk9.json\", jsonp: \"$jsonp\", dataType: \"jsonp\" }).done(function(data) { console.log(\"Request received: \" + data); But, as we mentioned, you should only need to use JSONP as a fallback in cases where you\u2019re working with a browser that doesn\u2019t support CORS. Queries using SODA3 The Socrata APIs provide rich query functionality through a query language we call the \u201cSocrata Query Language\u201d or \u201cSoQL\u201d. As its name might suggest, it borrows heavily from Structured Query Language (SQL), used by many relational database systems. Its paradigms should be familiar to most developers who have previously worked with SQL, and are easy to learn for those who are new to it. Requests must be either authenticated by a user or marked with a valid application token. Developers should now use the HTTP POST method when requesting queries, as this allows for longer queries and clearer options. The endpoints are split into two: /query for querying (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/query.json) Query has more options for customizing the request so that you can fine-tune what data you want back. /export for exports (e.g., https://data.cityofchicago.org/api/v3/views/ydr8-5enu/export.csv) Export focuses on providing the entire dataset to be consumed by humans or Microsoft Excel or similar programs. You can click on each option to see more information about them: Request Option\t/query\t/export\tDescription query\tavailable\tavailable\tThe SoQL query to run page\tavailable\tnot available\t{ pageNumber: 1, pageSize: 1000 } to indicate which page (1-indexed) and how many rows per page parameters\tavailable\tavailable\tSome views require parameters to be provided by the user. Details to be provided at a later date timeout\tdefault: 600\tdefault: 600\tThe number of seconds before timing out the request. Default: 600 (10 minutes) includeSystem\tdefault: true\tnot available\tWhether or not to include system columns includeSynthetic\tdefault: true\tnot available\tWhether or not to include not-explicitly-requested columns, such as system fields orderingSpecifier\tdefault: total\tdefault: total\tCan be set to discard if you do not care about order and just want the data. Can improve performance significantly serializationOptions\tnot available\tavailable\tDifferent formats have specific customization options.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-example-1",
+      "type": "section",
+      "title": "Example",
+      "path": [
+        "API Endpoints",
+        "Example"
+      ],
+      "text": "Example\nYou might use the popular program cURL to make the request with the appropriate payload, or use an appropriate HTTP client library in your preferred programming language. Query for the first 100 rows of a dataset: curl --header 'X-App-Token: your-application-token' \\ --json '{ \"query\": \"SELECT *\", \"page\": { \"pageNumber\": 1, \"pageSize\": 100",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-1",
+      "type": "section",
+      "title": "},",
+      "path": [
+        "API Endpoints",
+        "},"
+      ],
+      "text": "},\n\"includeSynthetic\": false",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-1",
+      "type": "section",
+      "title": "}' \\",
+      "path": [
+        "API Endpoints",
+        "}' \\"
+      ],
+      "text": "}' \\",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-section-2",
+      "type": "section",
+      "title": "}' \\",
+      "path": [
+        "API Endpoints",
+        "}' \\"
+      ],
+      "text": "https://soda.demo.socrata.com/api/v3/views/4tka-6guv/query.json Export the dataset as CSV with a byte-order mark and a separator character of TAB: curl --header 'X-App-Token: your-application-token' \\ --json '{ \"serializationOptions\": { \"separator\": \"\\t\", \"bom\": true https://soda.demo.socrata.com/api/v3/views/4tka-6guv/export.csv SoQL Function and Keyword Listing The following are all the functions and keywords available in SoQL. Some only work on the the latest version of our API endpoints, while some work on legacy versions as well. You can filter them by endpoint version and datatype using the filters below. For a list of valid operators, see the Datatypes documentation. distinct\tReturns distinct set of records\t2.1 and 3.0 avg(...)\tReturns the average of a given set of numbers\t2.0, 2.1, and 3.0 between ... and ...\tReturns TRUE for values in a given range\t2.1 and 3.0 case(...)\tReturns different values based on the evaluation of boolean comparisons\t2.1 and 3.0 convex_hull(...)\tReturns the minimum convex geometry that encloses all of another geometry\t2.1 and 3.0 count(...)\tReturns a count of a given set of records\t2.0, 2.1, and 3.0 date_extract_d(...)\tExtracts the day from the date as an integer.\t2.1 and 3.0 date_extract_dow(...)\tExtracts the day of the week as an integer between 0 and 6 (inclusive).\t2.1 and 3.0 date_extract_hh(...)\tExtracts the hour of the day as an integer between 0 and 23 (inclusive).\t2.1 and 3.0 date_extract_m(...)\tExtracts the month as an integer.\t2.1 and 3.0 date_extract_mm(...)\tExtracts the minute from the time as an integer.\t2.1 and 3.0 date_extract_ss(...)\tExtracts the second from the time as an integer.\t2.1 and 3.0 date_extract_woy(...)\tExtracts the week of the year as an integer between 0 and 51 (inclusive).\t2.1 and 3.0 date_extract_y(...)\tExtracts the year as an integer.\t2.1 and 3.0 date_trunc_y(...)\tTruncates a calendar date at the year threshold\t2.0, 2.1, and 3.0 date_trunc_ym(...)\tTruncates a calendar date at the year/month threshold\t2.0, 2.1, and 3.0 date_trunc_ymd(...)\tTruncates a calendar date at the year/month/date threshold\t2.0, 2.1, and 3.0 distance_in_meters(...)\tReturns the distance between two Points in meters\t2.1 and 3.0 extent(...)\tReturns a bounding box that encloses a set of geometries\t2.1 and 3.0 greatest(...)\tReturns the largest value among its arguments, ignoring NULLs.\t2.1 and 3.0 in(...)\tMatches values in a given set of options\t2.1 and 3.0 intersects(...)\tAllows you to compare two geospatial types to see if they intersect or overlap each other\t2.1 and 3.0 least(...)\tReturns the smallest value among its arguments, ignoring NULLs.\t2.1 and 3.0 like '...'\tAllows for substring searches in text strings\t2.1 and 3.0 ln(...)\tReturns the natural log of a number\t2.1 and 3.0 lower(...)\tReturns the lowercase equivalent of a string of text\t2.1 and 3.0 max(...)\tReturns the maximum of a given set of numbers\t2.1 and 3.0 min(...)\tReturns the minimum of a given set of numbers\t2.1 and 3.0 not between ... and ...\tReturns TRUE for values not in a given range\t2.1 and 3.0 not in(...)\tMatches values not in a given set of options\t2.1 and 3.0 not like '...'\tAllows for matching text fields that do not contain a substring\t2.1 and 3.0 num_points(...)\tReturns the number of vertices in a geospatial data record\t2.1 and 3.0 regr_intercept(...)\tReturns the y-intercept of the linear least squares fit\t2.1 and 3.0 regr_r2(...)\tReturns the square of the correlation coefficient (r\u00b2)\t2.1 and 3.0 regr_slope(...)\tReturns the slope of the linear least squares fit\t2.1 and 3.0 simplify(...)\tReduces the number of vertices in a line or polygon\t2.1 and 3.0 simplify_preserve_topology(...)\tReduces the number of vertices in a line or polygon, preserving topology\t2.1 and 3.0 starts_with(...)\tMatches on text strings that start with a given substring\t2.1 and 3.0 stddev_pop(...)\tReturns the population standard deviation of a given set of numbers\t2.1 and 3.0 stddev_samp(...)\tReturns a sampled standard deviation of a given set of numbers\t2.1 and 3.0 sum(...)\tReturns the sum of a given set of numbers\t2.1 and 3.0 unaccent(...)\tRemoves accents (diacritical marks) from a string.\t2.1 and 3.0 upper(...)\tReturns the uppercase equivalent of a string of text\t2.1 and 3.0 within_box(...)\tReturns the rows that have geodata within the specified box, defined by latitude, longitude corners\t2.0, 2.1, and 3.0 within_circle(...)\tReturns the rows that have locations within a specified circle, measured in meters\t2.0, 2.1, and 3.0 within_polygon(...)\tReturns the rows that have locations within the specified box, defined by latitude, longitude corners\t2.1 and 3.0",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-data-transform-listing-1",
+      "type": "section",
+      "title": "Data Transform Listing",
+      "path": [
+        "API Endpoints",
+        "Data Transform Listing"
+      ],
+      "text": "Data Transform Listing",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-data-transform-listing-2",
+      "type": "section",
+      "title": "Data Transform Listing",
+      "path": [
+        "API Endpoints",
+        "Data Transform Listing"
+      ],
+      "text": "These are the transformation functions available in the Dataset Management API. These functions can be used to transform and validate your data before you publish your dataset for consumption. These functions can be used in the \u201cData Transforms\u201d editor of the the Dataset Management Experience interface. Check out some of the examples on our Support Portal here! See the Dataset Management API docs for more info on how to use the transform functions as an API user. +\tKeep a number\u2019s sign and\tLogical and of two boolean values ||\tconcatenate two strings /\tDivide a number by another =\tReturn true if the left side equals the right ==\tReturn true if the left side equals the right ^\tNo documentation is available. >\tReturn true if the value on the left is greater than the value on the right >=\tReturn true if the value on the left is greater than or equal to the value on the right <\tReturn true if the value on the left is less than the value on the right <=\tReturn true if the value on the left is less than or equal to the value on the right %\tFind the remainder(modulus) of one number divided by another *\tMultiply two numbers together not\tInvert a boolean <>\tReturn true if the left side does not equal the right !=\tReturn true if the left side does not equal the right or\tLogical or of two boolean values -\tSubtract a number from another abs\tProduce the absolute value of a number between\tReturn true if the left is within the range of the right values case\tEvaluate a series of true/false expressions (predicates) and return the next consequent. centroid\treturns the geometric centroid of a polygon or multipolygon. Please refer to coalesce\tTake the leftmost non-null value. contains\ttell whether or not a string contains another string county_boundary\tReturns the boundary of the US county as a multipolygon. The state name is not case sensitive. date_extract_d\tExtract the day from the date as an integer date_extract_dow\tExtracts the day of the week as an integer between 0 and 6 where date_extract_hh\tExtract the hour the date as an integer date_extract_m\tExtract the month as an integer date_extract_mm\tExtract the minute from the date as an integer date_extract_ss\tExtract the second from the date as an integer date_extract_woy\tExtracts the week of the year as an integer between 0 and 51 date_extract_y\tExtract the year as an integer date_trunc_y\tTruncates a calendar date at the year threshold date_trunc_ym\tTruncates a calendar date at the year/month threshold date_trunc_ymd\tTruncates a calendar date at the year/month/day threshold datetime_add_d\tAdds or subtracts the specified number of days to the timestamp datetime_add_hh\tAdds or subtracts the specified number of hours to the timestamp datetime_add_mm\tAdds or subtracts the specified number of minutes to the timestamp datetime_add_ss\tAdds or subtracts the specified number of seconds to the timestamp datetime_diff\tCalculates the difference between two dates in seconds, minutes, hours, days, business days, weeks, calendar weeks, months, or years. domain_categories\tReturns the categories currently configured on the domain. Useful primarily domain_licenses\tReturns the licenses currently configured on the domain. Useful primarily email_parse\tParse an email. This is best effort as most things are actually ensure_within\tensure_within is a function which takes a point and a multipolygon error\tMake an error. This is useful in conjunction with a case function, floating_timestamp_day\tExtract the day from a calendar date floating_timestamp_day_of_week\tExtract the day of the week as an integer between 0 and 6 where Sunday is 0. floating_timestamp_hour\tExtract the hour from a calendar date floating_timestamp_minute\tExtract the minute from a calendar date floating_timestamp_month\tExtract the month from a calendar date floating_timestamp_second\tExtract the second from a calendar date floating_timestamp_week_of_year\tExtract the week from a calendar date as an integer between 0 and 51. floating_timestamp_year\tExtract the year from a calendar date forgive\tforgive can take an optional default argument from_polyline\tconvert a linestring encode in Google\u2019s polyline format with the given precision to a Line geocode\tgeocode is a function which takes human readable addresses geocode_esri\tgeocode_esri is a function which takes human readable addresses grapheme_length\tthe length of a piece of text in unicode grapheme clusters. greatest\treturn the largest value among its arguments (ignoring null) hash\tConstruct a hash value from a string value using either the md5 or sha256 algorithm. haversine_distance\tReturn the distance of the line using haversine formula http_get\tMake an HTTP Get request to a URL. The response is returned. If the server in\tWhether or not a value is in a set of other values is_empty\tReturns whether or not the input is empty. Empty means null values, is_not_null\tWhether or not a value is not null is_null\tWhether or not a value is null is_within\tis_within is a function which takes a point and a multipolygon json_array_contains\tTest if a json array contains an item. If the JSON passed to this function is not an array, json_pluck\tPluck a value out of a JSON string. The returned value will be a SoQL Json value. json_pluck_boolean\tPluck a boolean value out of a JSON string. The returned value must be a boolean, otherwise json_pluck_number\tPluck a number value out of a JSON string. The returned value must be a number, otherwise json_pluck_text\tPluck a text value out of a JSON string. The returned value may be a primitive like a least\treturn the smallest value among its arguments (ignoring null) left_pad\tPad text with the minimum number of copies of pad to reach desired_length. length\tthe length of a piece of text in unicode code points. This is usually, but not like\tIf a string is like another string. location_address\tExtract the address from a location location_city\tExtract the city from a location location_point\tExtract the point from a location location_state\tExtract the state from a location location_to_point\tTurn a location value into a point location_zip\tExtract the zip from a location lower\tlowercase a string make_location\tThis function has been deprecated. Please use the make_point function instead. make_point\tfunction to make a point out of a Y (latitude) and X (longitude) coordinate. make_url\tNo documentation is available. not_between\tReturn true if the left is not within the range of the right values not_in\tWhether or not a value is absent from a set of other values not_like\tIf a string is not like another string. parse_address\tExtract a street address from a full US address. parse_city\tExtract a city from a full US address. parse_point\tExtract the point from a full US address with point. parse_state\tExtract a state from a full US address. parse_zip\tExtract a ZIP code from a full US address. point_latitude\tExtract the latitude from a point point_longitude\tExtract the longitude from a point polylabel\tReturns a point that must exist within the polygon borders. It uses the recursive grid-based algorithm described here: https://github.com/mapbox/polylabel#how-the-algorithm-works. When given a multipolygon, the point it returns is within the largest (by area) sub-polygon. random_number_between\tReturns a random float using a uniform distribution between the lower and upper values supplied: random_number_between(lower, upper) random_number_normal\tReturns a random float using a normal distribution with the mean and variance supplied: random_number_normal(mean, variance) regex_capture\tfunction to capture a piece of text based on a regular expression regex_named_capture\tcapture a piece of text based on a regular expression regex_replace\tfunction to replace a piece of text based on a regular expression region_code\tTurn a point into the ID of a region, based on which region the point falls within. For example, if this dataset can produce region_code_label\tIdentical to region_code, but returns a text value. repair_geometry\tAttempt to repair the geometry. replace\treplace text with another piece of text replace_first\treplace the first occurrence of a piece of text with another piece of text reproject\treproject a geometry from one projection to another. reproject_to_wgs84\tfunction to reproject a geometry to WGS84. This will allow the geometry right_pad\tPad text with the minimum number of copies of pad to reach desired_length. round\tRound a number to a given precision. Trailing zeros are removed by default. Negative precisions round numbers to the left of the decimal. set_projection\tfunction to explicitly set the projection value on geometries which do not have projection simplify\tReturns a simplified version of the Line, Polygon, MultiLine, or MultiPolygon using simplify_preserve_topology\tReturns a simplified version of the Line, Polygon, MultiLine, or MultiPolygon using slice\tGet a substring of a specified length of a text from a start index source_created_at\tGet the fixed timestamp that this data source was created (ie: started uploading or importing). split_select\tfunction to split a piece of text on a token, and then select starts_with\ttell whether or a not a string is prefixed with another string state_boundary\treturns the boundary of the US state title_case\tMake string title case with the exception of small words as defined by NYT Style Guide: to_boolean\tcast a value to a true or false to_checkbox\tNo documentation is available. to_fixed_timestamp\tTurn a text value into a datetime with a fixed timezone. to_floating_timestamp\tTurn a text value into a floating datetime. \u201cFloating\u201d means the timezone to_json\tcast a text value to json to_line\tparse a WKT (text) representation of a line into a line value to_location\tThis function has been deprecated. Please use the to_point function instead. to_multiline\tconvert a line into a multiline to_multipoint\tconvert a point into a multipoint to_multipolygon\tconvert a polygon into a multipolygon to_number\tcast a value to a number to_point\tparse a WKT (text) representation of a point into a point value to_polygon\tparse a WKT (text) representation of a polygon into a polygon value to_text\tNo documentation is available. to_url\tNo documentation is available. trim\ttrim characters off the start and end of a string trim_leading\ttrim characters off the start of a string trim_trailing\ttrim characters off the end of a string upper\tuppercase a string uri_parse\tParse a URI. url_decode\tURL Decode a value url_description\tExtract the description part of a link. url_encode\tURL Encode a value. url_url\tExtract the url part of a link. validate_geometry\tTest that the geometry is valid. xml_pluck\tPluck a value out of an XML string using XPath. The returned value will be a string.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-output-formats-1",
+      "type": "section",
+      "title": "Output Formats",
+      "path": [
+        "API Endpoints",
+        "Output Formats"
+      ],
+      "text": "Output Formats\nThe Socrata Open Data API supports a number of different response formats that can be specified either via response type extensions on the API endpoint or HTTP Accept headers. CSV\tcsv\ttext/csv; charset=utf-8\t2.0, 2.1, and 3.0 GeoJSON\tgeojson\tapplication/vnd.geo+json;charset=utf-8\t2.1 and 3.0 JSON\tjson\tapplication/json;charset=utf-8\t2.0, 2.1, and 3.0 RDF-XML\trdf\tapplication/rdf+xml; charset=utf-8\t2.0 XML\txml\ttext/xml; charset=utf-8\t2.0 and 3.0 Neither type is better than the other - simply select the one that works best for your framework and application.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-extensions-1",
+      "type": "section",
+      "title": "Extensions",
+      "path": [
+        "API Endpoints",
+        "Extensions"
+      ],
+      "text": "Extensions\nThe simplest way to specify the response format is by appending a response type extension to the URL. This allows you to set the response format without requiring the ability to set headers in your HTTP client. Simply add the extension to the endpoint. For example, if your resource endpoint is /resource/644b-gaut, and you wanted to get CSV output, your path would be /resource/644b-gaut.csv. HTTP Accept Headers HTTP Accept headers allow applications to automatically negotiate content types with a web service. With SODA, this also means you can request content types using Accept headers without needing to provide a response type extension. Simply send an Accept header along with the desired mimetype for the desired response type. For example, to request JSON, you\u2019d use a header of Accept: application/json. The SODA API response will also include a Content-type header to specify the format of the data that it is returning.",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-datatypes-1",
+      "type": "section",
+      "title": "Datatypes",
+      "path": [
+        "API Endpoints",
+        "Datatypes"
+      ],
+      "text": "Datatypes\nThere are many core datatypes in SODA. What datatypes you may find depends on the version of your API endpoint: Checkbox\t2.0, 2.1, and 3.0 Fixed Timestamp\t2.0, 2.1, and 3.0 Floating Timestamp\t2.0 and 2.1 Line\t2.1 and 3.0 Location\t2.0, 2.1, and 3.0 MultiLine\t2.1 and 3.0 MultiPoint\t2.1 and 3.0 MultiPolygon\t2.1 and 3.0 Number\t2.0, 2.1, and 3.0 Point\t2.1 and 3.0 Polygon\t2.1 and 3.0 Text\t2.0, 2.1, and 3.0 URL\t2.0, 2.1, and 3.0 Other APIs",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-dataset-management-1",
+      "type": "section",
+      "title": "Dataset Management",
+      "path": [
+        "API Endpoints",
+        "Dataset Management"
+      ],
+      "text": "Dataset Management",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-approvals-1",
+      "type": "section",
+      "title": "Approvals",
+      "path": [
+        "API Endpoints",
+        "Approvals"
+      ],
+      "text": "Approvals",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-curated-region-jobs-1",
+      "type": "section",
+      "title": "Curated Region Jobs",
+      "path": [
+        "API Endpoints",
+        "Curated Region Jobs"
+      ],
+      "text": "Curated Region Jobs",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-curated-regions-1",
+      "type": "section",
+      "title": "Curated Regions",
+      "path": [
+        "API Endpoints",
+        "Curated Regions"
+      ],
+      "text": "Curated Regions",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-metadata-1",
+      "type": "section",
+      "title": "Metadata",
+      "path": [
+        "API Endpoints",
+        "Metadata"
+      ],
+      "text": "Metadata",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-publishing-1",
+      "type": "section",
+      "title": "Publishing",
+      "path": [
+        "API Endpoints",
+        "Publishing"
+      ],
+      "text": "Publishing\nSearch and Discovery",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-discovery-1",
+      "type": "section",
+      "title": "Discovery",
+      "path": [
+        "API Endpoints",
+        "Discovery"
+      ],
+      "text": "Discovery",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-team-search-1",
+      "type": "section",
+      "title": "Team Search",
+      "path": [
+        "API Endpoints",
+        "Team Search"
+      ],
+      "text": "Team Search",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-user-search-1",
+      "type": "section",
+      "title": "User Search",
+      "path": [
+        "API Endpoints",
+        "User Search"
+      ],
+      "text": "User Search\nExport and Integration OData V2 ODN",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-authentication-1",
+      "type": "section",
+      "title": "Authentication",
+      "path": [
+        "API Endpoints",
+        "Authentication"
+      ],
+      "text": "Authentication\nAPI Keys",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    },
+    {
+      "id": "section-permissions-1",
+      "type": "section",
+      "title": "Permissions",
+      "path": [
+        "API Endpoints",
+        "Permissions"
+      ],
+      "text": "Permissions",
+      "tags": [
+        "section"
+      ],
+      "source_file": "docs/Discovery_API_2.txt",
+      "doc_id": "socrata_soda_api"
+    }
+  ],
+  "schema": {
+    "title": "Socrata RAG Schema",
+    "version": "1.0",
+    "doc": {
+      "title": "string",
+      "sections": "array<Section>",
+      "endpoints": "array<Endpoint>",
+      "chunks": "array<Chunk>"
+    },
+    "Section": {
+      "id": "string",
+      "title": "string",
+      "paragraphs": "array<string>"
+    },
+    "Endpoint": {
+      "id": "string",
+      "title": "string",
+      "method": "string",
+      "path": "string",
+      "summary": "string",
+      "description": "array<string>",
+      "examples": "array<string>",
+      "request": "RequestParams",
+      "response": "Response"
+    },
+    "RequestParams": {
+      "query": "array<Param>",
+      "path": "array<Param>",
+      "header": "array<Param>",
+      "body": "array<Param>",
+      "notes": "array<string>"
+    },
+    "Response": {
+      "content_type": "string|null",
+      "status": "string|null",
+      "fields": "array<Field>",
+      "notes": "array<string>"
+    },
+    "Param": {
+      "name": "string",
+      "type": "string",
+      "description": "string"
+    },
+    "Field": {
+      "name": "string",
+      "type": "string",
+      "description": "string",
+      "notes": "array<string>|undefined"
+    },
+    "Chunk": {
+      "id": "string",
+      "type": "section|endpoint|request-params|response-fields",
+      "title": "string",
+      "path": "array<string>",
+      "text": "string",
+      "tags": "array<string>"
+    }
+  }
+}
