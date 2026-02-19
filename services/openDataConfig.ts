@@ -1,53 +1,24 @@
 import type { OpenDataRuntimeConfig, OpenDataFeatureFlags, OpenDataAuthConfig } from "../types";
 import { COMPLIANCE_POLICY } from "../data/compliancePolicy";
+import {
+  clearOptionalKeys,
+  clearOpenDataSettings,
+  getOptionalKeysPersistencePreference,
+  readOpenDataSettings,
+  readOptionalKeys,
+  setOptionalKeysPersistencePreference,
+  writeOpenDataSettings,
+  writeOptionalKeys
+} from "./storagePolicy";
 
-const STORAGE_KEY = "overseer_open_data_config";
-const SESSION_STORAGE_KEY = "overseer_open_data_config_session";
-const PERSISTENCE_KEY = "overseer_open_data_persist";
-
-const getPersistPreference = () => {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(PERSISTENCE_KEY) === "true";
-  } catch (_) {
-    return false;
-  }
-};
-
-export const getOpenDataPersistencePreference = () => getPersistPreference();
+export const getOpenDataPersistencePreference = () => getOptionalKeysPersistencePreference();
 
 export const setOpenDataPersistencePreference = (persist: boolean) => {
-  if (typeof window === "undefined") return;
-  try {
-    if (persist) {
-      window.localStorage.setItem(PERSISTENCE_KEY, "true");
-    } else {
-      window.localStorage.removeItem(PERSISTENCE_KEY);
-    }
-  } catch (_) {
-    // ignore
-  }
+  setOptionalKeysPersistencePreference(persist);
 };
 
 export const clearOpenDataPersistentConfig = () => {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch (_) {
-    // ignore
-  }
-};
-
-const hasStorage = (storage?: Storage) => {
-  if (!storage) return false;
-  try {
-    const testKey = "__open_data_test__";
-    storage.setItem(testKey, "1");
-    storage.removeItem(testKey);
-    return true;
-  } catch (_) {
-    return false;
-  }
+  clearOptionalKeys("persistent");
 };
 
 const defaultFlags: OpenDataFeatureFlags = {
@@ -69,23 +40,19 @@ const defaultConfig: OpenDataRuntimeConfig = {
 let memoryConfig: OpenDataRuntimeConfig | null = null;
 
 const loadFromStorage = (): OpenDataRuntimeConfig | null => {
-  if (typeof window === "undefined") return null;
-  const hasSession = hasStorage(window.sessionStorage);
-  const hasLocal = hasStorage(window.localStorage);
-  const preferPersistent = hasLocal && getPersistPreference();
-  const sessionRaw = hasSession ? window.sessionStorage.getItem(SESSION_STORAGE_KEY) : null;
-  const localRaw = hasLocal ? window.localStorage.getItem(STORAGE_KEY) : null;
-  const raw = preferPersistent
-    ? (localRaw || sessionRaw)
-    : (sessionRaw || (!hasSession ? localRaw : null));
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return null;
-    return mergeConfig(parsed as Partial<OpenDataRuntimeConfig>);
-  } catch (_) {
-    return null;
-  }
+  const settingsRecord = readOpenDataSettings();
+  const auth = readOptionalKeys();
+  const hasAuth = Boolean(
+    auth?.socrataAppToken
+    || auth?.arcgisApiKey
+    || auth?.geocodingEmail
+    || auth?.geocodingKey
+  );
+  if (!settingsRecord && !hasAuth) return null;
+  return mergeConfig({
+    ...(settingsRecord?.config || {}),
+    auth
+  });
 };
 
 const mergeConfig = (input: Partial<OpenDataRuntimeConfig>): OpenDataRuntimeConfig => {
@@ -123,21 +90,12 @@ const mergeConfig = (input: Partial<OpenDataRuntimeConfig>): OpenDataRuntimeConf
 };
 
 const persistConfig = (config: OpenDataRuntimeConfig, options?: { persist?: boolean }) => {
-  if (typeof window === "undefined") return;
-  // Store in sessionStorage by default to reduce persistence of optional keys.
-  const persist = options?.persist === true || (options?.persist === undefined && getPersistPreference());
-  const storage = persist && hasStorage(window.localStorage)
-    ? window.localStorage
-    : hasStorage(window.sessionStorage)
-      ? window.sessionStorage
-      : null;
-  if (!storage) return;
-  const key = storage === window.sessionStorage ? SESSION_STORAGE_KEY : STORAGE_KEY;
-  try {
-    storage.setItem(key, JSON.stringify(config));
-  } catch (_) {
-    // Ignore storage failures.
-  }
+  writeOpenDataSettings({
+    zeroCostMode: config.zeroCostMode,
+    allowPaidAccess: config.allowPaidAccess,
+    featureFlags: config.featureFlags
+  });
+  writeOptionalKeys(config.auth, { persist: options?.persist });
 };
 
 export const getOpenDataConfig = (): OpenDataRuntimeConfig => {
@@ -162,13 +120,7 @@ export const updateOpenDataConfig = (
 
 export const resetOpenDataConfig = () => {
   memoryConfig = { ...defaultConfig };
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-      window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch (_) {
-      // ignore
-    }
-  }
+  clearOpenDataSettings();
+  clearOptionalKeys("all");
   return memoryConfig;
 };

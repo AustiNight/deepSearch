@@ -19,6 +19,7 @@ import {
   normalizeSourcesFromText,
   recordEmptySources
 } from "./sourceNormalization";
+import { writeRawSynthesisDebug } from "./storagePolicy";
 
 const PROXY_BASE_URL = resolveProxyBaseUrl();
 const USE_PROXY = PROXY_BASE_URL.length > 0;
@@ -54,15 +55,7 @@ const callGemini = async (payload: { model: string; contents: any; config?: any 
 };
 
 const storeRawSynthesis = (raw: string, attempt: "initial" | "retry") => {
-  try {
-    if (typeof window !== "undefined" && window.sessionStorage) {
-      const maxChars = 200000;
-      const stored = raw.length > maxChars ? `${raw.slice(0, maxChars)}\n...[truncated]` : raw;
-      window.sessionStorage.setItem(`overseer_synthesis_raw_gemini_${attempt}`, stored);
-    }
-  } catch (_) {
-    // ignore storage errors
-  }
+  writeRawSynthesisDebug("gemini", attempt, raw);
   console.warn(`[SYNTHESIS RAW gemini ${attempt}]`, raw);
 };
 

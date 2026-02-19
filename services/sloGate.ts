@@ -5,6 +5,7 @@ import {
   SLO_MEDIAN_LATENCY_MS,
   SLO_PARCEL_RESOLUTION_SUCCESS_RATE
 } from '../constants';
+import { readSloHistoryRaw, writeSloHistoryRaw } from './storagePolicy';
 
 type SloHistoryEntry = {
   timestamp: number;
@@ -15,30 +16,14 @@ type SloHistoryEntry = {
   evidenceSuccess?: boolean;
 };
 
-const SLO_HISTORY_STORAGE_KEY = 'overseer_slo_history';
-
-const hasLocalStorage = () => typeof window !== 'undefined' && !!window.localStorage;
-
 const loadHistory = (): SloHistoryEntry[] => {
-  if (!hasLocalStorage()) return [];
-  try {
-    const raw = window.localStorage.getItem(SLO_HISTORY_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry) => entry && typeof entry.timestamp === 'number');
-  } catch {
-    return [];
-  }
+  const parsed = readSloHistoryRaw();
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry) => entry && typeof (entry as any).timestamp === 'number') as SloHistoryEntry[];
 };
 
 const saveHistory = (history: SloHistoryEntry[]) => {
-  if (!hasLocalStorage()) return;
-  try {
-    window.localStorage.setItem(SLO_HISTORY_STORAGE_KEY, JSON.stringify(history));
-  } catch {
-    // Ignore storage failures
-  }
+  writeSloHistoryRaw(history);
 };
 
 const roundMetric = (value: number, digits = 3) => {

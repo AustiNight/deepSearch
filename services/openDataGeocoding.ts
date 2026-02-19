@@ -3,47 +3,31 @@ import { normalizeAddressVariants } from "./addressNormalization";
 import { OPEN_DATA_GEOCODE_CACHE_TTL_MS, OPEN_DATA_GEOCODE_RATE_LIMIT_MS } from "../constants";
 import { enforceRateLimit, fetchJsonWithRetry } from "./openDataHttp";
 import { getOpenDataConfig } from "./openDataConfig";
+import { readGeocodeCache, writeGeocodeCache } from "./storagePolicy";
 
 type CachedGeocode = {
   value: GeocodeResult | null;
   expiresAt: number;
 };
 
-const GEOCODE_CACHE_KEY = "overseer_geocode_cache_v1";
-
 const memoryCache = new Map<string, CachedGeocode>();
 
-const hasStorage = () => typeof window !== "undefined" && !!window.localStorage;
-
 const loadCacheFromStorage = () => {
-  if (!hasStorage()) return;
-  try {
-    const raw = window.localStorage.getItem(GEOCODE_CACHE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return;
-    Object.entries(parsed).forEach(([key, entry]) => {
-      if (!entry || typeof entry !== "object") return;
-      const expiresAt = Number((entry as any).expiresAt);
-      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
-      memoryCache.set(key, { value: (entry as any).value ?? null, expiresAt });
-    });
-  } catch (_) {
-    // ignore
-  }
+  const cached = readGeocodeCache();
+  Object.entries(cached).forEach(([key, entry]) => {
+    if (!entry || typeof entry !== "object") return;
+    const expiresAt = Number((entry as any).expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
+    memoryCache.set(key, { value: (entry as any).value ?? null, expiresAt });
+  });
 };
 
 const persistCache = () => {
-  if (!hasStorage()) return;
-  try {
-    const payload: Record<string, CachedGeocode> = {};
-    memoryCache.forEach((entry, key) => {
-      if (entry.expiresAt > Date.now()) payload[key] = entry;
-    });
-    window.localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(payload));
-  } catch (_) {
-    // ignore
-  }
+  const payload: Record<string, CachedGeocode> = {};
+  memoryCache.forEach((entry, key) => {
+    if (entry.expiresAt > Date.now()) payload[key] = entry;
+  });
+  writeGeocodeCache(payload);
 };
 
 const cacheKey = (address: string) => address.toLowerCase().replace(/\s+/g, " ").trim();

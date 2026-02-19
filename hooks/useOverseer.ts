@@ -39,6 +39,15 @@ import { evaluatePrimaryRecordCoverage } from '../services/primaryRecordCoverage
 import { getOpenDatasetHints } from '../services/openDataPortalService';
 import { buildUnsupportedJurisdictionGap, classifyAddressScope, AddressScopeClassification } from '../services/addressScope';
 import { getOpenDataConfig } from '../services/openDataConfig';
+import {
+  EVIDENCE_RECOVERY_CACHE_TTL_MS,
+  EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES,
+  readEvidenceRecoveryCache,
+  readKnowledgeBaseRaw,
+  readSkillsRaw,
+  writeEvidenceRecoveryCache,
+  writeKnowledgeBaseRaw
+} from '../services/storagePolicy';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -155,15 +164,12 @@ const formatValidationIssue = (issue: any) => {
   }
 };
 
-const EVIDENCE_RECOVERY_CACHE_KEY = 'overseer_evidence_recovery_cache_v2';
-const EVIDENCE_RECOVERY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const EVIDENCE_RECOVERY_MAX_ATTEMPTS = 3;
 const EVIDENCE_RECOVERY_BASE_DELAY_MS = 700;
 const EVIDENCE_RECOVERY_MAX_QUERIES = 6;
 const EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS = 1000 * 45;
 const EVIDENCE_RECOVERY_PRIORITY_SCORE_MIN = 4;
 const EVIDENCE_RECOVERY_MAX_FALLBACK_QUERIES = 2;
-const EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES = 200;
 const EVIDENCE_RECOVERY_MAX_TEXT_CHARS = 12000;
 
 type EvidenceRecoveryCacheEntry = {
@@ -200,24 +206,12 @@ const EVIDENCE_RECOVERY_ERROR_TAXONOMY: Record<EvidenceRecoveryErrorCode, { seve
 };
 
 const loadEvidenceRecoveryCache = (): EvidenceRecoveryCache => {
-  try {
-    const stored = localStorage.getItem(EVIDENCE_RECOVERY_CACHE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (parsed && typeof parsed === 'object') return parsed as EvidenceRecoveryCache;
-    }
-  } catch (_) {
-    // ignore cache failures
-  }
-  return {};
+  const stored = readEvidenceRecoveryCache();
+  return stored && typeof stored === 'object' ? (stored as EvidenceRecoveryCache) : {};
 };
 
 const saveEvidenceRecoveryCache = (cache: EvidenceRecoveryCache) => {
-  try {
-    localStorage.setItem(EVIDENCE_RECOVERY_CACHE_KEY, JSON.stringify(cache));
-  } catch (_) {
-    // ignore cache failures
-  }
+  writeEvidenceRecoveryCache(cache);
 };
 
 const pruneEvidenceRecoveryCache = (cache: EvidenceRecoveryCache) => {
@@ -1374,28 +1368,19 @@ type KnowledgeBase = {
 };
 
 const loadKnowledgeBase = (): KnowledgeBase => {
-  try {
-    const stored = localStorage.getItem('overseer_kb');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      return {
-        domains: Array.isArray(parsed?.domains) ? parsed.domains : [],
-        methods: Array.isArray(parsed?.methods) ? parsed.methods : [],
-        lastUpdated: typeof parsed?.lastUpdated === 'number' ? parsed.lastUpdated : Date.now()
-      };
-    }
-  } catch (_) {
-    // ignore
+  const parsed = readKnowledgeBaseRaw();
+  if (parsed && typeof parsed === 'object') {
+    return {
+      domains: Array.isArray((parsed as any).domains) ? (parsed as any).domains : [],
+      methods: Array.isArray((parsed as any).methods) ? (parsed as any).methods : [],
+      lastUpdated: typeof (parsed as any).lastUpdated === 'number' ? (parsed as any).lastUpdated : Date.now()
+    };
   }
   return { domains: [], methods: [], lastUpdated: Date.now() };
 };
 
 const saveKnowledgeBase = (kb: KnowledgeBase) => {
-  try {
-    localStorage.setItem('overseer_kb', JSON.stringify(kb));
-  } catch (_) {
-    // ignore
-  }
+  writeKnowledgeBaseRaw(kb);
 };
 
 export const useOverseer = () => {
@@ -1414,11 +1399,8 @@ export const useOverseer = () => {
 
   useEffect(() => {
     try {
-      const storedSkills = localStorage.getItem('overseer_skills');
-      if (storedSkills) {
-        const parsed = JSON.parse(storedSkills);
-        if (Array.isArray(parsed)) setSkills(parsed);
-      }
+      const parsed = readSkillsRaw();
+      if (Array.isArray(parsed)) setSkills(parsed as Skill[]);
     } catch (e) {
       console.error("Failed to load skills", e);
     }
@@ -3305,8 +3287,8 @@ export const useOverseer = () => {
         logOverseer(
           'PHASE 4: SYNTHESIS',
           'non-JSON output',
-          'persist raw output to sessionStorage',
-          `keys overseer_synthesis_raw_${providerLabel}_initial/_retry`,
+          'persist raw output in memory',
+          `keys overseer_synthesis_raw_${providerLabel}_initial/_retry (memory only)`,
           'warning'
         );
       }
@@ -3345,10 +3327,10 @@ export const useOverseer = () => {
         } else {
           reportFromRaw = {
             title: baseReport?.title || `Deep Dive: ${topic}`,
-            summary: "Synthesis returned malformed JSON. The raw output is stored in sessionStorage for debugging.",
+            summary: "Synthesis returned malformed JSON. The raw output is stored in memory for debugging.",
             sections: [{
               title: "Synthesis Output Unavailable",
-              content: "The synthesis model returned malformed JSON. Please re-run the report or try a smaller topic. Raw output is stored in sessionStorage for debugging.",
+              content: "The synthesis model returned malformed JSON. Please re-run the report or try a smaller topic. Raw output is stored in memory for debugging.",
               sources: []
             }],
             provenance: {

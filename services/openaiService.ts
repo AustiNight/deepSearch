@@ -22,6 +22,7 @@ import {
   normalizeSourcesFromText,
   recordEmptySources
 } from "./sourceNormalization";
+import { readLogModelsPreference, writeRawSynthesisDebug } from "./storagePolicy";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 import { resolveProxyBaseUrl } from "./proxyBaseUrl";
@@ -49,12 +50,7 @@ const ensureOpenAIReady = () => {
 
 const loggedModelRoles = new Set<ModelRole>();
 const shouldLogResolvedModels = () => {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage?.getItem("overseer_log_models") === "true";
-  } catch (_) {
-    return false;
-  }
+  return readLogModelsPreference();
 };
 
 const resolveRoleModel = (role: ModelRole, overrides?: ModelOverrides) => {
@@ -366,15 +362,7 @@ export const validateReport = async (
 };
 
 const storeRawSynthesis = (raw: string, attempt: "initial" | "retry") => {
-  try {
-    if (typeof window !== "undefined" && window.sessionStorage) {
-      const maxChars = 200000;
-      const stored = raw.length > maxChars ? `${raw.slice(0, maxChars)}\n...[truncated]` : raw;
-      window.sessionStorage.setItem(`overseer_synthesis_raw_openai_${attempt}`, stored);
-    }
-  } catch (_) {
-    // ignore storage errors
-  }
+  writeRawSynthesisDebug("openai", attempt, raw);
   console.warn(`[SYNTHESIS RAW openai ${attempt}]`, raw);
 };
 

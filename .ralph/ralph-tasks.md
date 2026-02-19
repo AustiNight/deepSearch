@@ -28,7 +28,7 @@
   - [ ] Add a lightweight integrity check to verify the map includes all known verticals/subtopics and flags missing items
   - [ ] Acceptance: Transparency Map renders at 80% scale by default and stays current when new verticals/methods/tactics are added without manual edits
 
-- [ ] Epic: Storage Policy Layer + Migration
+- [x] Epic: Storage Policy Layer + Migration
   - [ ] Define a centralized storage policy module (e.g., `services/storagePolicy.ts`) that governs where each data class may be stored (memory, sessionStorage, localStorage)
   - [ ] Codify data classes and policies: settings metadata, run config, model overrides, allowlist, optional keys, open-data index, geocode cache, evidence recovery cache, KB, SLO history, raw synthesis debug
   - [ ] Enforce default storage tiers: optional keys -> sessionStorage (default), non-secrets -> localStorage, sensitive run data -> memory only

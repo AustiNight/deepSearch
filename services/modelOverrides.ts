@@ -1,5 +1,6 @@
-import { MODEL_OVERRIDE_STORAGE_KEY, OPENAI_MODEL_FAST, OPENAI_MODEL_REASONING } from "../constants";
+import { OPENAI_MODEL_FAST, OPENAI_MODEL_REASONING } from "../constants";
 import type { ModelOverrides, ModelRole } from "../types";
+import { readModelOverridesRaw, writeModelOverridesRaw } from "./storagePolicy";
 
 const MODEL_ROLES: ModelRole[] = [
   'overseer_planning',
@@ -56,23 +57,12 @@ export const sanitizeModelOverrides = (overrides?: Partial<ModelOverrides> | nul
 };
 
 export const loadModelOverrides = (): ModelOverrides => {
-  if (typeof window === "undefined" || !window.localStorage) return {};
-  try {
-    const raw = window.localStorage.getItem(MODEL_OVERRIDE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return sanitizeModelOverrides(parsed);
-  } catch (_) {
-    return {};
-  }
+  const raw = readModelOverridesRaw();
+  if (!raw || typeof raw !== "object") return {};
+  return sanitizeModelOverrides(raw as Partial<ModelOverrides>);
 };
 
 export const saveModelOverrides = (overrides: ModelOverrides) => {
-  if (typeof window === "undefined" || !window.localStorage) return;
-  try {
-    const sanitized = sanitizeModelOverrides(overrides);
-    window.localStorage.setItem(MODEL_OVERRIDE_STORAGE_KEY, JSON.stringify(sanitized));
-  } catch (_) {
-    return;
-  }
+  const sanitized = sanitizeModelOverrides(overrides);
+  writeModelOverridesRaw(sanitized);
 };

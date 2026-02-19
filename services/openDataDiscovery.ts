@@ -2,17 +2,13 @@ import type { DatasetComplianceEntry, IsoDateString, IsoDateTimeString, OpenData
 import {
   OPEN_DATA_DISCOVERY_MAX_DATASETS,
   OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES,
-  OPEN_DATA_INDEX_TTL_DAYS,
   OPEN_DATA_PORTAL_RECRAWL_DAYS
 } from "../constants";
 import { applyDatasetUsageGates } from "./openDataUsage";
 import { fetchJsonWithRetry } from "./openDataHttp";
-
-const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
-const OPEN_DATA_INDEX_STORAGE_KEY = "overseer_open_data_index";
+import { OPEN_DATA_INDEX_SCHEMA_VERSION, readOpenDataIndex, writeOpenDataIndex } from "./storagePolicy";
 const DEFAULT_LIMIT = Math.min(25, OPEN_DATA_DISCOVERY_MAX_DATASETS);
 
-const hasLocalStorage = () => typeof window !== "undefined" && !!window.localStorage;
 
 const toIsoDateString = (value: unknown): IsoDateString | undefined => {
   if (typeof value === "string") {
@@ -181,46 +177,7 @@ const parsePublisher = (value: unknown) => {
   return undefined;
 };
 
-const loadOpenDatasetIndex = (): OpenDatasetIndex => {
-  const fallback: OpenDatasetIndex = {
-    schemaVersion: OPEN_DATA_INDEX_SCHEMA_VERSION,
-    updatedAt: toIsoDateTimeString(),
-    datasets: []
-  };
-  if (!hasLocalStorage()) return fallback;
-  try {
-    const raw = window.localStorage.getItem(OPEN_DATA_INDEX_STORAGE_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    const schemaVersion = typeof parsed?.schemaVersion === "number" ? parsed.schemaVersion : OPEN_DATA_INDEX_SCHEMA_VERSION;
-    if (schemaVersion !== OPEN_DATA_INDEX_SCHEMA_VERSION) return fallback;
-    const datasets = Array.isArray(parsed?.datasets) ? parsed.datasets : [];
-    const updatedAt = asString(parsed?.updatedAt) || fallback.updatedAt;
-    const updatedMs = Date.parse(updatedAt);
-    if (Number.isFinite(updatedMs)) {
-      const ageDays = (Date.now() - updatedMs) / (1000 * 60 * 60 * 24);
-      if (ageDays > OPEN_DATA_INDEX_TTL_DAYS) return fallback;
-    }
-    return {
-      schemaVersion: OPEN_DATA_INDEX_SCHEMA_VERSION,
-      updatedAt,
-      datasets,
-      portalCrawls: parsed?.portalCrawls ?? undefined,
-      expiresAt: parsed?.expiresAt ?? undefined
-    } as OpenDatasetIndex;
-  } catch (_) {
-    return fallback;
-  }
-};
-
-const saveOpenDatasetIndex = (index: OpenDatasetIndex) => {
-  if (!hasLocalStorage()) return;
-  try {
-    window.localStorage.setItem(OPEN_DATA_INDEX_STORAGE_KEY, JSON.stringify(index));
-  } catch (_) {
-    // ignore persistence failures
-  }
-};
+const loadOpenDatasetIndex = (): OpenDatasetIndex => readOpenDataIndex();
 
 const buildDatasetKey = (dataset: OpenDatasetMetadata) => {
   const idPart = dataset.datasetId || dataset.title;
@@ -256,7 +213,7 @@ const upsertOpenDatasets = (datasets: OpenDatasetMetadata[]) => {
     portalCrawls: index.portalCrawls ?? undefined,
     expiresAt: new Date(Date.now() + OPEN_DATA_INDEX_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
   };
-  saveOpenDatasetIndex(updated);
+  writeOpenDataIndex(updated);
   return updated;
 };
 

@@ -1,5 +1,6 @@
 import { TAXONOMY_UPDATED_EVENT } from '../constants';
 import { dispatchTransparencyMapInvalidate } from '../services/transparencyMapEvents';
+import { readLocalJson, writeLocalJson } from '../services/storagePolicy';
 
 export type ResearchVerticalId = string;
 
@@ -956,28 +957,20 @@ const emptyStore = (): TaxonomyStore => ({
 });
 
 export const loadTaxonomyStore = (): TaxonomyStore => {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return emptyStore();
-    const stored = window.localStorage.getItem(TAXONOMY_STORAGE_KEY);
-    if (!stored) return emptyStore();
-    const parsed = JSON.parse(stored);
-    const store: TaxonomyStore = {
-      version: typeof parsed?.version === 'number' ? parsed.version : TAXONOMY_VERSION,
-      updatedAt: typeof parsed?.updatedAt === 'number' ? parsed.updatedAt : 0,
-      addedVerticals: Array.isArray(parsed?.addedVerticals) ? parsed.addedVerticals : [],
-      addedSubtopics: parsed?.addedSubtopics && typeof parsed.addedSubtopics === 'object' ? parsed.addedSubtopics : {},
-      addedTactics: parsed?.addedTactics && typeof parsed.addedTactics === 'object' ? parsed.addedTactics : {}
-    };
-    return store;
-  } catch (_) {
-    return emptyStore();
-  }
+  const parsed = readLocalJson<Partial<TaxonomyStore>>(TAXONOMY_STORAGE_KEY);
+  if (!parsed || typeof parsed !== 'object') return emptyStore();
+  return {
+    version: typeof parsed.version === 'number' ? parsed.version : TAXONOMY_VERSION,
+    updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0,
+    addedVerticals: Array.isArray(parsed.addedVerticals) ? parsed.addedVerticals : [],
+    addedSubtopics: parsed.addedSubtopics && typeof parsed.addedSubtopics === 'object' ? parsed.addedSubtopics : {},
+    addedTactics: parsed.addedTactics && typeof parsed.addedTactics === 'object' ? parsed.addedTactics : {}
+  };
 };
 
 export const saveTaxonomyStore = (store: TaxonomyStore, invalidation?: TaxonomyInvalidationOverride) => {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(TAXONOMY_STORAGE_KEY, JSON.stringify(store));
+    writeLocalJson(TAXONOMY_STORAGE_KEY, store);
     try {
       window.dispatchEvent(new CustomEvent(TAXONOMY_UPDATED_EVENT, { detail: { updatedAt: store.updatedAt, version: store.version } }));
       dispatchTransparencyMapInvalidate({

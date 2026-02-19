@@ -17,6 +17,7 @@
     "test:address-report": "node --loader ./scripts/ts-loader.mjs scripts/address-report.e2e.test.mjs",
     "test:failure-modes": "node --loader ./scripts/ts-loader.mjs scripts/failure-modes.test.mjs",
     "test:open-data": "node --loader ./scripts/ts-loader.mjs scripts/open-data-providers.test.mjs",
+    "test:storage-policy": "node --loader ./scripts/ts-loader.mjs scripts/storage-policy.test.mjs",
     "test:same-origin": "node scripts/same-origin-fetch.test.mjs",
     "test:ui": "playwright test",
     "test:guardrails": "node scripts/guardrails-check.mjs",

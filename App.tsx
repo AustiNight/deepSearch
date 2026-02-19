@@ -20,11 +20,25 @@ import {
 } from './services/openDataConfig';
 import { dispatchTransparencyMapInvalidate } from './services/transparencyMapEvents';
 import {
-  MODEL_OVERRIDE_STORAGE_KEY,
-  SETTINGS_UPDATED_AT_KEY,
-  SETTINGS_UPDATED_BY_KEY,
-  SETTINGS_VERSION_KEY,
-  SETTINGS_LOCAL_UPDATED_AT_KEY,
+  hasLocalSettingsSnapshot,
+  readAllowlist,
+  readAllowlistUpdatedAt,
+  readProvider,
+  readProviderKey,
+  readRunConfig,
+  readSettingsMetadata,
+  readSettingsMigrationComplete,
+  readUnlocked,
+  updateSettingsMetadata,
+  writeAllowlist,
+  writeAllowlistUpdatedAt,
+  writeProvider,
+  writeProviderKey,
+  writeRunConfig,
+  writeSettingsMigrationComplete,
+  writeUnlocked
+} from './services/storagePolicy';
+import {
   SETTINGS_UPDATED_EVENT,
   MIN_AGENT_COUNT,
   MAX_AGENT_COUNT,
@@ -80,10 +94,6 @@ const DEFAULT_RUN_CONFIG: RunConfig = {
 
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const isModelNameValid = (value: string) => MODEL_NAME_PATTERN.test(value.trim());
-
-const ACCESS_ALLOWLIST_STORAGE_KEY = 'overseer_access_allowlist';
-const ACCESS_ALLOWLIST_UPDATED_AT_KEY = 'overseer_access_allowlist_updated_at';
-const SETTINGS_MIGRATION_KEY = 'overseer_settings_migrated';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const OPENAI_MODEL_SUGGESTIONS = [
@@ -210,21 +220,7 @@ const App: React.FC = () => {
     setSettingsUpdatedAt(updatedAt);
     setSettingsUpdatedBy(updatedBy);
     setSettingsVersion(version);
-    if (updatedAt) {
-      localStorage.setItem(SETTINGS_UPDATED_AT_KEY, updatedAt);
-    } else {
-      localStorage.removeItem(SETTINGS_UPDATED_AT_KEY);
-    }
-    if (updatedBy) {
-      localStorage.setItem(SETTINGS_UPDATED_BY_KEY, updatedBy);
-    } else {
-      localStorage.removeItem(SETTINGS_UPDATED_BY_KEY);
-    }
-    if (typeof version === 'number') {
-      localStorage.setItem(SETTINGS_VERSION_KEY, version.toString());
-    } else {
-      localStorage.removeItem(SETTINGS_VERSION_KEY);
-    }
+    updateSettingsMetadata({ updatedAt, updatedBy, version });
     dispatchSettingsUpdate({ updatedAt, updatedBy, version, source: 'cloud' });
   };
 
@@ -232,12 +228,12 @@ const App: React.FC = () => {
     setProvider(payload.provider);
     setRunConfig(payload.runConfig);
     setModelOverrides(payload.modelOverrides);
-    localStorage.setItem('overseer_provider', payload.provider);
-    localStorage.setItem('overseer_run_config', JSON.stringify(payload.runConfig));
+    writeProvider(payload.provider);
+    writeRunConfig(payload.runConfig);
     saveModelOverrides(payload.modelOverrides);
     if (Array.isArray(payload.accessAllowlist)) {
       setAccessAllowlist(payload.accessAllowlist);
-      localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(payload.accessAllowlist));
+      writeAllowlist(JSON.stringify(payload.accessAllowlist));
     }
     if (options?.updateDraft) {
       setDraftProvider(payload.provider);
@@ -251,7 +247,7 @@ const App: React.FC = () => {
 
   const recordLocalSettingsUpdate = () => {
     const stamp = new Date().toISOString();
-    localStorage.setItem(SETTINGS_LOCAL_UPDATED_AT_KEY, stamp);
+    updateSettingsMetadata({ localUpdatedAt: stamp });
     dispatchSettingsUpdate({ localUpdatedAt: stamp, source: 'local' });
   };
 
@@ -273,13 +269,13 @@ const App: React.FC = () => {
       const data = await fetchAllowlist();
       const entries = Array.isArray(data?.entries) ? data.entries : [];
       setAccessAllowlist(entries);
-      localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(entries));
+      writeAllowlist(JSON.stringify(entries));
       if (data?.updatedAt) {
         setAllowlistUpdatedAt(data.updatedAt);
-        localStorage.setItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY, data.updatedAt);
+        writeAllowlistUpdatedAt(data.updatedAt);
       } else {
         setAllowlistUpdatedAt(null);
-        localStorage.removeItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY);
+        writeAllowlistUpdatedAt(null);
       }
       if (updateDraft) {
         setDraftAllowlistText(entries.join('\n'));
@@ -332,7 +328,7 @@ const App: React.FC = () => {
         return;
       }
 
-      const migrationComplete = localStorage.getItem(SETTINGS_MIGRATION_KEY) === 'true';
+      const migrationComplete = readSettingsMigrationComplete();
       if (!migrationComplete && hasLocalSettings) {
         const migrationResult = await updateUniversalSettings(localSnapshot, null, null);
         if (migrationResult.ok) {
@@ -341,7 +337,7 @@ const App: React.FC = () => {
             updatedBy: migrationResult.data.updatedBy ?? null,
             version: migrationResult.data.version ?? null
           });
-          localStorage.setItem(SETTINGS_MIGRATION_KEY, 'true');
+          writeSettingsMigrationComplete(true);
           setSettingsSyncStatus({ tone: 'success', message: 'Migrated local settings to cloud.' });
         } else {
           setSettingsSyncStatus({
@@ -361,19 +357,18 @@ const App: React.FC = () => {
 
   // Initialize from local storage if available
   useEffect(() => {
-    const storedProvider = localStorage.getItem('overseer_provider');
+    const storedProvider = readProvider();
     const resolvedProvider = storedProvider === 'google' || storedProvider === 'openai' ? storedProvider : DEFAULT_PROVIDER;
     setProvider(resolvedProvider);
 
-    const storedGoogle = localStorage.getItem('overseer_api_key_google') || '';
-    const storedOpenAI = localStorage.getItem('overseer_api_key_openai') || '';
+    const storedGoogle = readProviderKey('google') || '';
+    const storedOpenAI = readProviderKey('openai') || '';
     setKeyOverrides({ google: storedGoogle, openai: storedOpenAI });
 
     let resolvedRunConfig: RunConfig = { ...DEFAULT_RUN_CONFIG };
     try {
-      const storedConfig = localStorage.getItem('overseer_run_config');
-      if (storedConfig) {
-        const parsed = JSON.parse(storedConfig);
+      const parsed = readRunConfig();
+      if (parsed && typeof parsed === 'object') {
         const minAgents = parseEnvNumber(parsed?.minAgents?.toString(), ENV_MIN_AGENTS);
         const maxAgents = parseEnvNumber(parsed?.maxAgents?.toString(), ENV_MAX_AGENTS);
         const maxMethodAgents = parseEnvNumber(parsed?.maxMethodAgents?.toString(), ENV_MAX_METHOD_AGENTS);
@@ -407,7 +402,7 @@ const App: React.FC = () => {
 
     let resolvedAllowlist: string[] = [];
     try {
-      const storedAllowlist = localStorage.getItem(ACCESS_ALLOWLIST_STORAGE_KEY);
+      const storedAllowlist = readAllowlist();
       if (storedAllowlist) {
         try {
           const parsed = JSON.parse(storedAllowlist);
@@ -426,40 +421,30 @@ const App: React.FC = () => {
     setAccessAllowlist(resolvedAllowlist);
 
     try {
-      const storedUpdatedAt = localStorage.getItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY);
+      const storedUpdatedAt = readAllowlistUpdatedAt();
       if (storedUpdatedAt) setAllowlistUpdatedAt(storedUpdatedAt);
     } catch (_) {
       // ignore
     }
 
     try {
-      const storedSettingsUpdatedAt = localStorage.getItem(SETTINGS_UPDATED_AT_KEY);
-      const storedSettingsUpdatedBy = localStorage.getItem(SETTINGS_UPDATED_BY_KEY);
-      const storedSettingsVersion = localStorage.getItem(SETTINGS_VERSION_KEY);
-      if (storedSettingsUpdatedAt) setSettingsUpdatedAt(storedSettingsUpdatedAt);
-      if (storedSettingsUpdatedBy) setSettingsUpdatedBy(storedSettingsUpdatedBy);
-      if (storedSettingsVersion && Number.isFinite(Number(storedSettingsVersion))) {
-        setSettingsVersion(Number(storedSettingsVersion));
-      }
+      const meta = readSettingsMetadata();
+      if (meta.updatedAt) setSettingsUpdatedAt(meta.updatedAt);
+      if (meta.updatedBy) setSettingsUpdatedBy(meta.updatedBy);
+      if (typeof meta.version === 'number') setSettingsVersion(meta.version);
     } catch (_) {
       // ignore
     }
 
     if (REQUIRES_PASSWORD) {
       try {
-        const unlocked = sessionStorage.getItem('overseer_unlocked') === 'true';
-        if (unlocked) setIsUnlocked(true);
+        if (readUnlocked()) setIsUnlocked(true);
       } catch (_) {
         // ignore
       }
     }
 
-    const hasLocalSettings = Boolean(
-      localStorage.getItem('overseer_provider')
-      || localStorage.getItem('overseer_run_config')
-      || localStorage.getItem(MODEL_OVERRIDE_STORAGE_KEY)
-      || localStorage.getItem(ACCESS_ALLOWLIST_STORAGE_KEY)
-    );
+    const hasLocalSettings = hasLocalSettingsSnapshot();
     const localSnapshot = buildUniversalSettingsPayload({
       provider: resolvedProvider,
       runConfig: resolvedRunConfig,
@@ -512,19 +497,19 @@ const App: React.FC = () => {
     setProvider(draftProvider);
     setKeyOverrides(nextKeys);
     setRunConfig(nextRunConfig);
-    localStorage.setItem('overseer_provider', draftProvider);
-    localStorage.setItem('overseer_run_config', JSON.stringify(nextRunConfig));
+    writeProvider(draftProvider);
+    writeRunConfig(nextRunConfig);
     recordLocalSettingsUpdate();
 
     if (nextKeys.google) {
-      localStorage.setItem('overseer_api_key_google', nextKeys.google);
+      writeProviderKey('google', nextKeys.google);
     } else {
-      localStorage.removeItem('overseer_api_key_google');
+      writeProviderKey('google', '');
     }
     if (nextKeys.openai) {
-      localStorage.setItem('overseer_api_key_openai', nextKeys.openai);
+      writeProviderKey('openai', nextKeys.openai);
     } else {
-      localStorage.removeItem('overseer_api_key_openai');
+      writeProviderKey('openai', '');
     }
 
     const nextOpenDataAuth = sanitizeOpenDataAuth(draftOpenDataAuth);
@@ -552,10 +537,10 @@ const App: React.FC = () => {
           const { entries, updatedAt } = allowlistResult.data;
           const resolvedEntries = Array.isArray(entries) ? entries : sanitizedAllowlist;
           setAccessAllowlist(resolvedEntries);
-          localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(resolvedEntries));
+          writeAllowlist(JSON.stringify(resolvedEntries));
           if (updatedAt) {
             setAllowlistUpdatedAt(updatedAt);
-            localStorage.setItem(ACCESS_ALLOWLIST_UPDATED_AT_KEY, updatedAt);
+            writeAllowlistUpdatedAt(updatedAt);
           }
           setDraftAllowlistText(resolvedEntries.join('\n'));
           setAllowlistSyncStatus({
@@ -804,7 +789,7 @@ const App: React.FC = () => {
     }
     setIsUnlocked(true);
     try {
-      sessionStorage.setItem('overseer_unlocked', 'true');
+      writeUnlocked(true);
     } catch (_) {
       // ignore
     }
