@@ -24,7 +24,7 @@
   - [x] Apply source-type scoring (government > quasi-official > aggregator > social) and weight synthesis to prioritize higher-authority sources and recency
   - [x] Map findings into the `PropertyDossier` before rendering and display per-section confidence scores derived from the scoring model
   - [x] Tighten synthesis prompts to require claim-level citations, explicit “Source not found” labels, and a “Data Gaps & Next Steps” section with exact portal/endpoint pointers
-  - [ ] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)
+  - [x] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)
   - [ ] Add compliance/provenance capture for dataset license/ToS and access constraints and surface them in report metadata
   - [ ] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
   - [ ] Add privacy/compliance review checks tied to zero-cost mode and portal ToS/license enforcement

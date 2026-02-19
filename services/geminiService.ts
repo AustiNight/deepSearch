@@ -329,7 +329,17 @@ export const validateReport = async (
 
     You are an independent reviewer. Verify that claims include inline citations from allowed sources.
     Flag any unsupported claims, fabricated links, or missing citations.
-    Return JSON with isValid, issues (array), confidence (0-1).
+    Return JSON with:
+    - isValid: boolean
+    - confidence: number (0-1)
+    - issues: array of objects with:
+      - sectionTitle: string
+      - claim: string (short excerpt)
+      - problem: one of "missing_citation", "unsupported_claim", "fabricated_link", "source_not_allowed", "other"
+      - missingCitations?: string[] (expected sources or "none" if unknown)
+      - citedSources?: string[] (sources found in the report for this claim)
+      - notes?: string
+      - message: string (human-readable; must mention section + missing citations if applicable)
   `;
 
   try {
@@ -342,7 +352,21 @@ export const validateReport = async (
           type: Type.OBJECT,
           properties: {
             isValid: { type: Type.BOOLEAN },
-            issues: { type: Type.ARRAY, items: { type: Type.STRING } },
+            issues: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  sectionTitle: { type: Type.STRING },
+                  claim: { type: Type.STRING },
+                  problem: { type: Type.STRING },
+                  missingCitations: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  citedSources: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  notes: { type: Type.STRING },
+                  message: { type: Type.STRING }
+                }
+              }
+            },
             confidence: { type: Type.NUMBER }
           }
         }

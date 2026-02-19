@@ -45,6 +45,49 @@ const normalizeDomain = (url: string) => {
   }
 };
 
+const MAX_VALIDATION_SNIPPET_CHARS = 240;
+
+const formatValidationIssue = (issue: any) => {
+  if (typeof issue === 'string') return issue;
+  if (!issue || typeof issue !== 'object') return String(issue);
+  if (typeof issue.message === 'string' && issue.message.trim().length > 0) {
+    return issue.message.trim();
+  }
+  const parts: string[] = [];
+  const section = issue.sectionTitle || issue.section || issue.sectionId;
+  if (section) parts.push(`Section: ${section}`);
+  const rawClaim = issue.claim || issue.claimExcerpt || issue.statement;
+  if (typeof rawClaim === 'string' && rawClaim.trim().length > 0) {
+    const cleaned = rawClaim.replace(/\s+/g, ' ').trim();
+    const snippet = cleaned.length > MAX_VALIDATION_SNIPPET_CHARS
+      ? `${cleaned.slice(0, MAX_VALIDATION_SNIPPET_CHARS - 3)}...`
+      : cleaned;
+    parts.push(`Claim: "${snippet}"`);
+  }
+  const problem = issue.problem || issue.type || issue.issueType;
+  if (problem) parts.push(`Issue: ${problem}`);
+  const missing = Array.isArray(issue.missingCitations)
+    ? issue.missingCitations
+    : Array.isArray(issue.missingSources)
+      ? issue.missingSources
+      : [];
+  if (missing.length > 0) parts.push(`Missing citations: ${missing.join(', ')}`);
+  const cited = Array.isArray(issue.citedSources)
+    ? issue.citedSources
+    : Array.isArray(issue.sources)
+      ? issue.sources
+      : [];
+  if (cited.length > 0) parts.push(`Cited sources: ${cited.join(', ')}`);
+  const notes = issue.notes || issue.reason;
+  if (notes) parts.push(`Notes: ${notes}`);
+  if (parts.length > 0) return parts.join(' | ');
+  try {
+    return JSON.stringify(issue);
+  } catch (_) {
+    return String(issue);
+  }
+};
+
 const EVIDENCE_RECOVERY_CACHE_KEY = 'overseer_evidence_recovery_cache_v1';
 const EVIDENCE_RECOVERY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const EVIDENCE_RECOVERY_MAX_ATTEMPTS = 3;
@@ -3181,14 +3224,7 @@ export const useOverseer = () => {
       const isValid = validation?.isValid === true;
       if (!isValid) {
         const issues = Array.isArray(validation?.issues)
-          ? validation.issues.map((issue: any) => {
-              if (typeof issue === 'string') return issue;
-              try {
-                return JSON.stringify(issue);
-              } catch (_) {
-                return String(issue);
-              }
-            })
+          ? validation.issues.map((issue: any) => formatValidationIssue(issue))
           : [];
         logOverseer(
           'PHASE 4: VALIDATION',
