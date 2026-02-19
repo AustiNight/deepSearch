@@ -548,6 +548,26 @@ export interface PropertyDossier {
 
 export type OpenDataPortalType = 'socrata' | 'arcgis' | 'dcat' | 'unknown';
 
+export type OpenDataFeatureFlags = {
+  autoIngestion: boolean;
+  evidenceRecovery: boolean;
+  gatingEnforcement: boolean;
+};
+
+export type OpenDataAuthConfig = {
+  socrataAppToken?: string;
+  arcgisApiKey?: string;
+  geocodingEmail?: string;
+  geocodingKey?: string;
+};
+
+export type OpenDataRuntimeConfig = {
+  zeroCostMode: boolean;
+  allowPaidAccess: boolean;
+  featureFlags: OpenDataFeatureFlags;
+  auth: OpenDataAuthConfig;
+};
+
 export interface DatasetComplianceFields {
   license?: string;
   licenseUrl?: string;
@@ -574,12 +594,23 @@ export interface OpenDatasetMetadata {
   homepageUrl?: string;
   tags?: string[];
   retrievedAt: IsoDateTimeString;
+  fields?: string[];
+  distributions?: string[];
+  complianceAction?: 'allow' | 'block' | 'review';
+  complianceNotes?: string[];
+  doNotUse?: boolean;
+  freshnessStatus?: 'fresh' | 'stale' | 'unknown';
+  staleReason?: string;
+  lastCheckedAt?: IsoDateTimeString;
+  nextCheckAt?: IsoDateTimeString;
 }
 
 export interface OpenDatasetIndex {
   schemaVersion: number;
   updatedAt: IsoDateTimeString;
   datasets: OpenDatasetMetadata[];
+  portalCrawls?: Record<string, { lastCrawledAt: IsoDateTimeString; nextCrawlAt?: IsoDateTimeString }>;
+  expiresAt?: IsoDateTimeString;
 }
 
 export interface DatasetComplianceEntry extends DatasetComplianceFields {

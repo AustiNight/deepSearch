@@ -36,6 +36,7 @@ import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals,
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
 import { normalizeAddressVariants } from '../services/addressNormalization';
 import { evaluatePrimaryRecordCoverage } from '../services/primaryRecordCoverage';
+import { getOpenDatasetHints } from '../services/openDataPortalService';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -445,7 +446,10 @@ const buildEvidenceRecoveryQueries = (slots: Record<string, unknown>, addressDir
     `${addressQuoted} ${city ? `"${city}"` : ''} ${state}`.trim()
   ].filter(Boolean);
 
-  return uniqueList([...baseQueries, ...addressDirectQueries]);
+  const openDataHints = getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"]).slice(0, 6);
+  const portalQueries = openDataHints.map((dataset) => `${dataset.portalUrl} "${dataset.title}"`);
+
+  return uniqueList([...baseQueries, ...addressDirectQueries, ...portalQueries]);
 };
 
 const scoreEvidenceRecoveryQuery = (query: string) => {
@@ -2251,16 +2255,24 @@ export const useOverseer = () => {
         ...(tacticDiscoveryQueries.length > 0 ? tacticDiscoveryQueries : subtopicSeedQueries),
         ...discoveryTemplateQueries
       ]).slice(0, Math.min(6, maxMethodAgents));
+      const openDataDiscoveryHints = addressLike
+        ? getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"]).slice(0, 4)
+        : [];
+      const openDataDiscoveryQueries = openDataDiscoveryHints.map((dataset) => `${dataset.portalUrl} "${dataset.title}"`);
+      const discoveryQueriesWithOpenData = uniqueList([
+        ...openDataDiscoveryQueries,
+        ...discoveryQueries
+      ]).slice(0, Math.min(6, maxMethodAgents));
       discoveryTemplateQueries.forEach(q => registerMethodQuery(q, { source: 'method_discovery_template' }));
-      if (discoveryQueries.length > 0) {
+      if (discoveryQueriesWithOpenData.length > 0) {
         logOverseer(
           'PHASE 0.5: METHOD DISCOVERY',
           'collect method candidates',
-          `spawn ${discoveryQueries.length} scouts`,
-          `queries ${discoveryQueries.join(' | ')}`,
+          `spawn ${discoveryQueriesWithOpenData.length} scouts`,
+          `queries ${discoveryQueriesWithOpenData.join(' | ')}`,
           'action'
         );
-          const discoveryPromises = discoveryQueries.map(async (query: string, index: number) => {
+          const discoveryPromises = discoveryQueriesWithOpenData.map(async (query: string, index: number) => {
           await wait(index * 600, signal);
           ensureActive();
           const agentId = generateId();

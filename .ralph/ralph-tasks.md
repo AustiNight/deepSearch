@@ -1,5 +1,13 @@
 # Ralph Tasks
 
+## Guardrails (Non-Negotiable)
+- Zero-cost default stack (no paid services required to run)
+- Frontend hosted on GitHub Pages
+- API hosted on Cloudflare Worker + KV
+- Same-origin API via `https://deepsearches.app/api/*`
+- No secrets committed to repo
+- Changes must not require user approvals to proceed
+
 - [x] Epic: Improve Report Quality for Address-Like Topics
   - [x] Define schemas for `PropertyDossier`, `DataGap`, and claim-level citations (field names, types, units, optionality, and source linkage rules)
   - [x] Add provenance fields for retrieval timestamp, source update date, and data currency to support recency weighting
@@ -26,7 +34,7 @@
   - [x] Tighten synthesis prompts to require claim-level citations, explicit “Source not found” labels, and a “Data Gaps & Next Steps” section with exact portal/endpoint pointers
   - [x] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)
   - [x] Add compliance/provenance capture for dataset license/ToS and access constraints and surface them in report metadata
-  - [x] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
+  - [x] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and guard behind feature flags with automated checks)
   - [x] Add privacy/compliance review checks tied to zero-cost mode and portal ToS/license enforcement
   - [x] Add instrumentation for parcel-resolution success, evidence-recovery success, latency, and a measurable confidence-quality proxy metric
   - [x] Define SLO targets for parcel resolution, evidence recovery, and median latency; gate releases when below baseline
@@ -50,31 +58,37 @@
   - [x] Add a QA checklist or automated verification for PDF export (layout, tables, citations, headers/footers)
   - [x] Acceptance: clicking “Export to PDF” downloads a multi-page PDF with intact tables, citations, and bibliography; output matches the defined PDF spec and renders correctly in the supported browser list
 
-- [ ] Epic: Integrate Open Data Portal APIs + Parcel Spatial Joins
-  - [ ] Enforce a zero-cost mode: default to public endpoints with no paid services; skip any provider that requires paid access and surface a `DataGap` explaining the skip
-  - [ ] Add optional token support (Socrata app token, ArcGIS API key) that increases rate limits but is never required; fall back to anonymous mode when missing
-  - [ ] Implement keyless-safe geocoding defaults with strict rate limits and caching (Nominatim or equivalent), and document usage policy requirements in-code and in docs
-  - [ ] Add config flags to keep pay-as-you-go disabled and block any paid-tier requests by default
-  - [ ] Define a provider interface for open-data portals (discoverDatasets, fetchMetadata, queryByText, queryByGeometry, listFields, getDistributions) and wire a shared response normalization layer
-  - [ ] Implement Socrata provider with endpoint contracts: discovery via `/api/search/views?q=...`, metadata via `/api/views/{id}.json`, data via `/resource/{id}.json` with SoQL filters, geometry filters (`within_circle`/`within_polygon`), pagination, and rate limiting
-  - [ ] Implement ArcGIS provider with endpoint contracts: discovery via `/sharing/rest/search` (type: “Feature Service” + keywords), item metadata via `/sharing/rest/content/items/{id}`, layer discovery via service `?f=json`, and data queries via `{layerUrl}/query` with geometry + `esriSpatialRelIntersects`, pagination (`resultOffset`/`resultRecordCount`), and `outSR=4326`
-  - [ ] Implement DCAT provider: ingest `data.json`/`catalog.json`, filter datasets by keywords and spatial coverage, and use distribution `accessURL`/`downloadURL` to retrieve JSON/CSV where available
-  - [ ] Add portal-type detection heuristics (Socrata/ArcGIS/DCAT) from base URL, known endpoints, and metadata signatures
-  - [ ] Define authentication handling for providers (API keys, headers, tokens) with secure storage and error surfacing
-  - [ ] Build an address-to-geometry service: normalize address, geocode to lat/lon, and persist confidence + normalized variants for downstream queries
-  - [ ] Implement address-to-parcel resolution: query parcel datasets by address fields when available; otherwise perform GIS spatial join (point-in-polygon) against parcel layers
-  - [ ] Add explicit CRS/reprojection rules for all spatial queries (validate and normalize to EPSG:4326; enforce outSR on queries)
-  - [ ] Add a lightweight spatial-join utility (GeoJSON point-in-polygon) and guardrails for large polygon datasets (tiling/bbox filtering, streaming, or server-side query first)
-  - [ ] Add dataset usage gates for license/ToS compliance and freshness thresholds, and store “do not use” flags in the dataset index
-  - [ ] Add dataset auto‑ingestion: scheduled/triggered crawl of discovered portals to cache dataset metadata, fields, update timestamps, and distributions in a local index
-  - [ ] Add feature flags and rollback controls for auto‑ingestion, evidence recovery, and gating enforcement to allow staged rollout
-  - [ ] Define nonfunctional budgets (latency per report, max external calls) and align cache TTLs to those budgets
-  - [ ] Define dataset index invalidation, TTLs, and re-crawl cadence
-  - [ ] Version and validate data source contracts to handle schema changes without breaking queries
-  - [ ] Expose auto‑ingested datasets to method discovery and evidence recovery so agents can query by portal type + dataset tags (parcel, zoning, permits, code, 311/911)
-  - [ ] Add caching, retry/backoff, and rate-limit policies per provider; surface errors in `DataGap` entries with actionable retry guidance
-  - [ ] Add unit/integration tests for each provider (mocked API responses), and spatial-join fixtures for parcel lookups
-  - [ ] Acceptance: given a city/county portal URL, the system can discover datasets, query at least one dataset by address or geometry, and populate property-relevant fields with citations; provider tests cover Socrata, ArcGIS, and DCAT flows
+- [x] Epic: Integrate Open Data Portal APIs + Parcel Spatial Joins
+  - [x] Enforce a zero-cost mode: default to public endpoints with no paid services; skip any provider that requires paid access and surface a `DataGap` explaining the skip
+  - [x] Add optional token support (Socrata app token, ArcGIS API key) that increases rate limits but is never required; fall back to anonymous mode when missing
+  - [x] Store optional keys client-side only (localStorage/IndexedDB) and explicitly forbid sending keys to Worker/KV or committing them to repo
+  - [x] Implement keyless-safe geocoding defaults with strict rate limits and caching (Nominatim or equivalent), and document usage policy requirements in-code and in docs
+  - [x] Add config flags to keep pay-as-you-go disabled and block any paid-tier requests by default
+  - [x] Add a runtime guard that optional keys can never enable paid-tier endpoints; add tests to prove zero-cost mode remains active even with keys present
+  - [x] Add a centralized frontend API client that only allows `/api/*` endpoints and rejects direct third-party fetches at runtime
+  - [x] Define a provider interface for open-data portals (discoverDatasets, fetchMetadata, queryByText, queryByGeometry, listFields, getDistributions) and wire a shared response normalization layer
+  - [x] Implement Socrata provider with endpoint contracts: discovery via `/api/search/views?q=...`, metadata via `/api/views/{id}.json`, data via `/resource/{id}.json` with SoQL filters, geometry filters (`within_circle`/`within_polygon`), pagination, and rate limiting
+  - [x] Implement ArcGIS provider with endpoint contracts: discovery via `/sharing/rest/search` (type: “Feature Service” + keywords), item metadata via `/sharing/rest/content/items/{id}`, layer discovery via service `?f=json`, and data queries via `{layerUrl}/query` with geometry + `esriSpatialRelIntersects`, pagination (`resultOffset`/`resultRecordCount`), and `outSR=4326`
+  - [x] Implement DCAT provider: ingest `data.json`/`catalog.json`, filter datasets by keywords and spatial coverage, and use distribution `accessURL`/`downloadURL` to retrieve JSON/CSV where available
+  - [x] Add portal-type detection heuristics (Socrata/ArcGIS/DCAT) from base URL, known endpoints, and metadata signatures
+  - [x] Define authentication handling for providers (API keys, headers, tokens) with secure storage and error surfacing
+  - [x] Enforce same-origin API routing for all provider calls via `https://deepsearches.app/api/*`; block direct third-party fetches from the frontend and add tests/lint checks
+  - [x] Build an address-to-geometry service: normalize address, geocode to lat/lon, and persist confidence + normalized variants for downstream queries
+  - [x] Implement address-to-parcel resolution: query parcel datasets by address fields when available; otherwise perform GIS spatial join (point-in-polygon) against parcel layers
+  - [x] Add explicit CRS/reprojection rules for all spatial queries (validate and normalize to EPSG:4326; enforce outSR on queries)
+  - [x] Add a lightweight spatial-join utility (GeoJSON point-in-polygon) and guardrails for large polygon datasets (tiling/bbox filtering, streaming, or server-side query first)
+  - [x] Add dataset usage gates for license/ToS compliance and freshness thresholds, and store “do not use” flags in the dataset index
+  - [x] Add dataset auto‑ingestion: scheduled/triggered crawl of discovered portals to cache dataset metadata, fields, update timestamps, and distributions in a local index
+  - [x] Add DCAT ingestion caps (max dataset size/rows/bytes) and fallback behavior to avoid Worker timeouts and KV bloat
+  - [x] Add explicit crawl budgets and default-off auto‑ingestion settings aligned with zero-cost mode
+  - [x] Add feature flags and rollback controls for auto‑ingestion, evidence recovery, and gating enforcement to allow staged rollout
+  - [x] Define nonfunctional budgets (latency per report, max external calls) and align cache TTLs to those budgets
+  - [x] Define dataset index invalidation, TTLs, and re-crawl cadence
+  - [x] Version and validate data source contracts to handle schema changes without breaking queries
+  - [x] Expose auto‑ingested datasets to method discovery and evidence recovery so agents can query by portal type + dataset tags (parcel, zoning, permits, code, 311/911)
+  - [x] Add caching, retry/backoff, and rate-limit policies per provider; surface errors in `DataGap` entries with actionable retry guidance
+  - [x] Add unit/integration tests for each provider (mocked API responses), and spatial-join fixtures for parcel lookups
+  - [x] Acceptance: given a city/county portal URL, the system can discover datasets, query at least one dataset by address or geometry, and populate property-relevant fields with citations; provider tests cover Socrata, ArcGIS, and DCAT flows
 
 - [ ] Epic: Settings UI for Optional Open-Data Keys
   - [ ] Add a Settings UI section that lists optional keys (Socrata app token, ArcGIS API key, optional geocoding key if supported) with clear “not required” language
@@ -82,7 +96,7 @@
   - [ ] Link to public setup instructions for each optional key and summarize required fields/format
   - [ ] Add validation messaging that treats missing keys as “OK” and only warns about rate limiting
   - [ ] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
-  - [ ] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, and adding keys improves scalability only
+  - [ ] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, keys never leave client storage or sync to Worker/KV, and adding keys improves scalability only
 
 - [ ] Epic: Transparency Map Scaling + Auto-Updates
   - [ ] Set Transparency Map default scale to 80% (CSS transform or layout scaling) without affecting readability or responsiveness
@@ -95,17 +109,44 @@
 - [ ] Epic: US-Only Address Policy
   - [ ] Add an address-scope classifier that detects non-US inputs (country tokens, postal code formats, or explicit country fields)
   - [ ] Define US-only policy behavior: for non-US addresses, skip US-specific record gates and render a scoped report with `DataGap` entries that explain unsupported jurisdiction
+  - [ ] Ensure the US-only classifier runs before evidence recovery and provider calls to avoid wasted portal requests
   - [ ] Add a feature flag to enable/disable US-only enforcement and document defaults
   - [ ] Update settings/help text to explain the policy and how non-US inputs are handled
   - [ ] Add tests for US vs non-US address inputs (UK, CA, EU formats) and verify correct policy behavior
-  - [ ] Acceptance: non-US address inputs are explicitly flagged as out-of-scope with clear guidance, and US-only record gates are not applied
+  - [ ] Acceptance: non-US address inputs are explicitly flagged as out-of-scope, evidence recovery and provider calls are skipped, and US-only record gates are not applied
+
+- [ ] Epic: Constraint Check (Guardrails)
+  - [ ] Add an automated guardrail check that validates new tasks/changes against the Guardrails section before execution
+  - [ ] Ensure any changes that would violate guardrails are blocked or require explicit feature flags that default to off
+  - [ ] Add repo-level secret scanning in CI to enforce “no secrets committed” (regex + allowlist)
+  - [ ] Add KV data policy (metadata-only, no PII, no keys) and tests that enforce redaction
+  - [ ] Add a CI/static check that forbids non-`/api/*` fetches in frontend code
+  - [ ] Add a GitHub Pages routing sanity check (asset paths + 404 handling) to preserve Pages hosting
+  - [ ] Acceptance: tasks and changes that violate guardrails or require user approvals are detected and prevented by automated checks
+
+- [ ] Epic: Storage Policy Layer + Migration
+  - [ ] Define a centralized storage policy module (e.g., `services/storagePolicy.ts`) that governs where each data class may be stored (memory, sessionStorage, localStorage)
+  - [ ] Codify data classes and policies: settings metadata, run config, model overrides, allowlist, optional keys, open-data index, geocode cache, evidence recovery cache, KB, SLO history, raw synthesis debug
+  - [ ] Enforce default storage tiers: optional keys -> sessionStorage (default), non-secrets -> localStorage, sensitive run data -> memory only
+  - [ ] Add TTL and size limits in the storage policy for caches (open-data index, geocode cache, evidence recovery cache)
+  - [ ] Add schema versioning + migration hooks for storage entries (especially open-data index and settings metadata)
+  - [ ] Add a client-side guard that prevents keys from being persisted to localStorage unless explicitly opted in
+  - [ ] Add a settings UI toggle to allow optional key persistence (with warnings and clear consent)
+  - [ ] Migrate existing storage calls in `App.tsx`, `hooks/useOverseer.ts`, and `services/*` to use the storage policy module
+  - [ ] Ensure storage policy enforces same-origin API + no secret exfiltration (keys never leave client, no KV writes)
+  - [ ] Add tests for storage policy enforcement (keys default to sessionStorage, caches respect TTL, and disallowed writes are blocked)
+  - [ ] Acceptance: all storage reads/writes route through the policy module; keys are never persisted server-side; defaults align to zero-cost guardrails
 
 ## Dependency Order
 
+- Add Constraint Check (Guardrails) enforcement
 - Define schemas (`PropertyDossier`, `DataGap`, citations) and provenance fields
 - Define source taxonomy, scoring formulas, evidence thresholds, and data currency policy
 - Build jurisdiction availability matrix and data source contracts
 - Implement address normalization, geocoding, and parcel resolution (with CRS rules)
+- Apply US-only classifier before evidence recovery and provider calls
+- Implement Storage Policy Layer + Migration
+- Implement same-origin API client enforcement
 - Implement provider integrations and dataset index (discovery, ingestion, licensing gates)
 - Add evidence recovery, gating enforcement, and hard-fail policy
 - Update synthesis/validation/report rendering

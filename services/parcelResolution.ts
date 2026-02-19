@@ -3,6 +3,7 @@ import { normalizeAddressVariants } from "./addressNormalization";
 import { DATA_SOURCE_CONTRACTS } from "../data/dataSourceContracts";
 import { FAILURE_TAXONOMY } from "../data/failureTaxonomy";
 import { formatAvailabilityDetails, getRecordAvailability } from "./jurisdictionAvailability";
+import { pointInGeometry } from "./spatialJoin";
 
 export type GeoJsonPosition = [number, number];
 
@@ -168,36 +169,6 @@ const dedupeParcelCandidates = (candidates: ParcelCandidate[]) => {
     }
   }
   return deduped;
-};
-
-const pointInRing = (point: GeoPoint, ring: GeoJsonPosition[]) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0];
-    const yi = ring[i][1];
-    const xj = ring[j][0];
-    const yj = ring[j][1];
-    const intersect = ((yi > point.lat) !== (yj > point.lat))
-      && (point.lon < (xj - xi) * (point.lat - yi) / (yj - yi + Number.EPSILON) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-};
-
-const pointInPolygon = (point: GeoPoint, polygon: GeoJsonPolygon) => {
-  if (polygon.coordinates.length === 0) return false;
-  const outer = polygon.coordinates[0];
-  if (!pointInRing(point, outer)) return false;
-  for (let i = 1; i < polygon.coordinates.length; i += 1) {
-    if (pointInRing(point, polygon.coordinates[i])) return false;
-  }
-  return true;
-};
-
-const pointInGeometry = (point: GeoPoint, geometry?: GeoJsonGeometry) => {
-  if (!geometry) return false;
-  if (geometry.type === "Polygon") return pointInPolygon(point, geometry);
-  return geometry.coordinates.some((poly) => pointInPolygon(point, { type: "Polygon", coordinates: poly }));
 };
 
 const buildParcelFromCandidate = (candidate?: ParcelCandidate): ParcelInfo | undefined => {

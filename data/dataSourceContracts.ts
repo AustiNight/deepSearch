@@ -61,6 +61,8 @@ export type DataSourceContract = {
   endpoints: DataSourceEndpointContract[];
 };
 
+export const DATA_SOURCE_CONTRACTS_SCHEMA_VERSION = 1;
+
 const DEFAULT_RATE_LIMIT: DataSourceRateLimit = {
   maxRequestsPerMinute: 60,
   requiresKey: false,
@@ -297,3 +299,23 @@ export const DATA_SOURCE_CONTRACTS: DataSourceContract[] = [
     ]
   }
 ];
+
+export const validateDataSourceContracts = (contracts: DataSourceContract[] = DATA_SOURCE_CONTRACTS) => {
+  const errors: string[] = [];
+  contracts.forEach((contract, idx) => {
+    if (!contract.recordType) errors.push(`contract[${idx}] missing recordType`);
+    if (!contract.description) errors.push(`contract[${idx}] missing description`);
+    if (!Array.isArray(contract.endpoints) || contract.endpoints.length === 0) {
+      errors.push(`contract[${idx}] missing endpoints`);
+    } else {
+      contract.endpoints.forEach((endpoint, eidx) => {
+        if (!endpoint.id) errors.push(`contract[${idx}].endpoints[${eidx}] missing id`);
+        if (!endpoint.label) errors.push(`contract[${idx}].endpoints[${eidx}] missing label`);
+        if (!endpoint.portalType) errors.push(`contract[${idx}].endpoints[${eidx}] missing portalType`);
+        if (!Array.isArray(endpoint.queryInputs)) errors.push(`contract[${idx}].endpoints[${eidx}] missing queryInputs`);
+        if (!Array.isArray(endpoint.expectedFields)) errors.push(`contract[${idx}].endpoints[${eidx}] missing expectedFields`);
+      });
+    }
+  });
+  return { valid: errors.length === 0, errors };
+};

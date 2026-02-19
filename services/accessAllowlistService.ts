@@ -1,8 +1,4 @@
-import { resolveProxyBaseUrl } from "./proxyBaseUrl";
-
-const PROXY_BASE_URL = resolveProxyBaseUrl();
-
-const buildAllowlistUrl = () => `${PROXY_BASE_URL}/api/access/allowlist`;
+import { apiFetch } from "./apiClient";
 
 export type AllowlistResponse = {
   entries: string[];
@@ -26,7 +22,7 @@ const parseJson = async (res: Response) => {
 };
 
 export const fetchAllowlist = async (): Promise<AllowlistResponse> => {
-  const res = await fetch(buildAllowlistUrl(), { method: 'GET', credentials: 'include' });
+  const res = await apiFetch("/api/access/allowlist", { method: 'GET', credentials: 'include' });
   const data = await parseJson(res);
   if (!res.ok) {
     const message = data?.error || `Allowlist fetch failed (${res.status}).`;
@@ -38,7 +34,7 @@ export const fetchAllowlist = async (): Promise<AllowlistResponse> => {
 export const updateAllowlist = async (entries: string[], expectedUpdatedAt?: string | null): Promise<AllowlistUpdateResult> => {
   const body: Record<string, unknown> = { entries };
   if (expectedUpdatedAt) body.expectedUpdatedAt = expectedUpdatedAt;
-  const res = await fetch(buildAllowlistUrl(), {
+  const res = await apiFetch("/api/access/allowlist", {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',

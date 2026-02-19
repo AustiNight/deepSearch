@@ -1,6 +1,12 @@
 import type { DatasetComplianceEntry, IsoDateString, IsoDateTimeString, OpenDataPortalType, OpenDatasetIndex, OpenDatasetMetadata } from "../types";
-import { OPEN_DATA_DISCOVERY_MAX_DATASETS, OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES } from "../constants";
-import { recordPortalError } from "./portalErrorTelemetry";
+import {
+  OPEN_DATA_DISCOVERY_MAX_DATASETS,
+  OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES,
+  OPEN_DATA_INDEX_TTL_DAYS,
+  OPEN_DATA_PORTAL_RECRAWL_DAYS
+} from "../constants";
+import { applyDatasetUsageGates } from "./openDataUsage";
+import { fetchJsonWithRetry } from "./openDataHttp";
 
 const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
 const OPEN_DATA_INDEX_STORAGE_KEY = "overseer_open_data_index";
@@ -186,11 +192,21 @@ const loadOpenDatasetIndex = (): OpenDatasetIndex => {
     const raw = window.localStorage.getItem(OPEN_DATA_INDEX_STORAGE_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
+    const schemaVersion = typeof parsed?.schemaVersion === "number" ? parsed.schemaVersion : OPEN_DATA_INDEX_SCHEMA_VERSION;
+    if (schemaVersion !== OPEN_DATA_INDEX_SCHEMA_VERSION) return fallback;
     const datasets = Array.isArray(parsed?.datasets) ? parsed.datasets : [];
+    const updatedAt = asString(parsed?.updatedAt) || fallback.updatedAt;
+    const updatedMs = Date.parse(updatedAt);
+    if (Number.isFinite(updatedMs)) {
+      const ageDays = (Date.now() - updatedMs) / (1000 * 60 * 60 * 24);
+      if (ageDays > OPEN_DATA_INDEX_TTL_DAYS) return fallback;
+    }
     return {
       schemaVersion: OPEN_DATA_INDEX_SCHEMA_VERSION,
-      updatedAt: asString(parsed?.updatedAt) || fallback.updatedAt,
-      datasets
+      updatedAt,
+      datasets,
+      portalCrawls: parsed?.portalCrawls ?? undefined,
+      expiresAt: parsed?.expiresAt ?? undefined
     } as OpenDatasetIndex;
   } catch (_) {
     return fallback;
@@ -220,7 +236,8 @@ const upsertOpenDatasets = (datasets: OpenDatasetMetadata[]) => {
     existingIndex.set(buildDatasetKey(dataset), idx);
   });
 
-  for (const dataset of datasets) {
+  const gatedDatasets = applyDatasetUsageGates(datasets);
+  for (const dataset of gatedDatasets) {
     const key = buildDatasetKey(dataset);
     if (!key) continue;
     const existing = existingIndex.get(key);
@@ -235,7 +252,9 @@ const upsertOpenDatasets = (datasets: OpenDatasetMetadata[]) => {
   const updated: OpenDatasetIndex = {
     schemaVersion: OPEN_DATA_INDEX_SCHEMA_VERSION,
     updatedAt: toIsoDateTimeString(),
-    datasets: next
+    datasets: next,
+    portalCrawls: index.portalCrawls ?? undefined,
+    expiresAt: new Date(Date.now() + OPEN_DATA_INDEX_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
   };
   saveOpenDatasetIndex(updated);
   return updated;
@@ -247,39 +266,11 @@ type PortalRequestContext = {
 };
 
 const safeFetchJson = async (url: string, context: PortalRequestContext = {}) => {
-  try {
-    const res = await fetch(url, { method: "GET" });
-    if (!res.ok) {
-      recordPortalError({
-        status: res.status,
-        portalType: context.portalType,
-        portalUrl: context.portalUrl,
-        endpoint: url
-      });
-      return { ok: false, status: res.status, data: null } as const;
-    }
-    try {
-      const data = await res.json();
-      return { ok: true, status: res.status, data } as const;
-    } catch (_) {
-      recordPortalError({
-        status: res.status,
-        portalType: context.portalType,
-        portalUrl: context.portalUrl,
-        endpoint: url,
-        kind: "invalid_json"
-      });
-      return { ok: false, status: res.status, data: null } as const;
-    }
-  } catch (_) {
-    recordPortalError({
-      portalType: context.portalType,
-      portalUrl: context.portalUrl,
-      endpoint: url,
-      kind: "network"
-    });
-    return { ok: false, status: 0, data: null } as const;
+  const response = await fetchJsonWithRetry<any>(url, { retries: 0 }, context);
+  if (!response.ok) {
+    return { ok: false, status: response.status, data: null } as const;
   }
+  return { ok: true, status: response.status, data: response.data } as const;
 };
 
 const detectPortalType = (portalUrl: string): OpenDataPortalType => {
@@ -562,6 +553,11 @@ export const discoverOpenDataDatasets = async (input: OpenDataDiscoveryInput): P
   }
 
   const index = upsertOpenDatasets(datasets);
+  const portalCrawls = index.portalCrawls ?? {};
+  const nowIso = toIsoDateTimeString();
+  const nextCrawlDate = new Date(Date.now() + OPEN_DATA_PORTAL_RECRAWL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  portalCrawls[portalUrl] = { lastCrawledAt: nowIso, nextCrawlAt: nextCrawlDate };
+  saveOpenDatasetIndex({ ...index, portalCrawls });
   return { portalType, datasets, index };
 };
 

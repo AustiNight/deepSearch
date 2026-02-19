@@ -25,6 +25,7 @@ import {
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 import { resolveProxyBaseUrl } from "./proxyBaseUrl";
+import { apiFetch, directFetch } from "./apiClient";
 
 const PROXY_BASE_URL = resolveProxyBaseUrl();
 const USE_PROXY = PROXY_BASE_URL.length > 0;
@@ -43,7 +44,7 @@ export const initializeOpenAI = (apiKey?: string) => {
 
 const ensureOpenAIReady = () => {
   if (USE_PROXY) return;
-  ensureOpenAIReady();
+  if (!openAIKey) throw new Error("OpenAI API key required");
 };
 
 const loggedModelRoles = new Set<ModelRole>();
@@ -67,7 +68,7 @@ const resolveRoleModel = (role: ModelRole, overrides?: ModelOverrides) => {
 
 const requestOpenAI = async (body: Record<string, unknown>, options?: RequestOptions) => {
   if (USE_PROXY) {
-    const res = await fetch(`${PROXY_BASE_URL}/api/openai/responses`, {
+    const res = await apiFetch("/api/openai/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -82,7 +83,7 @@ const requestOpenAI = async (body: Record<string, unknown>, options?: RequestOpt
   }
 
   ensureOpenAIReady();
-  const res = await fetch(OPENAI_API_URL, {
+  const res = await directFetch(OPENAI_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

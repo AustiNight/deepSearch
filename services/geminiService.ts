@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { resolveProxyBaseUrl } from "./proxyBaseUrl";
+import { apiFetch } from "./apiClient";
 import { GEMINI_MODEL_FAST, GEMINI_MODEL_REASONING } from "../constants";
 import { isAddressLike } from "../data/verticalLogic";
 import {
@@ -35,7 +36,7 @@ export const initializeGemini = (apiKey?: string) => {
 
 const callGemini = async (payload: { model: string; contents: any; config?: any }, options?: RequestOptions) => {
   if (USE_PROXY) {
-    const res = await fetch(`${PROXY_BASE_URL}/api/gemini/generateContent`, {
+    const res = await apiFetch("/api/gemini/generateContent", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: "include",

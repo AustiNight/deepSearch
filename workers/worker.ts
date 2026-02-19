@@ -30,9 +30,15 @@ const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const MAX_ALLOWLIST_ENTRIES = 500;
 const MAX_ALLOWLIST_BODY_BYTES = 50_000;
 const MAX_SETTINGS_BODY_BYTES = 50_000;
+const MAX_OPEN_DATA_PROXY_BODY_BYTES = 20_000;
 const SETTINGS_SCHEMA_VERSION = 1;
 const ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion";
 const ACCESS_EMAIL_HEADER = "Cf-Access-Authenticated-User-Email";
+
+const OPEN_DATA_PROXY_ALLOWED_HEADERS = new Set([
+  "accept",
+  "x-app-token"
+]);
 
 const getCorsHeaders = (origin: string | null, env: Env) => {
   const allowed = (env.ALLOWED_ORIGINS || "")
@@ -157,6 +163,49 @@ const normalizeAllowlistEntries = (rawEntries: unknown) => {
     entries.push(value);
   }
   return { entries, invalid, error: "" };
+};
+
+const isPrivateHostname = (hostname: string) => {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower.endsWith(".local")) return true;
+
+  const ipv4Match = lower.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const parts = ipv4Match.slice(1).map((value) => Number(value));
+    if (parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) return true;
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 169 && b === 254) return true;
+    return false;
+  }
+
+  if (lower.includes(":")) {
+    if (lower === "::1") return true;
+    if (lower.startsWith("fe80:")) return true;
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  }
+
+  return false;
+};
+
+const sanitizeProxyHeaders = (raw: unknown) => {
+  if (!raw || typeof raw !== "object") return {};
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!OPEN_DATA_PROXY_ALLOWED_HEADERS.has(key.toLowerCase())) continue;
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    headers[key] = trimmed;
+  }
+  if (!headers["Accept"] && !headers["accept"]) {
+    headers["Accept"] = "application/json,text/plain;q=0.9,*/*;q=0.8";
+  }
+  headers["User-Agent"] = "deepsearches-open-data-proxy";
+  return headers;
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -413,6 +462,55 @@ export default {
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
+    if (url.pathname === "/api/open-data/fetch") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405, corsHeaders);
+      }
+      const { data, error } = await readJsonBody(request, MAX_OPEN_DATA_PROXY_BODY_BYTES);
+      if (error) {
+        return json({ error }, 400, corsHeaders);
+      }
+      const target = typeof data?.url === "string" ? data.url.trim() : "";
+      if (!target) {
+        return json({ error: "Target URL required." }, 400, corsHeaders);
+      }
+      let targetUrl: URL;
+      try {
+        targetUrl = new URL(target);
+      } catch (_) {
+        return json({ error: "Invalid target URL." }, 400, corsHeaders);
+      }
+      if (targetUrl.protocol !== "http:" && targetUrl.protocol !== "https:") {
+        return json({ error: "Unsupported URL protocol." }, 400, corsHeaders);
+      }
+      if (isPrivateHostname(targetUrl.hostname)) {
+        return json({ error: "Blocked private network target." }, 400, corsHeaders);
+      }
+
+      const headers = sanitizeProxyHeaders(data?.headers);
+      let upstream: Response;
+      try {
+        upstream = await fetch(targetUrl.toString(), { method: "GET", headers });
+      } catch (_) {
+        return json({ error: "Upstream fetch failed." }, 502, corsHeaders);
+      }
+
+      const responseHeaders = new Headers(corsHeaders);
+      const contentType = upstream.headers.get("content-type");
+      if (contentType) responseHeaders.set("Content-Type", contentType);
+      const cacheControl = upstream.headers.get("cache-control");
+      if (cacheControl) responseHeaders.set("Cache-Control", cacheControl);
+      const lastModified = upstream.headers.get("last-modified");
+      if (lastModified) responseHeaders.set("Last-Modified", lastModified);
+      const etag = upstream.headers.get("etag");
+      if (etag) responseHeaders.set("ETag", etag);
+
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: responseHeaders
+      });
     }
 
     if (url.pathname === "/api/access/allowlist") {
