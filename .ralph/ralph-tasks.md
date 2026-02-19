@@ -6,7 +6,7 @@
   - [x] Define field-level lineage rules for every `PropertyDossier` field (source precedence, derivation steps, and conflict resolution)
   - [x] Define authority scoring and confidence scoring formulas with explicit numeric scales and weighting rules
   - [x] Define a source taxonomy (authoritative, quasi-official, aggregator, social) with canonical examples and mapping rules
-  - [ ] Set explicit evidence thresholds as constants (min total sources, min authoritative sources, min authority score) and document them in taxonomy/overseer prompts
+  - [x] Set explicit evidence thresholds as constants (min total sources, min authoritative sources, min authority score) and document them in taxonomy/overseer prompts
   - [ ] Define a data currency policy per record type (max acceptable age, recency weighting, and out-of-date handling)
   - [ ] Build a jurisdiction availability matrix for primary records (CAD/assessor, tax collector, deed/recorder, zoning/GIS, permits, code enforcement) with explicit “unavailable” semantics
   - [ ] Specify data source contracts per record type (endpoint/portal, query inputs, expected fields, rate limits, and parsing rules) and store them in a centralized config

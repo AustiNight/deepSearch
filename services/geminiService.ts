@@ -2,6 +2,11 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { resolveProxyBaseUrl } from "./proxyBaseUrl";
 import { GEMINI_MODEL_FAST, GEMINI_MODEL_REASONING } from "../constants";
 import { isAddressLike } from "../data/verticalLogic";
+import {
+  MIN_EVIDENCE_AUTHORITATIVE_SOURCES,
+  MIN_EVIDENCE_AUTHORITY_SCORE,
+  MIN_EVIDENCE_TOTAL_SOURCES
+} from "../constants";
 import type { ModelOverrides, ModelRole, NormalizedSource, Skill, SourceNormalizationDiagnostics } from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
@@ -671,6 +676,7 @@ export const synthesizeGrandReport = async (
     - Include official records: appraisal district / assessor, tax collector, county clerk deed chain, zoning, permits/inspections, code violations, GIS parcel map, flood/insurance risk.
     - Add a "Property Dossier" section with subsections: Parcel & Legal, Ownership/Transfers, Tax & Appraisal, Zoning/Land Use, Permits & Code, Hazards/Environmental, Neighborhood Context, Data Gaps & Next Steps.
     - If a data item is not found, write "Source not found" and list the exact portal/record system that should contain it.
+    - Evidence thresholds: minimum total sources ${MIN_EVIDENCE_TOTAL_SOURCES}, minimum authoritative sources ${MIN_EVIDENCE_AUTHORITATIVE_SOURCES}, and at least one source with authorityScore >= ${MIN_EVIDENCE_AUTHORITY_SCORE}. If unmet, explicitly note the shortfall in "Data Gaps & Next Steps".
     `
     : '';
 

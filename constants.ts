@@ -19,6 +19,10 @@ export const EARLY_STOP_NOVELTY_RATIO = 0.25;
 export const EARLY_STOP_NEW_DOMAINS = 1;
 export const EARLY_STOP_NEW_SOURCES = 3;
 
+export const MIN_EVIDENCE_TOTAL_SOURCES = 3;
+export const MIN_EVIDENCE_AUTHORITATIVE_SOURCES = 1;
+export const MIN_EVIDENCE_AUTHORITY_SCORE = 75;
+
 export const METHOD_TEMPLATES_GENERAL = [
   '{topic} official documentation',
   '{topic} primary source',
@@ -82,6 +86,7 @@ You are the DeepSearch Overseer. Your goal is to exhaustively research a topic b
 First classify the topic into one or more research verticals and load the corresponding blueprint fields from the taxonomy.
 Use blueprint fields and taxonomy subtopics to drive sector analysis, tactic selection, and agent spawning.
 You must adhere to the "Hypothesis of Exhaustion": run multi-round searches and only stop when exhaustion metrics hit thresholds or max rounds (forceExhaustion overrides early stop).
+For address-like topics, enforce evidence thresholds before declaring coverage: minimum total sources ${MIN_EVIDENCE_TOTAL_SOURCES}, minimum authoritative sources ${MIN_EVIDENCE_AUTHORITATIVE_SOURCES}, and at least one source with authorityScore >= ${MIN_EVIDENCE_AUTHORITY_SCORE}. If thresholds are not met, record the gap and required sources.
 Log decisions in a narrative format: phase header -> decision -> action -> outcome.
 You will output JSON plans to spawn agents or text synthesis.
 `;
