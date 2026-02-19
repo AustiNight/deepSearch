@@ -48,6 +48,45 @@ const normalizeDomain = (url: string) => {
   }
 };
 
+const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const ADDRESS_REDACTION_TOKEN = '[REDACTED_ADDRESS]';
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildAddressRedactionPatterns = (topic: string) => {
+  if (!isAddressLike(topic)) return [];
+  const cleaned = topic.trim();
+  if (!cleaned) return [];
+  const tokens = uniqueList([cleaned, ...normalizeAddressVariants(cleaned)]);
+  return tokens
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map((token) => {
+      const parts = token.trim().split(/\s+/).filter(Boolean).map(escapeRegExp);
+      const pattern = parts.length > 0 ? parts.join('\\s+') : escapeRegExp(token);
+      return new RegExp(pattern, 'gi');
+    });
+};
+
+const redactAddressFromMessage = (message: string, patterns: RegExp[]) => {
+  if (!message || patterns.length === 0) return message;
+  let redacted = message;
+  patterns.forEach((pattern) => {
+    redacted = redacted.replace(pattern, ADDRESS_REDACTION_TOKEN);
+  });
+  return redacted;
+};
+
+const hashString = (value: string) => {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+};
+
 const MAX_VALIDATION_SNIPPET_CHARS = 240;
 
 const formatValidationIssue = (issue: any) => {
@@ -91,7 +130,7 @@ const formatValidationIssue = (issue: any) => {
   }
 };
 
-const EVIDENCE_RECOVERY_CACHE_KEY = 'overseer_evidence_recovery_cache_v1';
+const EVIDENCE_RECOVERY_CACHE_KEY = 'overseer_evidence_recovery_cache_v2';
 const EVIDENCE_RECOVERY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const EVIDENCE_RECOVERY_MAX_ATTEMPTS = 3;
 const EVIDENCE_RECOVERY_BASE_DELAY_MS = 700;
@@ -168,10 +207,9 @@ const pruneEvidenceRecoveryCache = (cache: EvidenceRecoveryCache) => {
 const buildEvidenceRecoveryCacheKey = (provider: LLMProvider, topic: string, query: string) => {
   const normalizedQuery = query.toLowerCase().replace(/\s+/g, ' ').trim();
   const normalizedTopic = topic.toLowerCase().replace(/\s+/g, ' ').trim();
-  return `${provider}:${normalizedTopic}:${normalizedQuery}`;
+  const digest = hashString(`${provider}:${normalizedTopic}:${normalizedQuery}`);
+  return `v2:${digest}`;
 };
-
-const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
 const createAbortError = (reason: string) => {
   const error = new Error(reason);
@@ -1687,9 +1725,16 @@ export const useOverseer = () => {
       return result;
     };
 
+    const addressLike = isAddressLike(topic);
+    const addressRedactionPatterns = buildAddressRedactionPatterns(topic);
+    const allowEvidenceRecoveryCache = !addressLike;
+
     const addLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
       if (!isActive()) return;
-      appendLog(agentId, agentName, message, type);
+      const safeMessage = addressRedactionPatterns.length > 0
+        ? redactAddressFromMessage(message, addressRedactionPatterns)
+        : message;
+      appendLog(agentId, agentName, safeMessage, type);
     };
     const updateAgent = (id: string, updates: Partial<Agent>) => {
       if (!isActive()) return;
@@ -1759,7 +1804,9 @@ export const useOverseer = () => {
     const modelOverrides = runConfig?.modelOverrides;
     const requestOptions = { signal };
     const knowledgeBase = loadKnowledgeBase();
-    let evidenceRecoveryCache = pruneEvidenceRecoveryCache(loadEvidenceRecoveryCache());
+    let evidenceRecoveryCache = allowEvidenceRecoveryCache
+      ? pruneEvidenceRecoveryCache(loadEvidenceRecoveryCache())
+      : {};
     const usedQueries = new Set<string>();
     const methodCandidateQueries: string[] = [];
     const methodQuerySources = new Map<string, string[]>();
@@ -2106,12 +2153,11 @@ export const useOverseer = () => {
         );
       }
 
-      const slotValues = buildSlotValues(topic, nameVariants, isAddressLike(topic));
+      const slotValues = buildSlotValues(topic, nameVariants, addressLike);
       const slotValuesAny = slotValues as Record<string, unknown>;
       const companyDomainHint = Array.isArray(slotValuesAny.companyDomain) ? String(slotValuesAny.companyDomain[0] || '') : '';
       const brandDomainHint = Array.isArray(slotValuesAny.brandDomain) ? String(slotValuesAny.brandDomain[0] || '') : '';
       const { packs: tacticPacks, expandedAll: expandedTactics } = buildTacticPacks(taxonomy, selectedVerticalIds, slotValues);
-      const addressLike = isAddressLike(topic);
       const topicVariants = addressLike && Array.isArray(slotValuesAny.topic)
         ? slotValuesAny.topic.map(value => String(value || '').trim()).filter(Boolean)
         : [topic];
@@ -3041,10 +3087,10 @@ export const useOverseer = () => {
               addLog(agentId, agentName, `Evidence recovery query: ${query}`, 'info');
 
               const cacheKey = buildEvidenceRecoveryCacheKey(provider, topic, query);
-              const cached = evidenceRecoveryCache[cacheKey];
+              const cached = allowEvidenceRecoveryCache ? evidenceRecoveryCache[cacheKey] : undefined;
               const cacheFresh = cached ? Date.now() - cached.timestamp <= EVIDENCE_RECOVERY_CACHE_TTL_MS : false;
 
-              if (cached && cacheFresh && cached.sources.length > 0) {
+              if (allowEvidenceRecoveryCache && cached && cacheFresh && cached.sources.length > 0) {
                 const cachedFinding: Finding = {
                   source: agentName,
                   content: cached.text || 'Cached evidence recovery result.',
@@ -3124,13 +3170,15 @@ export const useOverseer = () => {
               const trimmedText = resultText.length > EVIDENCE_RECOVERY_MAX_TEXT_CHARS
                 ? `${resultText.slice(0, EVIDENCE_RECOVERY_MAX_TEXT_CHARS)}\n...[truncated]`
                 : resultText;
-              evidenceRecoveryCache[cacheKey] = {
-                text: trimmedText,
-                sources: result.sources,
-                timestamp: Date.now()
-              };
-              evidenceRecoveryCache = pruneEvidenceRecoveryCache(evidenceRecoveryCache);
-              saveEvidenceRecoveryCache(evidenceRecoveryCache);
+              if (allowEvidenceRecoveryCache) {
+                evidenceRecoveryCache[cacheKey] = {
+                  text: trimmedText,
+                  sources: result.sources,
+                  timestamp: Date.now()
+                };
+                evidenceRecoveryCache = pruneEvidenceRecoveryCache(evidenceRecoveryCache);
+                saveEvidenceRecoveryCache(evidenceRecoveryCache);
+              }
 
               const recoveryFinding: Finding = {
                 source: agentName,

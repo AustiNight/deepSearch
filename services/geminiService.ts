@@ -681,6 +681,7 @@ export const synthesizeGrandReport = async (
   options?: RequestOptions
 ) => {
   const currentDate = new Date().toDateString();
+  const allowRawStorage = !isAddressLike(topic);
 
   // Combine huge amount of text
   const combinedText = allFindings.map(f => `
@@ -797,13 +798,13 @@ export const synthesizeGrandReport = async (
   const initialRaw = await request(initialPrompt);
   const initialParsed = tryParseJsonFromText(initialRaw);
   if (initialParsed.data) return coerceReportData(initialParsed.data, topic);
-  storeRawSynthesis(initialRaw, "initial");
+  if (allowRawStorage) storeRawSynthesis(initialRaw, "initial");
 
   const retryPrompt = buildPrompt(combinedText.substring(0, 40000), true);
   const retryRaw = await request(retryPrompt);
   const retryParsed = tryParseJsonFromText(retryRaw);
   if (retryParsed.data) return coerceReportData(retryParsed.data, topic);
-  storeRawSynthesis(retryRaw, "retry");
+  if (allowRawStorage) storeRawSynthesis(retryRaw, "retry");
 
   return {
     __rawText: retryRaw || initialRaw,

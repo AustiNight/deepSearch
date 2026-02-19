@@ -36,7 +36,7 @@ Open the **SYSTEM_CONFIG** modal (gear icon) to adjust runtime settings.
 
 - **New Search** is always available in the header and cancels the active run, clears run state, and keeps saved settings and API keys intact.
 
-More details in `docs/settings.md`, `docs/universal-settings.md`, and `docs/cloudflare-access.md`.
+More details in `docs/settings.md`, `docs/universal-settings.md`, `docs/cloudflare-access.md`, and `docs/data-privacy-posture.md`.
 
 ## Changelog
 

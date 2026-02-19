@@ -639,6 +639,7 @@ export const synthesizeGrandReport = async (
   ensureOpenAIReady();
   const model = resolveRoleModel('synthesis', modelOverrides);
   const currentDate = new Date().toDateString();
+  const allowRawStorage = !isAddressLike(topic);
 
   // Combine huge amount of text
   const combinedText = allFindings.map(f => `
@@ -707,7 +708,7 @@ export const synthesizeGrandReport = async (
   if (initialParsed && isValidReportData(initialParsed) && initialParsed.sections.length > 0) {
     return coerceReportData(initialParsed, topic);
   }
-  if (initial.raw) storeRawSynthesis(initial.raw, "initial");
+  if (initial.raw && allowRawStorage) storeRawSynthesis(initial.raw, "initial");
   const initialFallback = initialParsed ? coerceReportData(initialParsed, topic) : null;
 
   const retryPrompt = buildPrompt(combinedText.substring(0, 40000), true);
@@ -716,7 +717,7 @@ export const synthesizeGrandReport = async (
   if (retryParsed && isValidReportData(retryParsed) && retryParsed.sections.length > 0) {
     return coerceReportData(retryParsed, topic);
   }
-  if (retry.raw) storeRawSynthesis(retry.raw, "retry");
+  if (retry.raw && allowRawStorage) storeRawSynthesis(retry.raw, "retry");
   if (retryParsed) {
     return coerceReportData(retryParsed, topic);
   }
