@@ -98,6 +98,7 @@ export interface FinalReport {
 }
 
 export type IsoDateString = string;
+export type IsoDateTimeString = string;
 export type CurrencyCode = string;
 export type AreaUnit = 'sq_ft' | 'acres';
 export type DistanceUnit = 'ft' | 'm' | 'mi' | 'km';
@@ -115,8 +116,12 @@ export interface CitationSource {
   title?: string;
   publisher?: string;
   sourceType?: SourceTaxonomy;
-  retrievedAt?: IsoDateString;
+  retrievedAt?: IsoDateTimeString;
   sourceUpdatedAt?: IsoDateString;
+  dataCurrency?: {
+    asOf?: IsoDateString;
+    ageDays?: number;
+  };
 }
 
 export interface CitationSourceRef {

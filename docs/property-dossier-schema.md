@@ -4,6 +4,7 @@ Schema version: 1
 
 ## Conventions
 - Date strings use ISO 8601 format (`YYYY-MM-DD`).
+- Date-time strings use ISO 8601 format (`YYYY-MM-DDTHH:mm:ssZ`).
 - Currency values are USD unless otherwise specified.
 - `fieldPath` values use JSON Pointer syntax (example: `/taxAppraisal/assessedValueUsd`).
 
@@ -218,8 +219,10 @@ EnvironmentalSite
 | `title` | string | free text | no | Page or record title. |
 | `publisher` | string | free text | no | Publishing org. |
 | `sourceType` | string | taxonomy label | no | Source taxonomy category. |
-| `retrievedAt` | string | `YYYY-MM-DD` | no | Retrieval date. |
+| `retrievedAt` | string | `YYYY-MM-DDTHH:mm:ssZ` | no | Retrieval timestamp. |
 | `sourceUpdatedAt` | string | `YYYY-MM-DD` | no | Source update date when known. |
+| `dataCurrency.asOf` | string | `YYYY-MM-DD` | no | Data-as-of date for the underlying record. |
+| `dataCurrency.ageDays` | number | days | no | Age in days between `dataCurrency.asOf` and `retrievedAt` (or current date if `retrievedAt` missing). |
 
 ## CitationSourceRef
 
