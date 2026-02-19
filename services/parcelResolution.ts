@@ -2,7 +2,7 @@ import type { DataGap, DataGapReasonCode, GeoPoint, Jurisdiction, ParcelInfo, Pr
 import { normalizeAddressVariants } from "./addressNormalization";
 import { DATA_SOURCE_CONTRACTS } from "../data/dataSourceContracts";
 import { FAILURE_TAXONOMY } from "../data/failureTaxonomy";
-import { JURISDICTION_AVAILABILITY_MATRIX, type PrimaryRecordType, type RecordAvailability } from "../data/jurisdictionAvailability";
+import { formatAvailabilityDetails, getRecordAvailability } from "./jurisdictionAvailability";
 
 export type GeoJsonPosition = [number, number];
 
@@ -123,42 +123,6 @@ const isoDateToday = () => new Date().toISOString().slice(0, 10);
 
 const createGapId = () => `gap-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const countJurisdictionSpecificity = (jurisdiction?: Partial<Jurisdiction>) =>
-  Object.values(jurisdiction || {}).filter(Boolean).length;
-
-const matchesJurisdiction = (expected?: Partial<Jurisdiction>, actual?: Jurisdiction) => {
-  if (!expected) return true;
-  if (!actual) return false;
-  if (expected.country && normalizeJurisdictionToken(expected.country) !== normalizeJurisdictionToken(actual.country)) return false;
-  if (expected.state && normalizeJurisdictionToken(expected.state) !== normalizeJurisdictionToken(actual.state)) return false;
-  if (expected.county && normalizeJurisdictionToken(expected.county) !== normalizeJurisdictionToken(actual.county)) return false;
-  if (expected.city && normalizeJurisdictionToken(expected.city) !== normalizeJurisdictionToken(actual.city)) return false;
-  return true;
-};
-
-const findJurisdictionAvailability = (jurisdiction?: Jurisdiction) => {
-  const candidates = JURISDICTION_AVAILABILITY_MATRIX.filter(entry =>
-    matchesJurisdiction(entry.jurisdiction, jurisdiction)
-  );
-  if (candidates.length === 0) {
-    return JURISDICTION_AVAILABILITY_MATRIX.find(entry => entry.id === "US-DEFAULT");
-  }
-  return candidates.sort(
-    (a, b) => countJurisdictionSpecificity(b.jurisdiction) - countJurisdictionSpecificity(a.jurisdiction)
-  )[0];
-};
-
-const getRecordAvailability = (recordType: PrimaryRecordType, jurisdiction?: Jurisdiction) =>
-  findJurisdictionAvailability(jurisdiction)?.records?.[recordType];
-
-const formatAvailabilityDetails = (availability?: RecordAvailability) => {
-  if (!availability) return undefined;
-  const parts: string[] = [];
-  if (availability.unavailableReason) parts.push(`Unavailable reason: ${availability.unavailableReason}.`);
-  if (availability.reason) parts.push(`Notes: ${availability.reason}.`);
-  if (availability.lastChecked) parts.push(`Last checked: ${availability.lastChecked}.`);
-  return parts.length ? parts.join(" ") : undefined;
-};
 
 const buildFailureGap = (
   code: DataGapReasonCode,

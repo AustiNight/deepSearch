@@ -85,6 +85,30 @@ export interface ImageVisualization extends VisualizationBase {
 
 export type Visualization = ChartVisualization | ImageVisualization;
 
+export type PrimaryRecordCoverageStatus =
+  | 'covered'
+  | 'missing'
+  | 'unavailable'
+  | 'restricted'
+  | 'partial'
+  | 'unknown';
+
+export interface PrimaryRecordCoverageEntry {
+  recordType: string;
+  status: PrimaryRecordCoverageStatus;
+  availabilityStatus?: string;
+  availabilityDetails?: string;
+  matchedSources?: string[];
+}
+
+export interface PrimaryRecordCoverage {
+  complete: boolean;
+  entries: PrimaryRecordCoverageEntry[];
+  missing: string[];
+  unavailable: string[];
+  generatedAt?: IsoDateString;
+}
+
 export interface FinalReport {
   title: string;
   summary: string;
@@ -93,6 +117,7 @@ export interface FinalReport {
   provenance: {
     totalSources: number;
     methodAudit: string;
+    primaryRecordCoverage?: PrimaryRecordCoverage;
   };
   schemaVersion?: number;
 }

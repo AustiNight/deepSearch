@@ -1,7 +1,7 @@
 import React from 'react';
 import { FinalReport } from '../types';
 import ReactMarkdown from 'react-markdown';
-import { Download, ShieldCheck, ExternalLink } from 'lucide-react';
+import { Download, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react';
 import { ReportVisualizations } from './ReportVisualizations';
 
 interface Props {
@@ -11,6 +11,18 @@ interface Props {
 type MarkdownBlock =
   | { type: 'markdown'; content: string }
   | { type: 'table'; headers: string[]; rows: string[][] };
+
+const PRIMARY_RECORD_LABELS: Record<string, string> = {
+  assessor_parcel: 'Assessor / Parcel',
+  tax_collector: 'Tax Collector',
+  deed_recorder: 'Deed Recorder',
+  zoning_gis: 'Zoning / GIS',
+  permits: 'Permits',
+  code_enforcement: 'Code Enforcement'
+};
+
+const formatRecordTypeLabel = (recordType: string) =>
+  PRIMARY_RECORD_LABELS[recordType] || recordType.replace(/_/g, ' ');
 
 const isTableDivider = (line: string) => {
   const trimmed = line.trim();
@@ -151,6 +163,12 @@ const renderMarkdownBlocks = (content: string) => {
 };
 
 export const ReportView: React.FC<Props> = ({ report }) => {
+  const primaryRecordCoverage = report.provenance?.primaryRecordCoverage;
+  const isCoverageComplete = primaryRecordCoverage ? primaryRecordCoverage.complete : true;
+  const missingEntries = primaryRecordCoverage?.entries?.filter(
+    (entry) => entry.status !== 'covered' && entry.status !== 'unavailable'
+  ) || [];
+
   const downloadReport = () => {
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -165,9 +183,11 @@ export const ReportView: React.FC<Props> = ({ report }) => {
       <div className="flex justify-between items-start border-b border-gray-700 pb-6 mb-6">
         <div>
            <h1 className="text-3xl font-bold text-white mb-2">{report.title}</h1>
-           <div className="flex items-center gap-2 text-sm text-cyber-green">
-             <ShieldCheck className="w-4 h-4" />
-             <span>Overseer Verified • Exhaustive Search Complete</span>
+           <div className={`flex items-center gap-2 text-sm ${isCoverageComplete ? 'text-cyber-green' : 'text-yellow-400'}`}>
+             {isCoverageComplete ? <ShieldCheck className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+             <span>
+               Overseer Verified • {isCoverageComplete ? 'Exhaustive Search Complete' : 'Primary Records Incomplete'}
+             </span>
            </div>
         </div>
         <button 
@@ -177,6 +197,19 @@ export const ReportView: React.FC<Props> = ({ report }) => {
           <Download className="w-4 h-4" /> Export JSON
         </button>
       </div>
+
+      {!isCoverageComplete && missingEntries.length > 0 && (
+        <div className="mb-6 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          <p className="font-semibold">Primary record coverage is incomplete.</p>
+          <p className="mt-1 text-yellow-200/80">
+            Missing or restricted records: {missingEntries.map((entry) => {
+              const label = formatRecordTypeLabel(entry.recordType);
+              const status = entry.availabilityStatus || entry.status;
+              return `${label} (${status})`;
+            }).join(', ')}
+          </p>
+        </div>
+      )}
 
       <div className="prose prose-invert max-w-none">
         <div className="bg-gray-900/50 p-6 rounded-lg mb-8 border-l-4 border-cyber-blue">

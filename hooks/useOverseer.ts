@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -28,6 +28,8 @@ import {
 import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
 import { normalizeAddressVariants } from '../services/addressNormalization';
+import { PRIMARY_RECORD_TYPES, type PrimaryRecordType } from '../data/jurisdictionAvailability';
+import { formatAvailabilityDetails, getRecordAvailability } from '../services/jurisdictionAvailability';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -233,6 +235,151 @@ const evaluateEvidence = (sources: NormalizedSource[]) => {
     meetsAuthoritative,
     meetsAuthorityScore,
     meetsAll: meetsTotal && meetsAuthoritative && meetsAuthorityScore
+  };
+};
+
+const PRIMARY_RECORD_KEYWORDS: Record<PrimaryRecordType, RegExp[]> = {
+  assessor_parcel: [
+    /\bassessor\b/i,
+    /\bappraiser\b/i,
+    /\bappraisal\b/i,
+    /\bappraisal district\b/i,
+    /\bcentral appraisal district\b/i,
+    /\bparcel\b/i,
+    /\bproperty card\b/i,
+    /\bproperty search\b/i
+  ],
+  tax_collector: [
+    /\btax collector\b/i,
+    /\btax assessor\b/i,
+    /\btreasurer\b/i,
+    /\btax roll\b/i,
+    /\btax bill\b/i,
+    /\btax payment\b/i,
+    /\bproperty tax\b/i,
+    /\btax records\b/i
+  ],
+  deed_recorder: [
+    /\brecorder\b/i,
+    /\bregister of deeds\b/i,
+    /\bdeed\b/i,
+    /\bland records\b/i,
+    /\brecording\b/i,
+    /\bcounty clerk\b/i
+  ],
+  zoning_gis: [
+    /\bzoning\b/i,
+    /\bland use\b/i,
+    /\bplanning\b/i,
+    /\bzoning map\b/i,
+    /\bland use map\b/i
+  ],
+  permits: [
+    /\bpermit\b/i,
+    /\bpermitting\b/i,
+    /\bbuilding permit\b/i,
+    /\binspection\b/i,
+    /\bplan review\b/i,
+    /\bconstruction permit\b/i
+  ],
+  code_enforcement: [
+    /\bcode enforcement\b/i,
+    /\bcode violation\b/i,
+    /\bcode violations\b/i,
+    /\bcompliance\b/i,
+    /\bnuisance\b/i
+  ]
+};
+
+const isoDateToday = () => new Date().toISOString().slice(0, 10);
+
+const getSlotValue = (slots: Record<string, unknown>, key: string) =>
+  Array.isArray(slots[key]) ? String(slots[key]?.[0] || '').trim() : '';
+
+const buildJurisdictionFromSlots = (slots: Record<string, unknown>, addressLike: boolean): Jurisdiction | undefined => {
+  if (!addressLike) return undefined;
+  const state = getSlotValue(slots, 'state');
+  const county = getSlotValue(slots, 'countyPrimary') || getSlotValue(slots, 'county');
+  const city = getSlotValue(slots, 'city');
+  const hasAny = Boolean(state || county || city);
+  return hasAny
+    ? {
+        country: 'US',
+        state: state || undefined,
+        county: county || undefined,
+        city: city || undefined
+      }
+    : { country: 'US' };
+};
+
+const sourceMatchesRecordType = (source: NormalizedSource, recordType: PrimaryRecordType) => {
+  const normalized = normalizeForMatch(`${source.title || ''} ${source.domain || ''} ${source.uri || ''}`);
+  return PRIMARY_RECORD_KEYWORDS[recordType].some(pattern => pattern.test(normalized));
+};
+
+const evaluatePrimaryRecordCoverage = (
+  sources: NormalizedSource[],
+  jurisdiction?: Jurisdiction
+): PrimaryRecordCoverage => {
+  const entries = PRIMARY_RECORD_TYPES.map((recordType) => {
+    const availability = getRecordAvailability(recordType, jurisdiction);
+    const availabilityStatus = availability?.status ?? 'unknown';
+    const availabilityDetails = formatAvailabilityDetails(availability);
+    if (availabilityStatus === 'unavailable') {
+      return {
+        recordType,
+        status: 'unavailable',
+        availabilityStatus,
+        availabilityDetails,
+        matchedSources: []
+      };
+    }
+
+    const matchedSources = sources
+      .filter((source) => sourceMatchesRecordType(source, recordType))
+      .filter((source) => scoreAuthority(source) >= 60)
+      .map((source) => source.uri);
+
+    if (matchedSources.length > 0) {
+      return {
+        recordType,
+        status: 'covered',
+        availabilityStatus,
+        availabilityDetails,
+        matchedSources
+      };
+    }
+
+    const status = availabilityStatus === 'restricted'
+      ? 'restricted'
+      : availabilityStatus === 'partial'
+        ? 'partial'
+        : availabilityStatus === 'unknown'
+          ? 'unknown'
+          : 'missing';
+
+    return {
+      recordType,
+      status,
+      availabilityStatus,
+      availabilityDetails,
+      matchedSources: []
+    };
+  });
+
+  const missing = entries
+    .filter(entry => entry.status !== 'covered' && entry.status !== 'unavailable')
+    .map(entry => entry.recordType);
+  const unavailable = entries
+    .filter(entry => entry.status === 'unavailable')
+    .map(entry => entry.recordType);
+
+  return {
+    complete: missing.length === 0,
+    entries,
+    missing,
+    unavailable,
+    generatedAt: isoDateToday()
   };
 };
 
@@ -2981,6 +3128,39 @@ export const useOverseer = () => {
       }
 
       const reportSources = uniqueList(sections.flatMap((s: any) => Array.isArray(s?.sources) ? s.sources : []));
+      const sourceMap = new Map((allRawSources as NormalizedSource[]).map(source => [source.uri, source]));
+      const reportSourceDetails: NormalizedSource[] = reportSources.map((uri) => {
+        const mapped = sourceMap.get(uri);
+        if (mapped) return mapped;
+        return {
+          uri,
+          title: '',
+          domain: normalizeDomain(uri),
+          provider: 'unknown',
+          kind: 'unknown'
+        };
+      });
+      const primaryRecordCoverage = addressLike
+        ? evaluatePrimaryRecordCoverage(reportSourceDetails, buildJurisdictionFromSlots(slotValuesAny, addressLike))
+        : undefined;
+      if (primaryRecordCoverage) {
+        reportCandidate = {
+          ...reportCandidate,
+          provenance: {
+            ...reportCandidate.provenance,
+            primaryRecordCoverage
+          }
+        };
+        if (!primaryRecordCoverage.complete) {
+          logOverseer(
+            'PHASE 4: PRIMARY RECORDS',
+            'primary records checklist incomplete',
+            'suppress complete badge',
+            `missing ${primaryRecordCoverage.missing.join(', ') || 'none'}`,
+            'warning'
+          );
+        }
+      }
       if (isValid) {
         const newDomains = uniqueList(reportSources.map((s: string) => normalizeDomain(s)));
         const validatedMethods = Array.from(methodQuerySources.entries())
