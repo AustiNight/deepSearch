@@ -34,7 +34,7 @@ Evidence gating is enforced at three checkpoints to prevent unsupported coverage
    Condition: Evidence gate unmet or validation failed.
    Behavior: soft-fail. Render the report but surface a visible gating banner, suppress any "complete" badge, and ensure Data Gaps are visible in the report and metadata.
 
-Hard-fail behavior for critical evidence failures (e.g., unresolved parcel ambiguity, zero authoritative sources, confidence below minimum) is defined separately in the hard-fail policy and should override the soft-fail defaults above.
+Hard-fail behavior for critical evidence failures (e.g., unresolved parcel ambiguity, zero authoritative sources, confidence below minimum) is defined separately in `docs/hard-fail-policy.md` and should override the soft-fail defaults above.
 
 ## Current Agent Spawning Points
 1. Method Discovery Agents (Phase 0.5)

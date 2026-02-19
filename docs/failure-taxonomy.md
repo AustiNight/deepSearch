@@ -15,6 +15,9 @@ This taxonomy defines standardized failure codes for address-like pipelines. Eac
 | `geocode_failed` | Geocoder returns no valid point for the normalized address | `missing` | `critical` | `/subject/geo` | `geocode` | Unable to confirm the address location from available geocoders. |
 | `parcel_not_found` | Assessor lookup + GIS parcel join return no candidates | `missing` | `critical` | `/subject/parcelId` | `assessor_parcel` | No parcel record matched the address in assessor or GIS sources. |
 | `data_unavailable` | Jurisdiction availability matrix marks the record type as unavailable | `unavailable` | `major` | `/subject/parcelId` | `assessor_parcel` | Parcel/assessor records are not publicly available for this jurisdiction. |
+| `parcel_ambiguous` | Multiple parcel candidates remain after tie-breaks | `ambiguous` | `critical` | `/subject/parcelId` | `assessor_parcel` | Multiple parcel records match the address and a single parcel could not be confirmed. |
+| `authoritative_sources_missing` | Evidence recovery yields zero authoritative sources | `missing` | `critical` | `/sources` | `authoritative_sources` | Authoritative property records could not be confirmed for this address. |
+| `confidence_below_minimum` | Critical section confidence below minimum threshold | `missing` | `critical` | `/claims` | `report_confidence` | Evidence confidence is below the minimum required to complete this report. |
 
 ## Notes
 

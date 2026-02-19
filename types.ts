@@ -163,7 +163,10 @@ export type DataGapStatus =
 export type DataGapReasonCode =
   | 'geocode_failed'
   | 'parcel_not_found'
-  | 'data_unavailable';
+  | 'data_unavailable'
+  | 'parcel_ambiguous'
+  | 'authoritative_sources_missing'
+  | 'confidence_below_minimum';
 
 export interface DataGap {
   id: string;

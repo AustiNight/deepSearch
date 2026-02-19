@@ -18,7 +18,7 @@
   - [x] Add dataset discovery for open-data portals (Socrata/DCAT/ArcGIS) and persist dataset metadata (title, source, last updated, license)
   - [x] Implement an evidence-recovery pass when thresholds are not met, prioritizing authoritative property records and GIS layers with retry/backoff, caching, and error taxonomy
   - [x] Define evidence-gating enforcement points in the pipeline (pre-synthesis, post-synthesis, pre-render) and specify fail vs soft-fail behavior
-  - [ ] Define a hard-fail policy for critical failures (parcel ambiguity unresolved, no authoritative sources, confidence below minimum) with user-visible error reports
+  - [x] Define a hard-fail policy for critical failures (parcel ambiguity unresolved, no authoritative sources, confidence below minimum) with user-visible error reports
   - [ ] Define retry/time budgets for evidence recovery (max retries, total time, priority stopping rules)
   - [ ] Enforce the primary-records checklist using the availability matrix and block “complete” unless coverage is met or explicitly unavailable
   - [ ] Apply source-type scoring (government > quasi-official > aggregator > social) and weight synthesis to prioritize higher-authority sources and recency
