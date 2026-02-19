@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { resolveProxyBaseUrl } from "./proxyBaseUrl";
 import { GEMINI_MODEL_FAST, GEMINI_MODEL_REASONING } from "../constants";
 import type { ModelOverrides, ModelRole, NormalizedSource, Skill, SourceNormalizationDiagnostics } from "../types";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
@@ -7,11 +8,12 @@ import { coerceReportData } from "./reportFormatter";
 import {
   formatSourceDiagnosticsMessage,
   normalizeGeminiResponseSources,
+  normalizeSourcesFromResponse,
   normalizeSourcesFromText,
   recordEmptySources
 } from "./sourceNormalization";
 
-const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
+const PROXY_BASE_URL = resolveProxyBaseUrl();
 const USE_PROXY = PROXY_BASE_URL.length > 0;
 let genAI: GoogleGenAI | null = null;
 
@@ -440,6 +442,15 @@ const singleSearch = async (
         const normalization = normalizeGeminiResponseSources(response);
         let sources = normalization.sources;
         let fallbackDiagnostics: SourceNormalizationDiagnostics | null = null;
+
+        if (sources.length === 0) {
+          const responseFallback = normalizeSourcesFromResponse(response, "google");
+          if (responseFallback.sources.length > 0) {
+            sources = responseFallback.sources;
+            fallbackDiagnostics = responseFallback.diagnostics;
+            normalization.diagnostics.fallbackUsed = true;
+          }
+        }
 
         if (sources.length === 0 && text) {
           const fallback = normalizeSourcesFromText(text, "google");

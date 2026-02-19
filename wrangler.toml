@@ -11,3 +11,5 @@ kv_namespaces = [
   { binding = "ACCESS_ALLOWLIST_KV", id = "d34711020d7843d0932ef8a10323bb68" },
   { binding = "SETTINGS_KV", id = "6486fb3de3cd4e90a46aead171c4bd92" }
 ]
+[vars]
+ALLOWED_ORIGINS = "https://deepsearches.app,https://www.deepsearches.app"

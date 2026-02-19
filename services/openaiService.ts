@@ -12,6 +12,7 @@ import { getOpenAIModelDefaults, resolveModelForRole } from "./modelOverrides";
 import {
   formatSourceDiagnosticsMessage,
   normalizeOpenAIResponseSources,
+  normalizeSourcesFromResponse,
   normalizeSourcesFromText,
   recordEmptySources
 } from "./sourceNormalization";
@@ -438,6 +439,15 @@ const singleSearch = async (
     const normalization = normalizeOpenAIResponseSources(response);
     let sources = normalization.sources;
     let fallbackDiagnostics: SourceNormalizationDiagnostics | null = null;
+
+    if (sources.length === 0) {
+      const responseFallback = normalizeSourcesFromResponse(response, "openai");
+      if (responseFallback.sources.length > 0) {
+        sources = responseFallback.sources;
+        fallbackDiagnostics = responseFallback.diagnostics;
+        normalization.diagnostics.fallbackUsed = true;
+      }
+    }
 
     if (sources.length === 0 && text) {
       const fallback = normalizeSourcesFromText(text, "openai");

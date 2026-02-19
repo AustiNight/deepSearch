@@ -1,6 +1,7 @@
 import type { UniversalSettingsPayload, UniversalSettingsResponse } from '../types';
+import { resolveProxyBaseUrl } from "./proxyBaseUrl";
 
-const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
+const PROXY_BASE_URL = resolveProxyBaseUrl();
 
 const buildSettingsUrl = () => `${PROXY_BASE_URL}/api/settings`;
 

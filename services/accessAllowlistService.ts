@@ -1,4 +1,6 @@
-const PROXY_BASE_URL = (process.env.PROXY_BASE_URL || '').trim();
+import { resolveProxyBaseUrl } from "./proxyBaseUrl";
+
+const PROXY_BASE_URL = resolveProxyBaseUrl();
 
 const buildAllowlistUrl = () => `${PROXY_BASE_URL}/api/access/allowlist`;
 

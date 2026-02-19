@@ -150,11 +150,42 @@ const extractUrlsFromText = (text) => {
   return urls;
 };
 
+const extractUrlsFromObject = (value, urls, depth = 0) => {
+  if (depth > 6) return;
+  if (typeof value === "string") {
+    if (value.startsWith("http://") || value.startsWith("https://")) {
+      urls.push(value);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      extractUrlsFromObject(item, urls, depth + 1);
+    }
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) {
+      extractUrlsFromObject(value[key], urls, depth + 1);
+    }
+  }
+};
+
 export const normalizeSourcesFromText = (text, provider) => {
   const diagnostics = buildDiagnostics(provider);
   diagnostics.fallbackUsed = true;
   const urlMatches = extractUrlsFromText(text);
   const candidates = urlMatches.map((uri) => ({ uri, title: uri, kind: "citation" }));
+  const sources = normalizeCandidates(candidates, provider, diagnostics);
+  return { sources, diagnostics };
+};
+
+export const normalizeSourcesFromResponse = (resp, provider) => {
+  const diagnostics = buildDiagnostics(provider);
+  diagnostics.fallbackUsed = true;
+  const urls = [];
+  extractUrlsFromObject(resp, urls);
+  const candidates = urls.map((uri) => ({ uri, title: uri, kind: "citation" }));
   const sources = normalizeCandidates(candidates, provider, diagnostics);
   return { sources, diagnostics };
 };

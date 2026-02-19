@@ -9,6 +9,11 @@ export function normalizeSourcesFromText(
   provider: SourceProvider
 ): SourceNormalizationResult;
 
+export function normalizeSourcesFromResponse(
+  resp: any,
+  provider: SourceProvider
+): SourceNormalizationResult;
+
 export function normalizeOpenAIResponseSources(resp: any): SourceNormalizationResult;
 
 export function normalizeGeminiResponseSources(resp: any): SourceNormalizationResult;
