@@ -638,7 +638,7 @@ export const synthesizeGrandReport = async (
   `).join("\n====================\n");
 
   const allowedSourcesText = allowedSources.length > 0
-    ? `ALLOWED SOURCES (use ONLY these URLs in citations and bibliography):\n${allowedSources.join('\n')}\n`
+    ? `ALLOWED SOURCES (ordered by authority + recency; prefer earlier sources when conflicts occur):\n${allowedSources.join('\n')}\n`
     : `ALLOWED SOURCES: none provided\n`;
 
   const addressDirective = isAddressLike(topic)
@@ -668,7 +668,8 @@ export const synthesizeGrandReport = async (
     2. **CITATIONS REQUIRED**. Include inline citations as URLs from allowed sources for factual claims.
     3. **BIBLIOGRAPHY IS MANDATORY**. Use ONLY allowed sources. If you cannot support a claim from allowed sources, explicitly say "Source not found" and avoid numeric claims.
     4. **COMPARE & CONTRAST**. Do not just list facts. Compare Option A vs Option B with numbers.
-    5. **HYPOTHESIS**: Based on the data, what is the strongest conclusion?
+    5. **SOURCE PRIORITY**: Prefer higher-authority sources (government/official > quasi-official > aggregator > social) and the most recent evidence. When sources conflict, prioritize authority first, then recency.
+    6. **HYPOTHESIS**: Based on the data, what is the strongest conclusion?
 
     STRUCTURE:
     - **Executive Brief**: The bottom line (Verdict).

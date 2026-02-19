@@ -21,7 +21,7 @@
   - [x] Define a hard-fail policy for critical failures (parcel ambiguity unresolved, no authoritative sources, confidence below minimum) with user-visible error reports
   - [x] Define retry/time budgets for evidence recovery (max retries, total time, priority stopping rules)
   - [x] Enforce the primary-records checklist using the availability matrix and block “complete” unless coverage is met or explicitly unavailable
-  - [ ] Apply source-type scoring (government > quasi-official > aggregator > social) and weight synthesis to prioritize higher-authority sources and recency
+  - [x] Apply source-type scoring (government > quasi-official > aggregator > social) and weight synthesis to prioritize higher-authority sources and recency
   - [ ] Map findings into the `PropertyDossier` before rendering and display per-section confidence scores derived from the scoring model
   - [ ] Tighten synthesis prompts to require claim-level citations, explicit “Source not found” labels, and a “Data Gaps & Next Steps” section with exact portal/endpoint pointers
   - [ ] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)

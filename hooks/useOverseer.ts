@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -185,33 +185,115 @@ const SOCIAL_DOMAINS = new Set([
   'linkedin.com'
 ]);
 
+const PRIMARY_RECORD_PATTERN = /assessor|appraiser|appraisal|cad|property|parcel|tax|treasurer|recorder|clerk|register|gis|zoning|planning|permit|code\s*enforcement|deed/i;
+const OPEN_DATA_PATTERN = /opendata|open-data|data\.|socrata|arcgis|esri|gis|catalog|dataset|hub/i;
+const AGGREGATOR_PATTERN = /zillow|redfin|realtor|trulia|loopnet|propertyshark|homes\.com|apartments\.com|corelogic|realtytrac|attom/i;
+const SOCIAL_PATTERN = /facebook|twitter|x\.com|reddit|instagram|tiktok|linkedin|nextdoor/i;
+const GOVERNMENT_DOMAIN_PATTERN = /(\.gov$|\.gov\.|\.mil$|\.mil\.)/i;
+
+const SOURCE_TYPE_BASE_SCORES: Record<SourceTaxonomy, number> = {
+  authoritative: 90,
+  quasi_official: 70,
+  aggregator: 50,
+  social: 20,
+  unknown: 35
+};
+
+const classifySourceType = (source: NormalizedSource): SourceTaxonomy => {
+  const domain = (source.domain || '').toLowerCase();
+  const text = `${domain} ${source.title || ''} ${source.uri || ''}`.toLowerCase();
+
+  if (SOCIAL_DOMAINS.has(domain) || SOCIAL_PATTERN.test(text)) return 'social';
+  if (AGGREGATOR_DOMAINS.has(domain) || AGGREGATOR_PATTERN.test(text)) return 'aggregator';
+
+  const isGovDomain = GOVERNMENT_DOMAIN_PATTERN.test(domain);
+  const hasRecordKeywords = PRIMARY_RECORD_PATTERN.test(text);
+  const isOpenDataPortal = OPEN_DATA_PATTERN.test(text);
+
+  if (isGovDomain && hasRecordKeywords) return 'authoritative';
+  if (isGovDomain) return 'quasi_official';
+  if (isOpenDataPortal) return 'quasi_official';
+
+  return 'unknown';
+};
+
+const estimateRecencyScore = (source: NormalizedSource) => {
+  const now = new Date();
+  const text = `${source.title || ''} ${source.snippet || ''} ${source.uri || ''}`;
+  const isoMatches = text.match(/\b(19\d{2}|20\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b/g);
+  if (isoMatches && isoMatches.length > 0) {
+    const lastMatch = isoMatches[isoMatches.length - 1];
+    const date = new Date(lastMatch.replace(/\//g, '-'));
+    if (!Number.isNaN(date.getTime())) {
+      const ageDays = Math.max(0, (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+      return clamp(1 - ageDays / (365 * 5), 0, 1);
+    }
+  }
+  const yearMatches = text.match(/\b(19\d{2}|20\d{2})\b/g);
+  if (yearMatches && yearMatches.length > 0) {
+    const currentYear = now.getFullYear();
+    const maxYear = Math.max(...yearMatches.map((value) => Number(value)).filter(Number.isFinite));
+    if (Number.isFinite(maxYear)) {
+      const boundedYear = Math.min(currentYear + 1, Math.max(1990, maxYear));
+      const ageYears = Math.max(0, currentYear - boundedYear);
+      return clamp(1 - ageYears / 10, 0, 1);
+    }
+  }
+  return 0.5;
+};
+
 const scoreAuthority = (source: NormalizedSource) => {
   const domain = (source.domain || '').toLowerCase();
-  const title = (source.title || '').toLowerCase();
-  let score = 20;
+  const text = `${domain} ${source.title || ''} ${source.uri || ''}`.toLowerCase();
+  const sourceType = classifySourceType(source);
+  let score = SOURCE_TYPE_BASE_SCORES[sourceType];
 
-  if (domain.endsWith('.gov') || domain.includes('.gov.')) score += 60;
-  if (domain.endsWith('.mil') || domain.includes('.mil.')) score += 60;
-  if (domain.endsWith('.us')) score += 30;
+  const isGovDomain = GOVERNMENT_DOMAIN_PATTERN.test(domain) || domain.endsWith('.us');
+  if (isGovDomain) score += 5;
 
-  if (/assessor|appraiser|appraisal|cad|property|parcel|tax|treasurer|recorder|clerk|register|gis|zoning|planning|permit|code\s*enforcement|deed/.test(domain)) {
-    score += 20;
-  }
-  if (/assessor|appraiser|parcel|property|tax|treasurer|recorder|clerk|gis|zoning|permit|deed/.test(title)) {
-    score += 10;
-  }
-  if (/arcgis|opendata|socrata|data\.city|data\.county/.test(domain)) {
-    score += 10;
+  if (PRIMARY_RECORD_PATTERN.test(text)) score += 5;
+
+  if (/(parcel|account|permit|record|case|roll|parcelid|accountid|permitid)/i.test(source.uri || '')) {
+    score += 5;
   }
 
-  if (AGGREGATOR_DOMAINS.has(domain) || /zillow|redfin|realtor|trulia|loopnet|propertyshark/.test(domain)) {
-    score -= 25;
-  }
-  if (SOCIAL_DOMAINS.has(domain) || /facebook|twitter|reddit|instagram|tiktok|linkedin/.test(domain)) {
-    score -= 30;
+  if (sourceType === 'aggregator') score -= 10;
+  if (sourceType === 'social') score -= 15;
+  if (!source.title || source.title.trim().length === 0 || source.title === source.domain) score -= 5;
+
+  return clamp(score, 0, 100);
+};
+
+type ScoredSource = {
+  source: NormalizedSource;
+  sourceType: SourceTaxonomy;
+  authorityScore: number;
+  recencyScore: number;
+  combinedScore: number;
+};
+
+const rankSourcesByAuthorityAndRecency = (sources: NormalizedSource[]) => {
+  const scored: ScoredSource[] = sources.map((source) => {
+    const sourceType = classifySourceType(source);
+    const authorityScore = scoreAuthority(source);
+    const recencyScore = estimateRecencyScore(source);
+    const combinedScore = Math.round(authorityScore * 0.7 + recencyScore * 30);
+    return { source, sourceType, authorityScore, recencyScore, combinedScore };
+  });
+
+  const bestByUri = new Map<string, ScoredSource>();
+  for (const entry of scored) {
+    const existing = bestByUri.get(entry.source.uri);
+    if (!existing || entry.combinedScore > existing.combinedScore) {
+      bestByUri.set(entry.source.uri, entry);
+    }
   }
 
-  return Math.max(0, Math.min(100, score));
+  return Array.from(bestByUri.values()).sort((a, b) => {
+    if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+    if (b.authorityScore !== a.authorityScore) return b.authorityScore - a.authorityScore;
+    return (a.source.domain || '').localeCompare(b.source.domain || '');
+  });
 };
 
 const evaluateEvidence = (sources: NormalizedSource[]) => {
@@ -2946,7 +3028,8 @@ export const useOverseer = () => {
       );
 
       const allRawSources = findingsRef.current.flatMap((f: any) => f.rawSources || []);
-      const allowedSources = uniqueList(allRawSources.map((s: any) => s.uri).filter(Boolean));
+      const rankedSources = rankSourcesByAuthorityAndRecency(allRawSources);
+      const allowedSources = rankedSources.map((entry) => entry.source.uri);
       const finalReportData = await runSafely(synthesizeGrandReport(
         topic,
         findingsRef.current,
