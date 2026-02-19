@@ -32,7 +32,7 @@
   - [x] Define SLO targets for parcel resolution, evidence recovery, and median latency; gate releases when below baseline
   - [x] Add observability for evidence-gating decisions and portal error taxonomy
   - [x] Add data privacy posture for address inputs and logs (PII handling and retention)
-  - [ ] Add unit/integration tests for address normalization, parcel resolution (multi-parcel, unit-only, rural), evidence gating, and `PropertyDossier` population
+  - [x] Add unit/integration tests for address normalization, parcel resolution (multi-parcel, unit-only, rural), evidence gating, and `PropertyDossier` population
   - [ ] Add failure-mode test suite (schema drift, portal 429/503, stale datasets, mixed parcel formats, missing geometry)
   - [ ] Add E2E golden-fixture tests for address reports using frozen datasets
   - [ ] Add migration/backfill plan for cached reports and dataset index when schemas change

@@ -13,6 +13,7 @@
     "allowlist:smoke": "node scripts/allowlist-smoke.mjs",
     "test:sources": "node scripts/source-normalization.test.mjs",
     "test:settings": "node scripts/settings-serialization.test.mjs",
+    "test:address-quality": "node --loader ./scripts/ts-loader.mjs scripts/address-quality.test.mjs",
     "test:ui": "playwright test"
   },
   "dependencies": {
