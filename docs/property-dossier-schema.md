@@ -244,6 +244,27 @@ EnvironmentalSite
 | `query` | string | free text | no | Suggested query text. |
 | `notes` | string | free text | no | Access notes or instructions. |
 
+## Source Taxonomy
+
+`CitationSource.sourceType` must be one of the labels below.
+
+| sourceType | Definition | Canonical examples (US property context) |
+| --- | --- | --- |
+| `authoritative` | Legal or statutory system of record for the field, with record-level access. | County assessor/CAD parcel record; county tax collector account; recorder/deed index; official zoning GIS; permitting or code enforcement system; FEMA NFHL; EPA registries (ECHO, Superfund). |
+| `quasi_official` | Government or regulated entity publishing a mirror, extract, or summary that is not the system of record. | City/county open data portal extracts; state GIS hub layers; regional planning agency datasets; public utility service territory maps; ordinance/plan PDFs. |
+| `aggregator` | Third-party compilation, model, or estimate without being the system of record. | Zillow/Redfin/Realtor summaries; parcel aggregators/data brokers; OpenStreetMap-derived layers; commercial risk or valuation models. |
+| `social` | User-generated or community-reported content without formal verification. | Reddit threads; Facebook/Nextdoor posts; local forums; X/Twitter threads. |
+| `unknown` | Source type cannot be verified from available metadata. | Missing publisher or unclear provenance. |
+
+Mapping rules:
+- Assign `authoritative` when the publisher is the system of record for the field and provides record-level access (parcel id, account id, permit id, or registry id).
+- Assign `quasi_official` when the publisher is government or regulated but the data is a mirror, extract, or summary of a system of record.
+- Assign `aggregator` when the publisher is a third party that merges multiple sources or provides modeled/estimated values without record-level provenance.
+- Assign `social` when the content is user-generated or community-sourced.
+- For open data portals, use `authoritative` only if the dataset is the system of record; otherwise use `quasi_official`.
+- If a page mixes sources, assign `sourceType` per cited record, not per page.
+- If provenance cannot be established, set `sourceType` to `unknown` and add a `DataGap` noting missing publisher/provenance.
+
 ## Field-Level Lineage Rules
 
 ### Global Precedence and Conflict Resolution
@@ -506,7 +527,7 @@ Base score by `CitationSource.sourceType`:
 | sourceType | Base score |
 | --- | --- |
 | `authoritative` | 90 |
-| `quasi-official` | 70 |
+| `quasi_official` | 70 |
 | `aggregator` | 50 |
 | `social` | 20 |
 | `unknown` | 35 |
