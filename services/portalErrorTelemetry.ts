@@ -11,6 +11,16 @@ export type PortalErrorEvent = {
 };
 
 const MAX_SAMPLES = 6;
+const REDACTED_QUERY_VALUE = '[REDACTED]';
+const SENSITIVE_QUERY_KEYS = new Set([
+  'api_key',
+  'apikey',
+  'access_token',
+  'token',
+  'client_secret',
+  'client_id',
+  'key'
+]);
 
 const buildEmptyMetrics = (): PortalErrorMetrics => ({
   total: 0,
@@ -28,12 +38,39 @@ const cloneMetrics = (metrics: PortalErrorMetrics): PortalErrorMetrics => ({
 
 const isoTimestamp = () => new Date().toISOString();
 
+const isSensitiveQueryKey = (key: string) => {
+  const normalized = key.toLowerCase();
+  return SENSITIVE_QUERY_KEYS.has(normalized);
+};
+
+const sanitizeUrl = (raw?: string) => {
+  if (!raw) return raw;
+  try {
+    const url = new URL(raw);
+    let updated = false;
+    url.searchParams.forEach((value, key) => {
+      if (isSensitiveQueryKey(key)) {
+        url.searchParams.set(key, REDACTED_QUERY_VALUE);
+        updated = true;
+      }
+    });
+    return updated ? url.toString() : url.toString();
+  } catch (_) {
+    return raw.replace(
+      /([?&](?:api_key|apikey|access_token|token|client_secret|client_id|key)=)([^&\s]+)/gi,
+      `$1${REDACTED_QUERY_VALUE}`
+    );
+  }
+};
+
 export const resetPortalErrorMetrics = () => {
   portalErrorMetrics = buildEmptyMetrics();
 };
 
 export const recordPortalError = (event: PortalErrorEvent) => {
   const code = event.code || resolvePortalErrorCode(event.status, event.kind);
+  const sanitizedPortalUrl = sanitizeUrl(event.portalUrl);
+  const sanitizedEndpoint = sanitizeUrl(event.endpoint);
   portalErrorMetrics.total += 1;
   portalErrorMetrics.byCode[code] = (portalErrorMetrics.byCode[code] || 0) + 1;
 
@@ -49,8 +86,8 @@ export const recordPortalError = (event: PortalErrorEvent) => {
       code,
       status: event.status,
       portalType: event.portalType,
-      portalUrl: event.portalUrl,
-      endpoint: event.endpoint,
+      portalUrl: sanitizedPortalUrl,
+      endpoint: sanitizedEndpoint,
       occurredAt: isoTimestamp()
     };
     portalErrorMetrics.samples.push(sample);

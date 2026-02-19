@@ -51,6 +51,7 @@ const normalizeDomain = (url: string) => {
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
 const ADDRESS_REDACTION_TOKEN = '[REDACTED_ADDRESS]';
+const SECRET_REDACTION_TOKEN = '[REDACTED_SECRET]';
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -76,6 +77,25 @@ const redactAddressFromMessage = (message: string, patterns: RegExp[]) => {
     redacted = redacted.replace(pattern, ADDRESS_REDACTION_TOKEN);
   });
   return redacted;
+};
+
+const redactSecretsFromMessage = (message: string) => {
+  if (!message) return message;
+  let redacted = message;
+  redacted = redacted.replace(/sk-[A-Za-z0-9-]{10,}/g, SECRET_REDACTION_TOKEN);
+  redacted = redacted.replace(/AIza[0-9A-Za-z-_]{30,}/g, SECRET_REDACTION_TOKEN);
+  redacted = redacted.replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, `$1${SECRET_REDACTION_TOKEN}`);
+  redacted = redacted.replace(
+    /([?&](?:api_key|apikey|access_token|token|client_secret|client_id|key)=)([^&\s]+)/gi,
+    `$1${SECRET_REDACTION_TOKEN}`
+  );
+  return redacted;
+};
+
+const redactSensitiveFromMessage = (message: string, patterns: RegExp[]) => {
+  if (!message) return message;
+  const withAddressRedaction = redactAddressFromMessage(message, patterns);
+  return redactSecretsFromMessage(withAddressRedaction);
 };
 
 const hashString = (value: string) => {
@@ -1492,9 +1512,7 @@ export const useOverseer = () => {
 
     const addLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
       if (!isActive()) return;
-      const safeMessage = addressRedactionPatterns.length > 0
-        ? redactAddressFromMessage(message, addressRedactionPatterns)
-        : message;
+      const safeMessage = redactSensitiveFromMessage(message, addressRedactionPatterns);
       appendLog(agentId, agentName, safeMessage, type);
     };
     const updateAgent = (id: string, updates: Partial<Agent>) => {
@@ -3431,7 +3449,11 @@ export const useOverseer = () => {
       if (signal.aborted || runVersionRef.current !== runVersion || e?.name === 'AbortError') {
         return;
       }
-      console.error(e);
+      const safeErrorMessage = redactSensitiveFromMessage(
+        typeof e?.message === 'string' ? e.message : String(e),
+        addressRedactionPatterns
+      );
+      console.error(safeErrorMessage);
       logOverseer(
         'PHASE 4: FAILURE',
         'system error',

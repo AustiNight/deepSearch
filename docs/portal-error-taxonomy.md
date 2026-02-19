@@ -20,5 +20,5 @@ This taxonomy standardizes portal/network failures during open-data discovery so
 ## Usage
 
 - `services/openDataDiscovery.ts` records portal errors using this taxonomy.
-- `services/portalErrorTelemetry.ts` aggregates counts and samples into `runMetrics.portalErrors`.
+- `services/portalErrorTelemetry.ts` aggregates counts and samples into `runMetrics.portalErrors`, redacting sensitive query params in portal URLs/endpoints.
 - `hooks/useOverseer.ts` logs a warning if portal errors are present during a run.
