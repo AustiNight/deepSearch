@@ -33,7 +33,7 @@
   - [x] Add observability for evidence-gating decisions and portal error taxonomy
   - [x] Add data privacy posture for address inputs and logs (PII handling and retention)
   - [x] Add unit/integration tests for address normalization, parcel resolution (multi-parcel, unit-only, rural), evidence gating, and `PropertyDossier` population
-  - [ ] Add failure-mode test suite (schema drift, portal 429/503, stale datasets, mixed parcel formats, missing geometry)
+  - [x] Add failure-mode test suite (schema drift, portal 429/503, stale datasets, mixed parcel formats, missing geometry)
   - [ ] Add E2E golden-fixture tests for address reports using frozen datasets
   - [ ] Add migration/backfill plan for cached reports and dataset index when schemas change
   - [ ] Add security review for key storage, logging, and redaction in telemetry
