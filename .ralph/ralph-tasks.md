@@ -1,73 +1,113 @@
 # Ralph Tasks
 
-- [x] Epic: Fix default LLM models returning 0 sources
-  - [x] Define a canonical `sources` schema (provider‑agnostic fields, normalization rules, and dedupe strategy)
-  - [x] Implement a normalization layer for OpenAI + Gemini to convert raw tool responses into the canonical `sources` schema
-  - [x] Add provider instrumentation: log tool usage, raw source counts, normalized source counts, and any parsing failures per run
-  - [x] Reproduce with each default model in Settings (OpenAI + Gemini) and capture which provider/model pairs return empty sources
-  - [x] Trace source extraction paths for both providers (OpenAI Responses + Gemini generateContent) and verify the `sources` payload is populated end‑to‑end
-  - [x] Audit web search tool usage and source parsing to ensure citations/sources are surfaced (e.g., annotations, `web_search_call`, Gemini candidates)
-  - [x] Add guardrails: if a provider returns text without sources, attempt a fallback retrieval path or provide a clear diagnostic message
-  - [x] Add a deterministic fixture test (mock provider responses / fixed web-search fixture) that verifies non‑empty sources for default models on a stable topic
-  - [x] Add provider snapshot tests to validate normalization across OpenAI + Gemini payload variants
-  - [x] Acceptance: running a default model search returns >0 sources for a stable test topic and logs sources in the report UI with normalized sources visible
+- [/] Epic: Improve Report Quality for Address-Like Topics
+  - [x] Define schemas for `PropertyDossier`, `DataGap`, and claim-level citations (field names, types, units, optionality, and source linkage rules)
+  - [ ] Add provenance fields for retrieval timestamp, source update date, and data currency to support recency weighting
+  - [ ] Define field-level lineage rules for every `PropertyDossier` field (source precedence, derivation steps, and conflict resolution)
+  - [ ] Define authority scoring and confidence scoring formulas with explicit numeric scales and weighting rules
+  - [ ] Define a source taxonomy (authoritative, quasi-official, aggregator, social) with canonical examples and mapping rules
+  - [ ] Set explicit evidence thresholds as constants (min total sources, min authoritative sources, min authority score) and document them in taxonomy/overseer prompts
+  - [ ] Define a data currency policy per record type (max acceptable age, recency weighting, and out-of-date handling)
+  - [ ] Build a jurisdiction availability matrix for primary records (CAD/assessor, tax collector, deed/recorder, zoning/GIS, permits, code enforcement) with explicit “unavailable” semantics
+  - [ ] Specify data source contracts per record type (endpoint/portal, query inputs, expected fields, rate limits, and parsing rules) and store them in a centralized config
+  - [ ] Define a ground-truth calibration plan for thresholds/confidence (sample addresses, expected parcel IDs, rubric) and tune scoring against it
+  - [ ] Implement address normalization rules (USPS abbreviations, directional variants, unit handling) and reuse normalized variants across all queries
+  - [ ] Implement parcel-resolution workflow: geocode to lat/lon, resolve parcel ID via CAD/assessor lookup, and fall back to GIS parcel-layer spatial join
+  - [ ] Define deterministic parcel-resolution precedence and tie-break rules (multi-parcel matches, ambiguous address points) and log collisions in `DataGap`
+  - [ ] Define explicit failure taxonomies for geocode failure, parcel not found, and data unavailable; map each to user-visible messaging and `DataGap`
+  - [ ] Add dataset discovery for open-data portals (Socrata/DCAT/ArcGIS) and persist dataset metadata (title, source, last updated, license)
+  - [ ] Implement an evidence-recovery pass when thresholds are not met, prioritizing authoritative property records and GIS layers with retry/backoff, caching, and error taxonomy
+  - [ ] Define evidence-gating enforcement points in the pipeline (pre-synthesis, post-synthesis, pre-render) and specify fail vs soft-fail behavior
+  - [ ] Define a hard-fail policy for critical failures (parcel ambiguity unresolved, no authoritative sources, confidence below minimum) with user-visible error reports
+  - [ ] Define retry/time budgets for evidence recovery (max retries, total time, priority stopping rules)
+  - [ ] Enforce the primary-records checklist using the availability matrix and block “complete” unless coverage is met or explicitly unavailable
+  - [ ] Apply source-type scoring (government > quasi-official > aggregator > social) and weight synthesis to prioritize higher-authority sources and recency
+  - [ ] Map findings into the `PropertyDossier` before rendering and display per-section confidence scores derived from the scoring model
+  - [ ] Tighten synthesis prompts to require claim-level citations, explicit “Source not found” labels, and a “Data Gaps & Next Steps” section with exact portal/endpoint pointers
+  - [ ] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)
+  - [ ] Add compliance/provenance capture for dataset license/ToS and access constraints and surface them in report metadata
+  - [ ] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
+  - [ ] Add privacy/compliance review checks tied to zero-cost mode and portal ToS/license enforcement
+  - [ ] Add instrumentation for parcel-resolution success, evidence-recovery success, latency, and a measurable confidence-quality proxy metric
+  - [ ] Define SLO targets for parcel resolution, evidence recovery, and median latency; gate releases when below baseline
+  - [ ] Add observability for evidence-gating decisions and portal error taxonomy
+  - [ ] Add data privacy posture for address inputs and logs (PII handling and retention)
+  - [ ] Add unit/integration tests for address normalization, parcel resolution (multi-parcel, unit-only, rural), evidence gating, and `PropertyDossier` population
+  - [ ] Add failure-mode test suite (schema drift, portal 429/503, stale datasets, mixed parcel formats, missing geometry)
+  - [ ] Add E2E golden-fixture tests for address reports using frozen datasets
+  - [ ] Add migration/backfill plan for cached reports and dataset index when schemas change
+  - [ ] Add security review for key storage, logging, and redaction in telemetry
+  - [ ] Define performance constraints (max external calls, portal discovery caps, latency budgets) and enforce with guardrails
+  - [ ] Acceptance: evidence threshold constants are defined and enforced (with tests that fail/pass around the thresholds), address reports include a populated `PropertyDossier` with required fields when available, primary-record coverage (or explicit unavailability) is shown, confidence tags render for each section, and Data Gaps include exact source pointers
 
-- [x] Epic: Always-available “New Search” reset button
-  - [x] Add a persistent “New Search” control in the primary UI (visible even during errors or ongoing runs)
-  - [x] Implement a per‑run `AbortController` and ensure all streams, tool calls, and async loops respect cancellation
-  - [x] Add run‑versioning so late events from prior runs are ignored after reset
-  - [x] On click, reset run state (agents, logs, report, findings, progress flags) and cancel any in‑flight run safely
-  - [x] Add a regression test to ensure no further logs or streaming updates appear after a reset
-  - [x] Add a UI smoke test step that triggers “New Search” mid‑run and verifies no new logs appear afterward
-  - [x] Add reset observability: log reset reason, run id, and cancellation status
-  - [x] Ensure the reset does not clear saved settings or API keys
-  - [x] Acceptance: user can abort or recover from any state by clicking “New Search” and immediately start a fresh run
+- [ ] Epic: Export Report to PDF
+  - [ ] Decide the PDF generation approach and supported browsers before implementation (print-optimized DOM + `window.print` or client-side PDF generator)
+  - [ ] Define a PDF spec (page size defaults, margins, font stack, accessibility tags, max file size, filename convention like `deepsearch-report-<topic>-YYYYMMDD.pdf`, and citation/bibliography formatting rules)
+  - [ ] Define supported browser/OS test matrix for PDF output and ensure parity targets are explicit
+  - [ ] Add an “Export to PDF” button in the report header UI and wire it to the chosen generation method
+  - [ ] Create print styles for the report (section/page breaks, table wrapping, image scaling, header/footer)
+  - [ ] Ensure output is readable in light/dark modes and pagination is consistent in supported browsers
+  - [ ] Add a QA checklist or automated verification for PDF export (layout, tables, citations, headers/footers)
+  - [ ] Acceptance: clicking “Export to PDF” downloads a multi-page PDF with intact tables, citations, and bibliography; output matches the defined PDF spec and renders correctly in the supported browser list
 
-- [x] Epic: Universal settings sync (cross-device) + Save behavior
-  - [ ] Verify current Save behavior and identify why the dialog remains open
-  - [ ] Ensure Save persists settings and closes the modal on success
-  - [ ] If Save fails, keep the modal open and show a clear error status
-  - [ ] Define the identity provider and auth mechanism for universal settings (e.g., Cloudflare Access email) and document the data model
-  - [ ] Define the settings schema and versioning strategy (fields, defaults, migration rules)
-  - [ ] Implement backend storage/read/write endpoints for settings (provider, model overrides, run config, allowlist text, etc.)
-  - [ ] Implement UI integration: load settings from the universal store on startup and save on “Save Configuration”
-  - [ ] Add conflict handling (updatedAt/version) and fallback to localStorage if the remote store is unavailable
-  - [ ] Define source‑of‑truth rules (server vs local) on conflict and document expected behavior with example scenarios
-  - [ ] Add migration logic from localStorage to universal store (one‑time import + rollback behavior)
-  - [ ] Add storage governance: retention, quotas, and audit/logging guidelines (no secrets)
-  - [ ] Ensure secrets (API keys) are never stored or transmitted to the server; only non‑secret settings are synced
-  - [ ] Add tests for settings serialization to verify no secrets are included in network payloads
-  - [ ] Acceptance: Save closes the dialog on success, and changes made on one device are reflected on another device after reload
+- [ ] Epic: Integrate Open Data Portal APIs + Parcel Spatial Joins
+  - [ ] Enforce a zero-cost mode: default to public endpoints with no paid services; skip any provider that requires paid access and surface a `DataGap` explaining the skip
+  - [ ] Add optional token support (Socrata app token, ArcGIS API key) that increases rate limits but is never required; fall back to anonymous mode when missing
+  - [ ] Implement keyless-safe geocoding defaults with strict rate limits and caching (Nominatim or equivalent), and document usage policy requirements in-code and in docs
+  - [ ] Add config flags to keep pay-as-you-go disabled and block any paid-tier requests by default
+  - [ ] Define a provider interface for open-data portals (discoverDatasets, fetchMetadata, queryByText, queryByGeometry, listFields, getDistributions) and wire a shared response normalization layer
+  - [ ] Implement Socrata provider with endpoint contracts: discovery via `/api/search/views?q=...`, metadata via `/api/views/{id}.json`, data via `/resource/{id}.json` with SoQL filters, geometry filters (`within_circle`/`within_polygon`), pagination, and rate limiting
+  - [ ] Implement ArcGIS provider with endpoint contracts: discovery via `/sharing/rest/search` (type: “Feature Service” + keywords), item metadata via `/sharing/rest/content/items/{id}`, layer discovery via service `?f=json`, and data queries via `{layerUrl}/query` with geometry + `esriSpatialRelIntersects`, pagination (`resultOffset`/`resultRecordCount`), and `outSR=4326`
+  - [ ] Implement DCAT provider: ingest `data.json`/`catalog.json`, filter datasets by keywords and spatial coverage, and use distribution `accessURL`/`downloadURL` to retrieve JSON/CSV where available
+  - [ ] Add portal-type detection heuristics (Socrata/ArcGIS/DCAT) from base URL, known endpoints, and metadata signatures
+  - [ ] Define authentication handling for providers (API keys, headers, tokens) with secure storage and error surfacing
+  - [ ] Build an address-to-geometry service: normalize address, geocode to lat/lon, and persist confidence + normalized variants for downstream queries
+  - [ ] Implement address-to-parcel resolution: query parcel datasets by address fields when available; otherwise perform GIS spatial join (point-in-polygon) against parcel layers
+  - [ ] Add explicit CRS/reprojection rules for all spatial queries (validate and normalize to EPSG:4326; enforce outSR on queries)
+  - [ ] Add a lightweight spatial-join utility (GeoJSON point-in-polygon) and guardrails for large polygon datasets (tiling/bbox filtering, streaming, or server-side query first)
+  - [ ] Add dataset usage gates for license/ToS compliance and freshness thresholds, and store “do not use” flags in the dataset index
+  - [ ] Add dataset auto‑ingestion: scheduled/triggered crawl of discovered portals to cache dataset metadata, fields, update timestamps, and distributions in a local index
+  - [ ] Add feature flags and rollback controls for auto‑ingestion, evidence recovery, and gating enforcement to allow staged rollout
+  - [ ] Define nonfunctional budgets (latency per report, max external calls) and align cache TTLs to those budgets
+  - [ ] Define dataset index invalidation, TTLs, and re-crawl cadence
+  - [ ] Version and validate data source contracts to handle schema changes without breaking queries
+  - [ ] Expose auto‑ingested datasets to method discovery and evidence recovery so agents can query by portal type + dataset tags (parcel, zoning, permits, code, 311/911)
+  - [ ] Add caching, retry/backoff, and rate-limit policies per provider; surface errors in `DataGap` entries with actionable retry guidance
+  - [ ] Add unit/integration tests for each provider (mocked API responses), and spatial-join fixtures for parcel lookups
+  - [ ] Acceptance: given a city/county portal URL, the system can discover datasets, query at least one dataset by address or geometry, and populate property-relevant fields with citations; provider tests cover Socrata, ArcGIS, and DCAT flows
 
-- [x] Epic: Redesign Transparency Map as a normalized table
-  - [ ] Replace the current scaled layout with a 100% scale, full‑width normalized table
-  - [ ] Table columns must include: `Vertical`, `Blueprint Fields`, `Subtopics`, `Methods/Tactics`, `Seed Query`, `Hint Rules`
-  - [ ] Define the data‑mapping layer that transforms taxonomy + hint rules into normalized table rows
-  - [ ] Add accessibility semantics (table headers, row scopes, keyboard navigation) and document expected behavior
-  - [ ] Render one row per vertical; use bullet lists within cells that contain multiple values
-  - [ ] Add sticky table headers for readability and ensure the table is responsive across common aspect ratios
-  - [ ] Define performance constraints (expected row count, virtualization threshold) and optimize rendering accordingly
-  - [ ] Ensure light/dark styling and print‑friendly output with readable contrasts
-  - [ ] Acceptance: Transparency Map displays all verticals in a structured table with clear headers and bullet‑list cells at 100% scale and passes accessibility review
+- [ ] Epic: Settings UI for Optional Open-Data Keys
+  - [ ] Add a Settings UI section that lists optional keys (Socrata app token, ArcGIS API key, optional geocoding key if supported) with clear “not required” language
+  - [ ] Explain zero-cost mode defaults and what improves with keys (rate limits, reliability, throughput) without changing core functionality
+  - [ ] Link to public setup instructions for each optional key and summarize required fields/format
+  - [ ] Add validation messaging that treats missing keys as “OK” and only warns about rate limiting
+  - [ ] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
+  - [ ] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, and adding keys improves scalability only
 
-- [x] Epic: Update documentation and release notes for UI/search changes
-  - [x] Document the New Search reset behavior and universal settings sync in `README.md` and `docs/settings.md`
-  - [x] Document the updated Transparency Map layout and any performance limits in `docs/vertical-logic.md` or a dedicated doc
-  - [x] Add a user‑facing changelog entry for the UI/search changes and note any version tags
-  - [x] Acceptance: docs reflect new UI behavior and sync semantics
+- [ ] Epic: Transparency Map Scaling + Auto-Updates
+  - [ ] Set Transparency Map default scale to 80% (CSS transform or layout scaling) without affecting readability or responsiveness
+  - [ ] Ensure the scaled map maintains legible typography and column alignment across mobile/tablet/desktop breakpoints
+  - [ ] Implement an auto-update mechanism for the Transparency Map that re-renders whenever taxonomy/blueprint/vertical/method/tactic sources change
+  - [ ] Add a single source of truth for Transparency Map data (derived from taxonomy + settings) and recompute on load, settings save, and taxonomy updates
+  - [ ] Add a lightweight integrity check to verify the map includes all known verticals/subtopics and flags missing items
+  - [ ] Acceptance: Transparency Map renders at 80% scale by default and stays current when new verticals/methods/tactics are added without manual edits
 
-- [x] Epic: System test vertical + UI smoke testing pipeline
-  - [x] Add a reserved system test phrase (`DEEPSEARCH_SYSTEM_TEST`) and force classification to `system_test`
-  - [x] Add a `system_test` vertical to the taxonomy with reserved tactics and blueprint fields for test reporting
-  - [x] Implement a system-test path in `useOverseer` that bypasses external LLM calls, spawns each agent type once (Researcher, Critic, Synthesizer), and generates a minimal report
-  - [x] Bypass admin-password gating for system-test runs so CI can execute without credentials
-  - [x] Add Playwright configuration with multi-viewport projects (mobile/tablet/desktop/desktop-lg)
-  - [x] Add a UI smoke spec that triggers the system test phrase, validates the report content, and checks no horizontal overflow
-  - [x] Add a GitHub Actions workflow to run the UI smoke test on push/PR
-  - [x] Remove the broken `/index.css` link that caused strict-mode console errors in tests
-  - [x] Acceptance: `npm run test:ui` passes locally and in CI; system test report lists all agent types spawned once
+- [ ] Epic: US-Only Address Policy
+  - [ ] Add an address-scope classifier that detects non-US inputs (country tokens, postal code formats, or explicit country fields)
+  - [ ] Define US-only policy behavior: for non-US addresses, skip US-specific record gates and render a scoped report with `DataGap` entries that explain unsupported jurisdiction
+  - [ ] Add a feature flag to enable/disable US-only enforcement and document defaults
+  - [ ] Update settings/help text to explain the policy and how non-US inputs are handled
+  - [ ] Add tests for US vs non-US address inputs (UK, CA, EU formats) and verify correct policy behavior
+  - [ ] Acceptance: non-US address inputs are explicitly flagged as out-of-scope with clear guidance, and US-only record gates are not applied
 
-- [x] Epic: Add green brain favicon
-  - [x] Create `public/favicon.svg` using the green brain icon used in the app header
-  - [x] Wire the favicon in `index.html`
-  - [x] Acceptance: browser tab shows the green brain favicon on load
+## Dependency Order
+
+- Define schemas (`PropertyDossier`, `DataGap`, citations) and provenance fields
+- Define source taxonomy, scoring formulas, evidence thresholds, and data currency policy
+- Build jurisdiction availability matrix and data source contracts
+- Implement address normalization, geocoding, and parcel resolution (with CRS rules)
+- Implement provider integrations and dataset index (discovery, ingestion, licensing gates)
+- Add evidence recovery, gating enforcement, and hard-fail policy
+- Update synthesis/validation/report rendering
+- Add observability, SLOs, and test suites
+- Add UI updates (Settings optional keys, Transparency Map scaling)

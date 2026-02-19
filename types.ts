@@ -97,6 +97,256 @@ export interface FinalReport {
   schemaVersion?: number;
 }
 
+export type IsoDateString = string;
+export type CurrencyCode = string;
+export type AreaUnit = 'sq_ft' | 'acres';
+export type DistanceUnit = 'ft' | 'm' | 'mi' | 'km';
+
+export type SourceTaxonomy =
+  | 'authoritative'
+  | 'quasi_official'
+  | 'aggregator'
+  | 'social'
+  | 'unknown';
+
+export interface CitationSource {
+  id: string;
+  url: string;
+  title?: string;
+  publisher?: string;
+  sourceType?: SourceTaxonomy;
+  retrievedAt?: IsoDateString;
+  sourceUpdatedAt?: IsoDateString;
+}
+
+export interface CitationSourceRef {
+  sourceId: string;
+  page?: string;
+  section?: string;
+  quote?: string;
+  note?: string;
+}
+
+export interface ClaimCitation {
+  id: string;
+  fieldPath: string;
+  claim: string;
+  value?: string | number | boolean | null;
+  unit?: string;
+  confidence?: number;
+  citations: CitationSourceRef[];
+  derivation?: string;
+  createdAt?: IsoDateString;
+}
+
+export interface SourcePointer {
+  label: string;
+  portalUrl?: string;
+  endpoint?: string;
+  query?: string;
+  notes?: string;
+}
+
+export type DataGapSeverity = 'critical' | 'major' | 'minor' | 'info';
+export type DataGapStatus =
+  | 'missing'
+  | 'unavailable'
+  | 'restricted'
+  | 'stale'
+  | 'ambiguous'
+  | 'conflict';
+
+export interface DataGap {
+  id: string;
+  fieldPath?: string;
+  recordType?: string;
+  description: string;
+  reason: string;
+  expectedSources?: SourcePointer[];
+  severity?: DataGapSeverity;
+  status?: DataGapStatus;
+  detectedAt?: IsoDateString;
+  impact?: string;
+}
+
+export interface PostalAddress {
+  address1?: string;
+  address2?: string;
+  city?: string;
+  county?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+export interface GeoPoint {
+  lat: number;
+  lon: number;
+  accuracyMeters?: number;
+}
+
+export interface Jurisdiction {
+  city?: string;
+  county?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+export interface PropertySubject {
+  address: string;
+  normalizedAddress?: string;
+  jurisdiction?: Jurisdiction;
+  geo?: GeoPoint;
+  parcelId?: string;
+  accountId?: string;
+}
+
+export interface ParcelInfo {
+  parcelId?: string;
+  accountId?: string;
+  situsAddress?: string;
+  legalDescription?: string;
+  mapReference?: string;
+  subdivision?: string;
+  lot?: string;
+  block?: string;
+  landUseCode?: string;
+  landUseDescription?: string;
+  lotSize?: {
+    value: number;
+    unit: AreaUnit;
+  };
+  buildingAreaSqFt?: number;
+  yearBuilt?: number;
+  unitCount?: number;
+}
+
+export type OwnerType = 'individual' | 'entity' | 'government' | 'trust' | 'unknown';
+
+export interface OwnershipTransfer {
+  transferDate?: IsoDateString;
+  recordedDate?: IsoDateString;
+  priceUsd?: number;
+  grantor?: string;
+  grantee?: string;
+  instrument?: string;
+  documentId?: string;
+  documentUrl?: string;
+}
+
+export interface OwnershipInfo {
+  ownerName?: string;
+  ownerType?: OwnerType;
+  mailingAddress?: PostalAddress;
+  ownershipStartDate?: IsoDateString;
+  lastTransferDate?: IsoDateString;
+  lastTransferPriceUsd?: number;
+  deedInstrument?: string;
+  deedBookPage?: string;
+  ownershipHistory?: OwnershipTransfer[];
+}
+
+export interface TaxAppraisal {
+  assessmentYear?: number;
+  assessedValueUsd?: number;
+  marketValueUsd?: number;
+  landValueUsd?: number;
+  improvementValueUsd?: number;
+  taxableValueUsd?: number;
+  taxAmountUsd?: number;
+  taxRatePct?: number;
+  exemptions?: string[];
+  taxStatus?: string;
+}
+
+export interface ZoningSetbacks {
+  frontFt?: number;
+  rearFt?: number;
+  sideFt?: number;
+}
+
+export interface ZoningLandUse {
+  zoningCode?: string;
+  zoningDescription?: string;
+  overlayDistricts?: string[];
+  futureLandUse?: string;
+  landUseDesignation?: string;
+  lotCoveragePct?: number;
+  far?: number;
+  maxHeightFt?: number;
+  setbacks?: ZoningSetbacks;
+}
+
+export interface PermitRecord {
+  permitId?: string;
+  permitType?: string;
+  status?: string;
+  issuedDate?: IsoDateString;
+  finalDate?: IsoDateString;
+  valuationUsd?: number;
+  workDescription?: string;
+  contractor?: string;
+}
+
+export interface CodeViolation {
+  caseId?: string;
+  status?: string;
+  openedDate?: IsoDateString;
+  resolvedDate?: IsoDateString;
+  description?: string;
+  fineUsd?: number;
+}
+
+export interface PermitsAndCode {
+  permits?: PermitRecord[];
+  codeViolations?: CodeViolation[];
+}
+
+export interface EnvironmentalSite {
+  siteName?: string;
+  program?: string;
+  epaId?: string;
+  distance?: {
+    value: number;
+    unit: DistanceUnit;
+  };
+  status?: string;
+}
+
+export interface HazardsEnvironmental {
+  floodZone?: string;
+  femaPanel?: string;
+  floodRiskPercentile?: number;
+  wildfireRisk?: string;
+  seismicZone?: string;
+  environmentalSites?: EnvironmentalSite[];
+}
+
+export interface NeighborhoodContext {
+  censusTract?: string;
+  censusBlockGroup?: string;
+  neighborhood?: string;
+  schoolDistrict?: string;
+  communityPlanArea?: string;
+  cityCouncilDistrict?: string;
+}
+
+export interface PropertyDossier {
+  schemaVersion: number;
+  subject: PropertySubject;
+  parcel?: ParcelInfo;
+  ownership?: OwnershipInfo;
+  taxAppraisal?: TaxAppraisal;
+  zoningLandUse?: ZoningLandUse;
+  permitsAndCode?: PermitsAndCode;
+  hazardsEnvironmental?: HazardsEnvironmental;
+  neighborhoodContext?: NeighborhoodContext;
+  dataGaps: DataGap[];
+  claims: ClaimCitation[];
+  sources: CitationSource[];
+}
+
 export type TaxonomyProvenanceSource = 'seed' | 'agent_proposal' | 'overseer_vet' | 'manual';
 
 export interface TaxonomyProvenance {
