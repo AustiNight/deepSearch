@@ -36,6 +36,14 @@ Evidence gating is enforced at three checkpoints to prevent unsupported coverage
 
 Hard-fail behavior for critical evidence failures (e.g., unresolved parcel ambiguity, zero authoritative sources, confidence below minimum) is defined separately in `docs/hard-fail-policy.md` and should override the soft-fail defaults above.
 
+## Evidence Recovery Budgets
+Evidence recovery enforces explicit retry and time budgets to limit spend and avoid chasing low-quality sources.
+
+- Max retries per recovery query: 3 attempts with exponential backoff.
+- Total evidence recovery time budget: 45 seconds across all recovery queries.
+- Priority stopping: run higher-scoring recovery queries first (score >= 4); skip low-priority queries once authoritative thresholds are satisfied.
+- Fallback cap: at most 2 low-priority recovery queries are attempted after priority queries.
+
 ## Current Agent Spawning Points
 1. Method Discovery Agents (Phase 0.5)
    Names: `Method Discovery {n}`. Task: "Discover research methods". Spawned from `METHOD_DISCOVERY_TEMPLATES_*`.

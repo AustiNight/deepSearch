@@ -47,6 +47,9 @@ const EVIDENCE_RECOVERY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const EVIDENCE_RECOVERY_MAX_ATTEMPTS = 3;
 const EVIDENCE_RECOVERY_BASE_DELAY_MS = 700;
 const EVIDENCE_RECOVERY_MAX_QUERIES = 6;
+const EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS = 1000 * 45;
+const EVIDENCE_RECOVERY_PRIORITY_SCORE_MIN = 4;
+const EVIDENCE_RECOVERY_MAX_FALLBACK_QUERIES = 2;
 const EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES = 200;
 const EVIDENCE_RECOVERY_MAX_TEXT_CHARS = 12000;
 
@@ -2562,10 +2565,10 @@ export const useOverseer = () => {
           );
 
           const recoveryQueries = buildEvidenceRecoveryQueries(slotValuesAny, addressDirectQueries);
-          const prioritizedQueries = recoveryQueries
+          const scoredQueries = recoveryQueries
             .map(query => ({ query, score: scoreEvidenceRecoveryQuery(query) }))
-            .sort((a, b) => b.score - a.score)
-            .map(item => item.query);
+            .sort((a, b) => b.score - a.score);
+          const queryScoreMap = new Map(scoredQueries.map(item => [item.query, item.score]));
 
           const neededTotal = Math.max(0, MIN_EVIDENCE_TOTAL_SOURCES - evidenceStatus.totalSources);
           const neededAuthoritative = Math.max(0, MIN_EVIDENCE_AUTHORITATIVE_SOURCES - evidenceStatus.authoritativeSources);
@@ -2573,7 +2576,14 @@ export const useOverseer = () => {
             EVIDENCE_RECOVERY_MAX_QUERIES,
             Math.max(1, neededTotal + neededAuthoritative)
           );
-          const queriesToRun = prioritizedQueries.filter(q => !usedQueries.has(q)).slice(0, targetQueries);
+          const candidateQueries = scoredQueries.filter(({ query }) => !usedQueries.has(query));
+          const priorityQueries = candidateQueries.filter(({ score }) => score >= EVIDENCE_RECOVERY_PRIORITY_SCORE_MIN);
+          const fallbackQueries = candidateQueries
+            .filter(({ score }) => score < EVIDENCE_RECOVERY_PRIORITY_SCORE_MIN)
+            .slice(0, EVIDENCE_RECOVERY_MAX_FALLBACK_QUERIES);
+          const queriesToRun = [...priorityQueries, ...fallbackQueries]
+            .slice(0, targetQueries)
+            .map(item => item.query);
 
           if (queriesToRun.length === 0) {
             logOverseer(
@@ -2584,9 +2594,30 @@ export const useOverseer = () => {
               'warning'
             );
           } else {
+            const recoveryDeadline = Date.now() + EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS;
+            let recoveryTimedOut = false;
             const recoverySources: string[] = [];
             for (const [index, query] of queriesToRun.entries()) {
               ensureActive();
+              if (Date.now() >= recoveryDeadline) {
+                recoveryTimedOut = true;
+                break;
+              }
+
+              const queryScore = queryScoreMap.get(query) ?? 0;
+              if (queryScore < EVIDENCE_RECOVERY_PRIORITY_SCORE_MIN
+                && evidenceStatus.meetsAuthoritative
+                && evidenceStatus.meetsAuthorityScore) {
+                logOverseer(
+                  'PHASE 3C: EVIDENCE RECOVERY',
+                  'priority stopping rule triggered',
+                  'skip low-priority recovery queries',
+                  'authoritative thresholds already satisfied',
+                  'info'
+                );
+                break;
+              }
+
               usedQueries.add(query);
 
               const agentId = generateId();
@@ -2623,6 +2654,10 @@ export const useOverseer = () => {
                 addLog(agentId, agentName, `Cache hit. Sources: ${cached.sources.length}`, 'success');
                 pushFinding({ ...cachedFinding, ...{ rawSources: cached.sources } } as any);
                 recoverySources.push(...cached.sources.map(s => s.uri));
+                evidenceStatus = evaluateEvidence(collectSources());
+                if (evidenceStatus.meetsAll) {
+                  break;
+                }
                 continue;
               }
 
@@ -2630,6 +2665,10 @@ export const useOverseer = () => {
               let result: { text: string; sources: NormalizedSource[] } | null = null;
               while (attempt < EVIDENCE_RECOVERY_MAX_ATTEMPTS) {
                 ensureActive();
+                if (Date.now() >= recoveryDeadline) {
+                  recoveryTimedOut = true;
+                  break;
+                }
                 attempt += 1;
                 try {
                   result = await runSafely(performDeepResearch(
@@ -2647,8 +2686,20 @@ export const useOverseer = () => {
                 if (result && result.sources.length > 0) break;
                 if (attempt < EVIDENCE_RECOVERY_MAX_ATTEMPTS) {
                   const delay = EVIDENCE_RECOVERY_BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 250;
+                  if (Date.now() + delay >= recoveryDeadline) {
+                    recoveryTimedOut = true;
+                    break;
+                  }
                   await wait(delay, signal);
                 }
+              }
+
+              if (recoveryTimedOut) {
+                updateAgent(agentId, {
+                  status: AgentStatus.FAILED,
+                  reasoning: ['time budget exceeded during evidence recovery']
+                });
+                break;
               }
 
               if (!result || result.sources.length === 0) {
@@ -2689,6 +2740,21 @@ export const useOverseer = () => {
               addLog(agentId, agentName, `Evidence recovery complete. Sources: ${result.sources.length}`, 'success');
               pushFinding({ ...recoveryFinding, ...{ rawSources: result.sources } } as any);
               recoverySources.push(...result.sources.map(s => s.uri));
+
+              evidenceStatus = evaluateEvidence(collectSources());
+              if (evidenceStatus.meetsAll) {
+                break;
+              }
+            }
+
+            if (recoveryTimedOut) {
+              logOverseer(
+                'PHASE 3C: EVIDENCE RECOVERY',
+                EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_timeout.summary,
+                'time budget exceeded',
+                `budget ${EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS}ms`,
+                'warning'
+              );
             }
 
             if (recoverySources.length > 0) {
