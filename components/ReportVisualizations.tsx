@@ -45,7 +45,7 @@ const SourcePills: React.FC<{ sources?: string[] }> = ({ sources }) => {
 };
 
 const ChartLegend: React.FC<{ series: ChartVisualization['data']['series'] }> = ({ series }) => (
-  <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-400">
+  <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-400 print:text-gray-700">
     {series.map((entry, index) => (
       <div key={`${entry.name}-${index}`} className="flex items-center gap-2">
         <span
@@ -235,7 +235,7 @@ const ChartSvg: React.FC<{ visualization: ChartVisualization }> = ({ visualizati
 };
 
 const ChartCard: React.FC<{ visualization: ChartVisualization }> = ({ visualization }) => (
-  <div className="rounded-xl border border-gray-700 bg-black/30 p-5 shadow-lg print:border-gray-300 print:bg-white">
+  <div className="rounded-xl border border-gray-700 bg-black/30 p-5 shadow-lg print:border-gray-300 print:bg-white print-avoid-break">
     <div className="mb-3">
       <h4 className="text-lg font-semibold text-white print:text-black">{visualization.title}</h4>
       {visualization.caption ? (
@@ -248,7 +248,7 @@ const ChartCard: React.FC<{ visualization: ChartVisualization }> = ({ visualizat
 );
 
 const ImageCard: React.FC<{ visualization: ImageVisualization }> = ({ visualization }) => (
-  <div className="rounded-xl border border-gray-700 bg-black/30 p-5 shadow-lg print:border-gray-300 print:bg-white">
+  <div className="rounded-xl border border-gray-700 bg-black/30 p-5 shadow-lg print:border-gray-300 print:bg-white print-avoid-break">
     <div className="mb-3">
       <h4 className="text-lg font-semibold text-white print:text-black">{visualization.title}</h4>
       {visualization.caption ? (
@@ -276,8 +276,8 @@ export const ReportVisualizations: React.FC<Props> = ({ visualizations }) => {
   return (
     <section className="not-prose mb-10">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-xl font-bold text-white">Visualizations</h3>
-        <span className="text-xs text-gray-500">Charts & media derived from report data</span>
+        <h3 className="text-xl font-bold text-white print:text-black">Visualizations</h3>
+        <span className="text-xs text-gray-500 print:text-gray-600">Charts & media derived from report data</span>
       </div>
       <div className="grid gap-6 md:grid-cols-2">
         {visualizations.map((viz, index) => {

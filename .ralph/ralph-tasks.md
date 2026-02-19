@@ -40,15 +40,15 @@
   - [x] Define performance constraints (max external calls, portal discovery caps, latency budgets) and enforce with guardrails
   - [x] Acceptance: evidence threshold constants are defined and enforced (with tests that fail/pass around the thresholds), address reports include a populated `PropertyDossier` with required fields when available, primary-record coverage (or explicit unavailability) is shown, confidence tags render for each section, and Data Gaps include exact source pointers
 
-- [ ] Epic: Export Report to PDF
-  - [ ] Decide the PDF generation approach and supported browsers before implementation (print-optimized DOM + `window.print` or client-side PDF generator)
-  - [ ] Define a PDF spec (page size defaults, margins, font stack, accessibility tags, max file size, filename convention like `deepsearch-report-<topic>-YYYYMMDD.pdf`, and citation/bibliography formatting rules)
-  - [ ] Define supported browser/OS test matrix for PDF output and ensure parity targets are explicit
-  - [ ] Add an “Export to PDF” button in the report header UI and wire it to the chosen generation method
-  - [ ] Create print styles for the report (section/page breaks, table wrapping, image scaling, header/footer)
-  - [ ] Ensure output is readable in light/dark modes and pagination is consistent in supported browsers
-  - [ ] Add a QA checklist or automated verification for PDF export (layout, tables, citations, headers/footers)
-  - [ ] Acceptance: clicking “Export to PDF” downloads a multi-page PDF with intact tables, citations, and bibliography; output matches the defined PDF spec and renders correctly in the supported browser list
+- [x] Epic: Export Report to PDF
+  - [x] Decide the PDF generation approach and supported browsers before implementation (print-optimized DOM + `window.print` or client-side PDF generator)
+  - [x] Define a PDF spec (page size defaults, margins, font stack, accessibility tags, max file size, filename convention like `deepsearch-report-<topic>-YYYYMMDD.pdf`, and citation/bibliography formatting rules)
+  - [x] Define supported browser/OS test matrix for PDF output and ensure parity targets are explicit
+  - [x] Add an “Export to PDF” button in the report header UI and wire it to the chosen generation method
+  - [x] Create print styles for the report (section/page breaks, table wrapping, image scaling, header/footer)
+  - [x] Ensure output is readable in light/dark modes and pagination is consistent in supported browsers
+  - [x] Add a QA checklist or automated verification for PDF export (layout, tables, citations, headers/footers)
+  - [x] Acceptance: clicking “Export to PDF” downloads a multi-page PDF with intact tables, citations, and bibliography; output matches the defined PDF spec and renders correctly in the supported browser list
 
 - [ ] Epic: Integrate Open Data Portal APIs + Parcel Spatial Joins
   - [ ] Enforce a zero-cost mode: default to public endpoints with no paid services; skip any provider that requires paid access and surface a `DataGap` explaining the skip

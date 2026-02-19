@@ -1,7 +1,7 @@
 import React from 'react';
 import { FinalReport } from '../types';
 import ReactMarkdown from 'react-markdown';
-import { Download, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Download, FileText, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react';
 import { ReportVisualizations } from './ReportVisualizations';
 
 interface Props {
@@ -62,6 +62,28 @@ const formatMs = (value?: number) => {
   if (typeof value !== 'number') return 'N/A';
   return `${Math.round(value)}ms`;
 };
+
+const toFileSlug = (value: string) => {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug ? slug.slice(0, 48) : 'report';
+};
+
+const formatFileDate = (value: Date) => {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}${month}${day}`;
+};
+
+const formatDisplayDate = (value: Date) =>
+  new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit'
+  }).format(value);
 
 const truncateText = (value: string, max: number) => {
   if (value.length <= max) return value;
@@ -150,7 +172,7 @@ const MarkdownDataTable: React.FC<{ headers: string[]; rows: string[][] }> = ({
   headers,
   rows
 }) => (
-  <div className="not-prose my-6 overflow-x-auto rounded-lg border border-gray-700 bg-black/30 print:bg-white print:border-gray-300">
+  <div className="not-prose my-6 overflow-x-auto rounded-lg border border-gray-700 bg-black/30 print:bg-white print:border-gray-300 print-avoid-break print:overflow-visible">
     <table className="min-w-full border-collapse text-left text-sm text-gray-200 print:text-black">
       <thead className="bg-gray-900/60 text-cyber-blue print:bg-gray-100 print:text-black">
         <tr>
@@ -199,7 +221,10 @@ const renderMarkdownBlocks = (content: string) => {
       );
     }
     return (
-      <ReactMarkdown key={`markdown-${index}`} className="text-gray-300 leading-relaxed">
+      <ReactMarkdown
+        key={`markdown-${index}`}
+        className="text-gray-300 leading-relaxed print:text-black"
+      >
         {block.content}
       </ReactMarkdown>
     );
@@ -222,8 +247,15 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const hasDatasetCompliance = datasetCompliance.length > 0;
   const dataGaps = report.propertyDossier?.dataGaps || [];
   const hasDataGaps = dataGaps.length > 0;
+  const bibliographySources = Array.from(
+    new Set(
+      report.sections.flatMap((section) => section.sources || []).filter(Boolean)
+    )
+  );
+  const hasBibliography = bibliographySources.length > 0;
+  const printDate = new Date();
 
-  const downloadReport = () => {
+  const downloadJson = () => {
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -232,9 +264,37 @@ export const ReportView: React.FC<Props> = ({ report }) => {
     a.click();
   };
 
+  const exportPdf = () => {
+    if (typeof window === 'undefined') return;
+    const now = new Date();
+    const filename = `deepsearch-report-${toFileSlug(report.title)}-${formatFileDate(now)}.pdf`;
+    const originalTitle = document.title;
+    const body = document.body;
+    let restored = false;
+
+    const restore = () => {
+      if (restored) return;
+      restored = true;
+      document.title = originalTitle;
+      if (body.dataset.printing) delete body.dataset.printing;
+    };
+
+    document.title = filename;
+    body.dataset.printing = 'true';
+    window.addEventListener('afterprint', restore, { once: true });
+    window.setTimeout(restore, 3000);
+    window.print();
+  };
+
   return (
-    <div className="bg-cyber-gray border border-gray-700 rounded-lg p-8 max-w-4xl mx-auto shadow-2xl">
-      <div className="flex justify-between items-start border-b border-gray-700 pb-6 mb-6">
+    <div className="report-print bg-cyber-gray border border-gray-700 rounded-lg p-8 max-w-4xl mx-auto shadow-2xl print:bg-white print:text-black print:border-gray-300 print:shadow-none print:max-w-none print:mx-0 print:rounded-none">
+      <div className="hidden print:block mb-4 border-b border-gray-300 pb-2 text-xs text-gray-600">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-gray-700">DeepSearch Report</span>
+          <span>Generated {formatDisplayDate(printDate)}</span>
+        </div>
+      </div>
+      <div className="flex justify-between items-start border-b border-gray-700 pb-6 mb-6 print:border-gray-300">
         <div>
            <h1 className="text-3xl font-bold text-white mb-2">{report.title}</h1>
            <div className={`flex items-center gap-2 text-sm ${isCoverageComplete ? 'text-cyber-green' : 'text-yellow-400'}`}>
@@ -244,12 +304,20 @@ export const ReportView: React.FC<Props> = ({ report }) => {
              </span>
            </div>
         </div>
-        <button 
-          onClick={downloadReport}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-md text-sm transition-colors"
-        >
-          <Download className="w-4 h-4" /> Export JSON
-        </button>
+        <div className="flex items-center gap-2 print:hidden">
+          <button
+            onClick={exportPdf}
+            className="flex items-center gap-2 px-4 py-2 bg-cyber-blue/20 hover:bg-cyber-blue/30 rounded-md text-sm transition-colors text-cyber-blue"
+          >
+            <FileText className="w-4 h-4" /> Export PDF
+          </button>
+          <button
+            onClick={downloadJson}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-md text-sm transition-colors"
+          >
+            <Download className="w-4 h-4" /> Export JSON
+          </button>
+        </div>
       </div>
 
       {!isCoverageComplete && missingEntries.length > 0 && (
@@ -277,30 +345,34 @@ export const ReportView: React.FC<Props> = ({ report }) => {
         </div>
       )}
 
-      <div className="prose prose-invert max-w-none">
-        <div className="bg-gray-900/50 p-6 rounded-lg mb-8 border-l-4 border-cyber-blue">
-          <h3 className="text-cyber-blue mt-0">Executive Summary</h3>
-          <p className="text-gray-300 leading-relaxed">{report.summary}</p>
+      <div className="prose prose-invert max-w-none print:text-black">
+        <div className="bg-gray-900/50 p-6 rounded-lg mb-8 border-l-4 border-cyber-blue print:bg-gray-100 print:border-gray-300">
+          <h3 className="text-cyber-blue mt-0 print:text-black">Executive Summary</h3>
+          <p className="text-gray-300 leading-relaxed print:text-black">{report.summary}</p>
         </div>
 
         <ReportVisualizations visualizations={report.visualizations || []} />
 
         {report.sections.map((section, idx) => (
-          <div key={idx} className="mb-8">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-2 mb-4">
-              <h2 className="text-xl font-bold text-white">
+          <div key={idx} className="mb-8 print-avoid-break">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-2 mb-4 print:border-gray-300">
+              <h2 className="text-xl font-bold text-white print:text-black">
                 {idx + 1}. {section.title}
               </h2>
               {typeof section.confidence === 'number' && (
-                <span className={`text-xs px-2 py-1 rounded-full border ${confidenceBadgeClasses(section.confidence)}`}>
+                <span
+                  className={`text-xs px-2 py-1 rounded-full border print:border-gray-300 print:bg-white print:text-gray-700 ${confidenceBadgeClasses(
+                    section.confidence
+                  )}`}
+                >
                   Confidence: {(section.confidence * 100).toFixed(0)}% ({formatConfidenceLabel(section.confidence)})
                 </span>
               )}
             </div>
             <div className="mb-4 space-y-4">{renderMarkdownBlocks(section.content)}</div>
             {section.sources.length > 0 ? (
-              <div className="bg-black/20 p-3 rounded text-xs">
-                <span className="font-bold text-gray-500 block mb-2">SOURCES:</span>
+              <div className="bg-black/20 p-3 rounded text-xs print:bg-gray-100 print:border print:border-gray-300 print:text-black">
+                <span className="font-bold text-gray-500 block mb-2 print:text-gray-700">SOURCES:</span>
                 <div className="flex flex-wrap gap-2">
                   {section.sources.map((src, i) => (
                     <a 
@@ -308,7 +380,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                       href={src.startsWith('http') ? src : '#'} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-cyber-blue hover:underline bg-blue-900/20 px-2 py-1 rounded"
+                      className="flex items-center gap-1 text-cyber-blue hover:underline bg-blue-900/20 px-2 py-1 rounded print:text-black print:bg-transparent print:underline"
                     >
                       <ExternalLink className="w-3 h-3" />
                       {new URL(src.startsWith('http') ? src : 'https://example.com').hostname.replace('www.', '')}
@@ -317,7 +389,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                 </div>
               </div>
             ) : (
-              <div className="text-xs text-yellow-500 font-mono">
+              <div className="text-xs text-yellow-500 font-mono print:text-gray-600">
                 No verified sources for this section.
               </div>
             )}
@@ -325,8 +397,8 @@ export const ReportView: React.FC<Props> = ({ report }) => {
         ))}
 
         {hasDataGaps && (
-          <div className="mt-10 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">
-            <p className="text-[11px] uppercase tracking-wide text-gray-500">Data Gaps & Next Steps</p>
+          <div className="mt-10 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">Data Gaps & Next Steps</p>
             <div className="mt-3 space-y-3">
               {dataGaps.map((gap, index) => {
                 const label = gap.recordType
@@ -334,56 +406,56 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                   : (gap.fieldPath || `Gap ${index + 1}`);
                 const expectedSources = gap.expectedSources || [];
                 return (
-                  <div key={`${gap.id}-${index}`} className="rounded border border-gray-800 bg-gray-900/40 p-3">
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-white">
+                  <div key={`${gap.id}-${index}`} className="rounded border border-gray-800 bg-gray-900/40 p-3 print:bg-white print:border-gray-300">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-white print:text-black">
                       <span>{label}</span>
                       {gap.status && (
-                        <span className="text-[10px] uppercase tracking-wide text-amber-200">
+                        <span className="text-[10px] uppercase tracking-wide text-amber-200 print:text-gray-700">
                           {gap.status}
                         </span>
                       )}
                       {gap.severity && (
-                        <span className="text-[10px] uppercase tracking-wide text-gray-500">
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500 print:text-gray-600">
                           {gap.severity}
                         </span>
                       )}
                     </div>
                     {gap.description && (
-                      <div className="mt-1 text-gray-300">{gap.description}</div>
+                      <div className="mt-1 text-gray-300 print:text-gray-800">{gap.description}</div>
                     )}
                     {gap.reason && (
-                      <div className="mt-1 text-gray-400">Reason: {gap.reason}</div>
+                      <div className="mt-1 text-gray-400 print:text-gray-700">Reason: {gap.reason}</div>
                     )}
                     {gap.impact && (
-                      <div className="mt-1 text-gray-500">Impact: {gap.impact}</div>
+                      <div className="mt-1 text-gray-500 print:text-gray-600">Impact: {gap.impact}</div>
                     )}
                     {expectedSources.length > 0 && (
-                      <div className="mt-2 space-y-1 text-[11px] text-gray-400">
-                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Expected Sources</div>
+                      <div className="mt-2 space-y-1 text-[11px] text-gray-400 print:text-gray-700">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500 print:text-gray-600">Expected Sources</div>
                         {expectedSources.map((source, sourceIndex) => {
                           const portalLabel = formatPortalLabel(source.portalUrl);
                           return (
                             <div key={`${source.label}-${sourceIndex}`}>
-                              <span className="text-gray-300">{source.label}</span>
+                              <span className="text-gray-300 print:text-gray-800">{source.label}</span>
                               {portalLabel && (
-                                <span className="ml-2 text-gray-500">Portal: {portalLabel}</span>
+                                <span className="ml-2 text-gray-500 print:text-gray-600">Portal: {portalLabel}</span>
                               )}
                               {source.portalUrl && (
                                 <a
                                   href={source.portalUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                                  className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline print:text-black print:underline"
                                 >
                                   <ExternalLink className="w-3 h-3" />
                                   Link
                                 </a>
                               )}
                               {source.endpoint && (
-                                <span className="ml-2 text-gray-500">Endpoint: {source.endpoint}</span>
+                                <span className="ml-2 text-gray-500 print:text-gray-600">Endpoint: {source.endpoint}</span>
                               )}
                               {source.query && (
-                                <span className="ml-2 text-gray-500">Query: {source.query}</span>
+                                <span className="ml-2 text-gray-500 print:text-gray-600">Query: {source.query}</span>
                               )}
                             </div>
                           );
@@ -398,39 +470,39 @@ export const ReportView: React.FC<Props> = ({ report }) => {
         )}
 
         {sloGate && (
-          <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">
-            <p className="text-[11px] uppercase tracking-wide text-gray-500">Release SLO Gate</p>
-            <div className="mt-2 space-y-2 text-gray-400">
+          <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">Release SLO Gate</p>
+            <div className="mt-2 space-y-2 text-gray-400 print:text-gray-700">
               <div>
                 Status:{' '}
-                <span className={sloGate.gateStatus === 'blocked' ? 'text-amber-300' : 'text-emerald-200'}>
+                <span className={sloGate.gateStatus === 'blocked' ? 'text-amber-300 print:text-gray-700' : 'text-emerald-200 print:text-gray-700'}>
                   {sloGate.gateStatus === 'blocked' ? 'Blocked' : 'Clear'}
                 </span>
               </div>
               <div>
                 Parcel resolution:{' '}
-                <span className="text-gray-200">
+                <span className="text-gray-200 print:text-gray-800">
                   {formatPercent(sloGate.parcelResolution.actual)} / target {formatPercent(sloGate.parcelResolution.target)} ({formatSloStatus(sloGate.parcelResolution.status)})
                 </span>
               </div>
               <div>
                 Evidence recovery:{' '}
-                <span className="text-gray-200">
+                <span className="text-gray-200 print:text-gray-800">
                   {formatPercent(sloGate.evidenceRecovery.actual)} / target {formatPercent(sloGate.evidenceRecovery.target)} ({formatSloStatus(sloGate.evidenceRecovery.status)})
                 </span>
               </div>
               <div>
                 Median latency:{' '}
-                <span className="text-gray-200">
+                <span className="text-gray-200 print:text-gray-800">
                   {formatMs(sloGate.medianLatencyMs.actual)} / target {formatMs(sloGate.medianLatencyMs.target)} ({formatSloStatus(sloGate.medianLatencyMs.status)})
                 </span>
               </div>
               <div>
-                Window: <span className="text-gray-200">{sloGate.totalRuns} runs (max {sloGate.windowSize})</span>
+                Window: <span className="text-gray-200 print:text-gray-800">{sloGate.totalRuns} runs (max {sloGate.windowSize})</span>
               </div>
             </div>
             {sloGate.gateReasons && sloGate.gateReasons.length > 0 && (
-              <div className="mt-3 space-y-1 text-[11px] text-amber-300">
+              <div className="mt-3 space-y-1 text-[11px] text-amber-300 print:text-gray-700">
                 {sloGate.gateReasons.slice(0, 3).map((reason, idx) => (
                   <div key={`slo-reason-${idx}`}>{reason}</div>
                 ))}
@@ -440,45 +512,45 @@ export const ReportView: React.FC<Props> = ({ report }) => {
         )}
 
         {compliance && (
-          <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">
-            <p className="text-[11px] uppercase tracking-wide text-gray-500">Compliance Gate</p>
-            <div className="mt-2 space-y-2 text-gray-400">
+          <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">Compliance Gate</p>
+            <div className="mt-2 space-y-2 text-gray-400 print:text-gray-700">
               <div>
-                Mode: <span className="text-gray-200">{compliance.mode}</span>
+                Mode: <span className="text-gray-200 print:text-gray-800">{compliance.mode}</span>
               </div>
               {typeof compliance.zeroCostMode === "boolean" && (
                 <div>
                   Zero-cost mode:{" "}
-                  <span className="text-gray-200">{compliance.zeroCostMode ? "enabled" : "disabled"}</span>
+                  <span className="text-gray-200 print:text-gray-800">{compliance.zeroCostMode ? "enabled" : "disabled"}</span>
                 </div>
               )}
               {compliance.gateStatus === "signoff_required" && (
-                <div className="text-amber-300">
+                <div className="text-amber-300 print:text-gray-700">
                   Sign-off required before rollout. Set approver + date in compliance policy.
                 </div>
               )}
               {compliance.reviewRequired && (
-                <div className="text-amber-300">
+                <div className="text-amber-300 print:text-gray-700">
                   Compliance review required{compliance.reviewItems?.length ? ` (${compliance.reviewItems.length})` : ""}.
                 </div>
               )}
               {compliance.blockedSources.length > 0 && (
-                <div className="text-amber-300">
+                <div className="text-amber-300 print:text-gray-700">
                   Blocked sources: {compliance.blockedSources.length}
                 </div>
               )}
             </div>
             {compliance.blockedSources.length > 0 && (
-              <div className="mt-3 space-y-1 text-gray-400">
+              <div className="mt-3 space-y-1 text-gray-400 print:text-gray-700">
                 {compliance.blockedSources.slice(0, 6).map((entry, idx) => (
-                  <div key={`${entry.uri}-${idx}`} className="text-[11px] text-gray-400">
+                  <div key={`${entry.uri}-${idx}`} className="text-[11px] text-gray-400 print:text-gray-600">
                     {entry.domain} — {entry.reason}
                   </div>
                 ))}
               </div>
             )}
             {compliance.reviewItems && compliance.reviewItems.length > 0 && (
-              <div className="mt-3 space-y-1 text-[11px] text-gray-400">
+              <div className="mt-3 space-y-1 text-[11px] text-gray-400 print:text-gray-700">
                 {compliance.reviewItems.slice(0, 6).map((entry, idx) => (
                   <div key={`${entry.datasetTitle || "review"}-${idx}`}>
                     {(entry.datasetTitle || entry.datasetId || "Dataset")} — {entry.reason}
@@ -490,8 +562,8 @@ export const ReportView: React.FC<Props> = ({ report }) => {
         )}
 
         {hasDatasetCompliance && (
-          <div className="mt-10 rounded-lg border border-gray-800 bg-black/20 p-4 text-xs text-gray-300">
-            <p className="text-[11px] uppercase tracking-wide text-gray-500">Dataset Compliance</p>
+          <div className="mt-10 rounded-lg border border-gray-800 bg-black/20 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">Dataset Compliance</p>
             <div className="mt-3 space-y-3">
               {datasetCompliance.map((entry, index) => {
                 const portalLabel = formatPortalLabel(entry.portalUrl);
@@ -499,14 +571,14 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                 const accessConstraints = entry.accessConstraints?.filter(Boolean) || [];
                 const termsText = entry.termsOfService ? truncateText(entry.termsOfService, 160) : null;
                 return (
-                  <div key={`${entry.datasetId || entry.title}-${index}`} className="rounded border border-gray-800 bg-gray-900/40 p-3">
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-white">
+                  <div key={`${entry.datasetId || entry.title}-${index}`} className="rounded border border-gray-800 bg-gray-900/40 p-3 print:bg-white print:border-gray-300">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-white print:text-black">
                       {datasetLink ? (
                         <a
                           href={datasetLink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                          className="inline-flex items-center gap-1 text-cyber-blue hover:underline print:text-black print:underline"
                         >
                           <ExternalLink className="w-3 h-3" />
                           {entry.title}
@@ -515,32 +587,32 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                         <span>{entry.title}</span>
                       )}
                     </div>
-                    <div className="mt-2 space-y-1 text-gray-400">
+                    <div className="mt-2 space-y-1 text-gray-400 print:text-gray-700">
                       {entry.complianceAction && entry.complianceAction !== "allow" && (
-                        <div className="text-amber-300">
+                        <div className="text-amber-300 print:text-gray-700">
                           Compliance: {entry.complianceAction.toUpperCase()}
                         </div>
                       )}
                       {entry.attribution && (
                         <div>
-                          Attribution: <span className="text-gray-300">{entry.attribution}</span>
+                          Attribution: <span className="text-gray-300 print:text-gray-800">{entry.attribution}</span>
                           {entry.attributionRequired && entry.attributionStatus !== "ok" && (
-                            <span className="ml-2 text-amber-300">Missing required fields</span>
+                            <span className="ml-2 text-amber-300 print:text-gray-700">Missing required fields</span>
                           )}
                         </div>
                       )}
                       {portalLabel && (
-                        <div>Portal: <span className="text-gray-300">{portalLabel}</span></div>
+                        <div>Portal: <span className="text-gray-300 print:text-gray-800">{portalLabel}</span></div>
                       )}
                       {entry.license && (
                         <div>
-                          License: <span className="text-gray-300">{entry.license}</span>
+                          License: <span className="text-gray-300 print:text-gray-800">{entry.license}</span>
                           {entry.licenseUrl && (
                             <a
                               href={entry.licenseUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                              className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline print:text-black print:underline"
                             >
                               <ExternalLink className="w-3 h-3" />
                               Link
@@ -550,13 +622,13 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                       )}
                       {(termsText || entry.termsUrl) && (
                         <div>
-                          Terms: {termsText && <span className="text-gray-300">{termsText}</span>}
+                          Terms: {termsText && <span className="text-gray-300 print:text-gray-800">{termsText}</span>}
                           {entry.termsUrl && (
                             <a
                               href={entry.termsUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                              className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline print:text-black print:underline"
                             >
                               <ExternalLink className="w-3 h-3" />
                               Link
@@ -566,11 +638,11 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                       )}
                       {accessConstraints.length > 0 && (
                         <div>
-                          Access: <span className="text-gray-300">{accessConstraints.join(', ')}</span>
+                          Access: <span className="text-gray-300 print:text-gray-800">{accessConstraints.join(', ')}</span>
                         </div>
                       )}
                       {(entry.lastUpdated || entry.retrievedAt) && (
-                        <div className="text-gray-500">
+                        <div className="text-gray-500 print:text-gray-600">
                           {entry.lastUpdated && <span>Updated: {entry.lastUpdated}</span>}
                           {entry.lastUpdated && entry.retrievedAt && <span> • </span>}
                           {entry.retrievedAt && <span>Retrieved: {entry.retrievedAt}</span>}
@@ -584,9 +656,40 @@ export const ReportView: React.FC<Props> = ({ report }) => {
           </div>
         )}
 
-        <div className="mt-12 pt-6 border-t border-gray-800 text-xs text-gray-500 font-mono">
+        {hasBibliography && (
+          <div className="mt-10 rounded-lg border border-gray-800 bg-black/20 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">Bibliography</p>
+            <div className="mt-3 space-y-2">
+              {bibliographySources.map((source, index) => (
+                <div key={`${source}-${index}`} className="flex items-start gap-2">
+                  <span className="text-gray-500 print:text-gray-600">{index + 1}.</span>
+                  {source.startsWith('http') ? (
+                    <a
+                      href={source}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all text-cyber-blue hover:underline print:text-black print:underline"
+                    >
+                      {source}
+                    </a>
+                  ) : (
+                    <span className="break-all text-gray-300 print:text-gray-800">{source}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-12 pt-6 border-t border-gray-800 text-xs text-gray-500 font-mono print:border-gray-300 print:text-gray-600">
           <p>METHOD AUDIT: {report.provenance.methodAudit}</p>
           <p>TOTAL SOURCES INDEXED: {report.provenance.totalSources}</p>
+        </div>
+        <div className="hidden print:block mt-6 pt-4 border-t border-gray-300 text-[10px] text-gray-600">
+          <div className="flex items-center justify-between">
+            <span>DeepSearch Overseer • PDF Export</span>
+            <span>{formatDisplayDate(printDate)}</span>
+          </div>
         </div>
       </div>
     </div>

@@ -48,6 +48,54 @@
       ::-webkit-scrollbar-thumb:hover {
         background: #444;
       }
+      @page {
+        size: letter;
+        margin: 0.5in;
+      }
+      @media print {
+        html, body {
+          background: #ffffff !important;
+          color: #111111 !important;
+        }
+        body {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        body * {
+          visibility: hidden;
+        }
+        .report-print,
+        .report-print * {
+          visibility: visible;
+        }
+        .report-print {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100%;
+        }
+        .report-print img,
+        .report-print svg {
+          max-width: 100% !important;
+          height: auto !important;
+        }
+        .report-print table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        .report-print th,
+        .report-print td {
+          word-break: break-word;
+        }
+        .print-avoid-break {
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        .print-page-break {
+          break-before: page;
+          page-break-before: always;
+        }
+      }
     </style>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <script type="importmap">
