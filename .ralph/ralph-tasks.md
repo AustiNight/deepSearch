@@ -13,7 +13,7 @@
   - [x] Define a ground-truth calibration plan for thresholds/confidence (sample addresses, expected parcel IDs, rubric) and tune scoring against it
   - [x] Implement address normalization rules (USPS abbreviations, directional variants, unit handling) and reuse normalized variants across all queries
   - [x] Implement parcel-resolution workflow: geocode to lat/lon, resolve parcel ID via CAD/assessor lookup, and fall back to GIS parcel-layer spatial join
-  - [ ] Define deterministic parcel-resolution precedence and tie-break rules (multi-parcel matches, ambiguous address points) and log collisions in `DataGap`
+  - [x] Define deterministic parcel-resolution precedence and tie-break rules (multi-parcel matches, ambiguous address points) and log collisions in `DataGap`
   - [ ] Define explicit failure taxonomies for geocode failure, parcel not found, and data unavailable; map each to user-visible messaging and `DataGap`
   - [ ] Add dataset discovery for open-data portals (Socrata/DCAT/ArcGIS) and persist dataset metadata (title, source, last updated, license)
   - [ ] Implement an evidence-recovery pass when thresholds are not met, prioritizing authoritative property records and GIS layers with retry/backoff, caching, and error taxonomy

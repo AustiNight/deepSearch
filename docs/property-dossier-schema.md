@@ -295,6 +295,16 @@ If `dataCurrency.ageDays > maxAgeDays`, add a `DataGap` with `status=stale` for 
 - For derived values, include `ClaimCitation.derivation` and cite every input used in the derivation.
 - If conflicting authoritative values cannot be resolved, keep the highest-precedence value, and add a `DataGap` with `status=conflict`.
 
+### Parcel Resolution Precedence and Tie-Breaks
+- Precedence order: assessor/CAD parcel lookup → GIS parcel layer spatial join. Do not override an ambiguous assessor result with GIS.
+- When multiple assessor candidates exist, apply deterministic tie-breaks in this order:
+  - Exact situs address match to the normalized address variant.
+  - Normalized address match (case/format normalized).
+  - Presence of a `parcelId` (over account-only matches).
+  - Higher candidate confidence score.
+- When multiple GIS parcels intersect the address point, do not select any parcel.
+- If tie-breaks still yield multiple candidates, leave `/subject/parcelId` unset and add a `DataGap` with `status=ambiguous` referencing the parcel sources.
+
 ### PropertyDossier (Root)
 | Field | Source precedence | Derivation steps | Conflict resolution |
 | --- | --- | --- | --- |
