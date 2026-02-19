@@ -37,7 +37,7 @@
   - [x] Add E2E golden-fixture tests for address reports using frozen datasets
   - [x] Add migration/backfill plan for cached reports and dataset index when schemas change
   - [x] Add security review for key storage, logging, and redaction in telemetry
-  - [ ] Define performance constraints (max external calls, portal discovery caps, latency budgets) and enforce with guardrails
+  - [x] Define performance constraints (max external calls, portal discovery caps, latency budgets) and enforce with guardrails
   - [ ] Acceptance: evidence threshold constants are defined and enforced (with tests that fail/pass around the thresholds), address reports include a populated `PropertyDossier` with required fields when available, primary-record coverage (or explicit unavailability) is shown, confidence tags render for each section, and Data Gaps include exact source pointers
 
 - [ ] Epic: Export Report to PDF

@@ -44,6 +44,13 @@ Evidence recovery enforces explicit retry and time budgets to limit spend and av
 - Priority stopping: run higher-scoring recovery queries first (score >= 4); skip low-priority queries once authoritative thresholds are satisfied.
 - Fallback cap: at most 2 low-priority recovery queries are attempted after priority queries.
 
+## Performance Guardrails
+Performance constraints cap external calls, portal discovery volume, and end-to-end latency.
+
+- Max external calls per run: `MAX_EXTERNAL_CALLS_PER_RUN` (default 60). Each `performDeepResearch` consumes one unit. Once the cap is reached, remaining external calls are skipped and the run continues to synthesis with existing findings.
+- Total run latency budget: `RUN_TOTAL_TIME_BUDGET_MS` (default 120,000 ms). When exceeded, new external calls are skipped and the run finalizes with current evidence.
+- Portal discovery caps: `OPEN_DATA_DISCOVERY_MAX_DATASETS` (default 25 datasets per portal query) and `OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES` (default 10 ArcGIS item metadata fetches per discovery pass). Enforced in `services/openDataDiscovery.ts`.
+
 ## Service Level Objectives (SLOs) + Release Gate
 SLOs are evaluated over a rolling window of recent runs and used as a release gate. The SLO summary is attached to `report.provenance.sloGate`.
 

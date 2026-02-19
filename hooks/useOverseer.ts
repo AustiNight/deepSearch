@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -28,7 +28,9 @@ import {
   EARLY_STOP_NEW_SOURCES,
   MIN_EVIDENCE_TOTAL_SOURCES,
   MIN_EVIDENCE_AUTHORITATIVE_SOURCES,
-  MIN_EVIDENCE_AUTHORITY_SCORE
+  MIN_EVIDENCE_AUTHORITY_SCORE,
+  MAX_EXTERNAL_CALLS_PER_RUN,
+  RUN_TOTAL_TIME_BUDGET_MS
 } from '../constants';
 import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
@@ -1557,6 +1559,8 @@ export const useOverseer = () => {
     const envMin = resolveNumber(process.env.MIN_AGENT_COUNT, MIN_AGENT_COUNT);
     const envMax = resolveNumber(process.env.MAX_AGENT_COUNT, MAX_AGENT_COUNT);
     const envMaxMethod = resolveNumber(process.env.MAX_METHOD_AGENTS, MAX_METHOD_AGENTS);
+    const envMaxExternalCalls = resolveNumber(process.env.MAX_EXTERNAL_CALLS_PER_RUN, MAX_EXTERNAL_CALLS_PER_RUN);
+    const envLatencyBudgetMs = resolveNumber(process.env.RUN_TOTAL_TIME_BUDGET_MS, RUN_TOTAL_TIME_BUDGET_MS);
 
     const minAgents = Math.max(1, resolveNumber(runConfig?.minAgents, envMin));
     const maxAgents = Math.max(minAgents, resolveNumber(runConfig?.maxAgents, envMax));
@@ -1607,6 +1611,19 @@ export const useOverseer = () => {
     let taxonomyProposalBudget = Math.min(4, maxAgents);
     let taxonomyGrowthQueue = Promise.resolve();
 
+    const performanceBudget = {
+      maxExternalCalls: envMaxExternalCalls,
+      latencyBudgetMs: envLatencyBudgetMs
+    };
+    const runDeadline = runStartedAt + performanceBudget.latencyBudgetMs;
+    const performanceState = {
+      externalCallsUsed: 0,
+      externalCallBudgetExceeded: false,
+      latencyBudgetExceeded: false,
+      loggedExternalCallGuard: false,
+      loggedLatencyGuard: false
+    };
+
     const registerMethodQuery = (
       query: string,
       meta: { source: string; verticalId?: string; subtopicId?: string; methodId?: string; tacticId?: string; template?: string }
@@ -1638,6 +1655,89 @@ export const useOverseer = () => {
       type: LogEntry['type'] = 'info'
     ) => {
       addLog(overseerId, overseer.name, buildNarrativeMessage(phase, decision, action, outcome), type);
+    };
+
+    type DeepResearchResult = {
+      text: string;
+      sources: NormalizedSource[];
+      skipped?: boolean;
+      skipReason?: 'latency_budget' | 'external_call_budget';
+    };
+
+    const recordPerformanceGuardrail = (reason: string, detail?: string) => {
+      logOverseer(
+        'PERF GUARDRAIL',
+        reason,
+        'skip external call',
+        detail,
+        'warning'
+      );
+    };
+
+    const formatGuardDetail = (phase: string, query?: string) => {
+      if (!query) return phase;
+      const trimmed = query.length > 90 ? `${query.slice(0, 87)}...` : query;
+      return `${phase} | ${trimmed}`;
+    };
+
+    const canUseExternalCall = (phase: string, query?: string) => {
+      if (Date.now() >= runDeadline) {
+        performanceState.latencyBudgetExceeded = true;
+        if (!performanceState.loggedLatencyGuard) {
+          recordPerformanceGuardrail(
+            'latency budget exceeded',
+            `budget ${performanceBudget.latencyBudgetMs}ms`
+          );
+          performanceState.loggedLatencyGuard = true;
+        }
+        return { allowed: false, reason: 'latency_budget' as const, detail: formatGuardDetail(phase, query) };
+      }
+      if (performanceState.externalCallsUsed >= performanceBudget.maxExternalCalls) {
+        performanceState.externalCallBudgetExceeded = true;
+        if (!performanceState.loggedExternalCallGuard) {
+          recordPerformanceGuardrail(
+            'external call budget exceeded',
+            `cap ${performanceBudget.maxExternalCalls} calls`
+          );
+          performanceState.loggedExternalCallGuard = true;
+        }
+        return { allowed: false, reason: 'external_call_budget' as const, detail: formatGuardDetail(phase, query) };
+      }
+      performanceState.externalCallsUsed += 1;
+      return { allowed: true, reason: null, detail: undefined };
+    };
+
+    const markAgentSkipped = (agentId: string, agentName: string, reason: 'latency_budget' | 'external_call_budget', phase: string, query?: string) => {
+      const detail = formatGuardDetail(phase, query);
+      updateAgent(agentId, {
+        status: AgentStatus.FAILED,
+        reasoning: [`performance guardrail: ${reason}`, detail]
+      });
+      addLog(agentId, agentName, `Skipped external call (${reason}).`, 'warning');
+    };
+
+    const runDeepResearchWithGuards = async (
+      agentId: string,
+      agentName: string,
+      phase: string,
+      focus: string,
+      query: string,
+      logFn: (msg: string) => void,
+      options?: { modelOverrides?: ModelOverrides; role?: ModelRole; l1Role?: ModelRole; l2Role?: ModelRole; signal?: AbortSignal }
+    ): Promise<DeepResearchResult> => {
+      const guard = canUseExternalCall(phase, query);
+      if (!guard.allowed) {
+        markAgentSkipped(agentId, agentName, guard.reason, phase, query);
+        return { text: '', sources: [], skipped: true, skipReason: guard.reason };
+      }
+      const result = await runSafely(performDeepResearch(
+        agentName,
+        focus,
+        query,
+        logFn,
+        options
+      ));
+      return result as DeepResearchResult;
     };
 
     const recordEvidenceGate = (
@@ -1848,13 +1948,19 @@ export const useOverseer = () => {
             addAgent(agent);
             addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-            const result = await runSafely(performDeepResearch(
+            const result = await runDeepResearchWithGuards(
+              agentId,
               agent.name,
+              'PHASE 0B: GENERAL DISCOVERY',
               'General discovery',
               query,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
               { modelOverrides, signal }
-            ));
+            );
+            if (result.skipped) {
+              usedQueries.add(query);
+              continue;
+            }
 
             updateAgent(agentId, {
               status: AgentStatus.COMPLETE,
@@ -2171,13 +2277,19 @@ export const useOverseer = () => {
           addAgent(agent);
           addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-          const result = await runSafely(performDeepResearch(
+          const result = await runDeepResearchWithGuards(
+            agentId,
             agent.name,
+            'PHASE 0.5: METHOD DISCOVERY',
             'Method discovery',
             query,
             (msg) => addLog(agentId, agent.name, msg, 'info'),
             { modelOverrides, role: 'method_discovery', signal }
-          ));
+          );
+          if (result.skipped) {
+            usedQueries.add(query);
+            return;
+          }
 
           enqueueTaxonomyGrowth({
             agentId,
@@ -2397,13 +2509,18 @@ export const useOverseer = () => {
             addLog(agentId, agent.name, `Deployed for: ${sector.focus}`, 'info');
 
             // The "10x" Loop: Broad -> Analyze -> verify -> verification searches
-            const result = await runSafely(performDeepResearch(
+            const result = await runDeepResearchWithGuards(
+              agentId,
               agent.name,
+              `PHASE 2: DEEP DRILL (ROUND ${round}/${maxRounds})`,
               sector.focus,
               sector.initialQuery,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
               { modelOverrides, l1Role: 'deep_research_l1', l2Role: 'deep_research_l2', signal }
-            ));
+            );
+            if (result.skipped) {
+              return;
+            }
             roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
 
             enqueueTaxonomyGrowth({
@@ -2467,13 +2584,18 @@ export const useOverseer = () => {
             addAgent(agent);
             addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-            const result = await runSafely(performDeepResearch(
+            const result = await runDeepResearchWithGuards(
+              agentId,
               agent.name,
+              `PHASE 2B: METHOD AUDIT (ROUND ${round}/${maxRounds})`,
               'Independent method audit',
               query,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
               { modelOverrides, role: 'method_audit', signal }
-            ));
+            );
+            if (result.skipped) {
+              return;
+            }
             roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
             enqueueTaxonomyGrowth({
               agentId,
@@ -2617,36 +2739,48 @@ export const useOverseer = () => {
          
          const gapSources: string[] = [];
          // Use Deep Research even for the gap fill
-         const gapResult = await runSafely(performDeepResearch(
-             gapAgent.name, 
-             critique.newMethod.task, 
-             critique.newMethod.query, 
+         const gapResult = await runDeepResearchWithGuards(
+             gapAgentId,
+             gapAgent.name,
+             'PHASE 3: RED TEAM',
+             critique.newMethod.task,
+             critique.newMethod.query,
              (msg) => addLog(gapAgentId, gapAgent.name, msg, 'info'),
              { modelOverrides, role: 'gap_hunter', signal }
-         ));
-         gapSources.push(...gapResult.sources.map(s => s.uri).filter(Boolean));
-
-         enqueueTaxonomyGrowth({
-           agentId: gapAgentId,
-           agentName: gapAgent.name,
-           focus: critique.newMethod.task,
-           resultText: gapResult.text || ''
-         });
-
-         const gapFinding = {
-             source: gapAgent.name,
-             content: gapResult.text,
-             confidence: 0.9,
-             rawSources: gapResult.sources
-         };
-         updateAgent(gapAgentId, { status: AgentStatus.COMPLETE });
-         pushFinding(gapFinding as any);
-         recordExhaustionRound(
-           exhaustionTracker,
-           'gap_fill',
-           [critique.newMethod.query],
-           gapSources
          );
+         if (gapResult.skipped) {
+           logOverseer(
+             'PHASE 3: RED TEAM',
+             'gap fill skipped',
+             'performance guardrail hit',
+             gapResult.skipReason || 'guardrail',
+             'warning'
+           );
+         } else {
+           gapSources.push(...gapResult.sources.map(s => s.uri).filter(Boolean));
+
+           enqueueTaxonomyGrowth({
+             agentId: gapAgentId,
+             agentName: gapAgent.name,
+             focus: critique.newMethod.task,
+             resultText: gapResult.text || ''
+           });
+
+           const gapFinding = {
+               source: gapAgent.name,
+               content: gapResult.text,
+               confidence: 0.9,
+               rawSources: gapResult.sources
+           };
+           updateAgent(gapAgentId, { status: AgentStatus.COMPLETE });
+           pushFinding(gapFinding as any);
+           recordExhaustionRound(
+             exhaustionTracker,
+             'gap_fill',
+             [critique.newMethod.query],
+             gapSources
+           );
+         }
       } else if (critique.newMethod) {
         logOverseer(
           'PHASE 3: RED TEAM',
@@ -2719,13 +2853,19 @@ export const useOverseer = () => {
             addAgent(agent);
             addLog(agentId, agent.name, `Deployed for: ${query}`, 'info');
 
-            const result = await runSafely(performDeepResearch(
+            const result = await runDeepResearchWithGuards(
+              agentId,
               agent.name,
+              'PHASE 3B: EXHAUSTION TEST',
               'Exhaustion test',
               query,
               (msg) => addLog(agentId, agent.name, msg, 'info'),
               { modelOverrides, role: 'exhaustion_scout', signal }
-            ));
+            );
+            if (result.skipped) {
+              usedQueries.add(query);
+              return;
+            }
             phase3BSources.push(...result.sources.map(s => s.uri).filter(Boolean));
             enqueueTaxonomyGrowth({
               agentId,
@@ -2893,7 +3033,7 @@ export const useOverseer = () => {
               }
 
               let attempt = 0;
-              let result: { text: string; sources: NormalizedSource[] } | null = null;
+              let result: DeepResearchResult | null = null;
               while (attempt < EVIDENCE_RECOVERY_MAX_ATTEMPTS) {
                 ensureActive();
                 if (Date.now() >= recoveryDeadline) {
@@ -2902,13 +3042,26 @@ export const useOverseer = () => {
                 }
                 attempt += 1;
                 try {
-                  result = await runSafely(performDeepResearch(
+                  result = await runDeepResearchWithGuards(
+                    agentId,
                     agentName,
+                    'PHASE 3C: EVIDENCE RECOVERY',
                     'Evidence recovery',
                     query,
                     (msg) => addLog(agentId, agentName, msg, 'info'),
                     { modelOverrides, l1Role: 'deep_research_l1', l2Role: 'deep_research_l2', signal }
-                  ));
+                  );
+                  if (result?.skipped) {
+                    const skipReason = result.skipReason || 'guardrail';
+                    logOverseer(
+                      'PHASE 3C: EVIDENCE RECOVERY',
+                      'recovery skipped',
+                      'performance guardrail hit',
+                      skipReason,
+                      'warning'
+                    );
+                    break;
+                  }
                 } catch (err: any) {
                   if (err?.name === 'AbortError') throw err;
                   result = null;
@@ -2923,6 +3076,13 @@ export const useOverseer = () => {
                   }
                   await wait(delay, signal);
                 }
+              }
+
+              if (result?.skipped) {
+                if (result.skipReason === 'latency_budget') {
+                  recoveryTimedOut = true;
+                }
+                break;
               }
 
               if (recoveryTimedOut) {
@@ -3396,6 +3556,26 @@ export const useOverseer = () => {
       }
       runMetrics.confidenceQuality = computeConfidenceQualityProxy(reportWithConfidence.sections, primaryRecordCoverage);
       runMetrics.runLatencyMs = Date.now() - runStartedAt;
+      runMetrics.performance = {
+        maxExternalCalls: performanceBudget.maxExternalCalls,
+        externalCallsUsed: performanceState.externalCallsUsed,
+        latencyBudgetMs: performanceBudget.latencyBudgetMs,
+        latencyBudgetExceeded: performanceState.latencyBudgetExceeded,
+        externalCallBudgetExceeded: performanceState.externalCallBudgetExceeded
+      };
+      if (performanceState.latencyBudgetExceeded || performanceState.externalCallBudgetExceeded) {
+        const reasons = [
+          performanceState.latencyBudgetExceeded ? 'latency budget hit' : null,
+          performanceState.externalCallBudgetExceeded ? 'external call cap hit' : null
+        ].filter(Boolean).join(' | ');
+        logOverseer(
+          'PHASE 4: PERF GUARDRAIL',
+          'performance guardrail triggered',
+          'report finalized with capped search',
+          reasons || undefined,
+          'warning'
+        );
+      }
       const portalErrors = getPortalErrorMetrics();
       if (portalErrors) {
         runMetrics.portalErrors = portalErrors;

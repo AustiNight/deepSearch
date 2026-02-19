@@ -194,6 +194,14 @@ export interface ConfidenceQualityMetrics {
   proxyScore: number;
 }
 
+export interface PerformanceBudgetMetrics {
+  maxExternalCalls: number;
+  externalCallsUsed: number;
+  latencyBudgetMs: number;
+  latencyBudgetExceeded?: boolean;
+  externalCallBudgetExceeded?: boolean;
+}
+
 export interface RunMetrics {
   runLatencyMs?: number;
   parcelResolution?: ParcelResolutionMetrics;
@@ -201,6 +209,7 @@ export interface RunMetrics {
   evidenceGates?: EvidenceGateDecision[];
   confidenceQuality?: ConfidenceQualityMetrics;
   portalErrors?: PortalErrorMetrics;
+  performance?: PerformanceBudgetMetrics;
 }
 
 export type SloMetricStatus = 'met' | 'missed' | 'not_applicable';

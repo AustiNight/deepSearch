@@ -28,6 +28,11 @@ export const SLO_PARCEL_RESOLUTION_SUCCESS_RATE = 0.85;
 export const SLO_EVIDENCE_RECOVERY_SUCCESS_RATE = 0.7;
 export const SLO_MEDIAN_LATENCY_MS = 60000;
 
+export const MAX_EXTERNAL_CALLS_PER_RUN = 60;
+export const RUN_TOTAL_TIME_BUDGET_MS = 1000 * 120;
+export const OPEN_DATA_DISCOVERY_MAX_DATASETS = 25;
+export const OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES = 10;
+
 export const METHOD_TEMPLATES_GENERAL = [
   '{topic} official documentation',
   '{topic} primary source',

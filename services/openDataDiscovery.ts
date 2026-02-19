@@ -1,9 +1,10 @@
 import type { DatasetComplianceEntry, IsoDateString, IsoDateTimeString, OpenDataPortalType, OpenDatasetIndex, OpenDatasetMetadata } from "../types";
+import { OPEN_DATA_DISCOVERY_MAX_DATASETS, OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES } from "../constants";
 import { recordPortalError } from "./portalErrorTelemetry";
 
 const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
 const OPEN_DATA_INDEX_STORAGE_KEY = "overseer_open_data_index";
-const DEFAULT_LIMIT = 25;
+const DEFAULT_LIMIT = Math.min(25, OPEN_DATA_DISCOVERY_MAX_DATASETS);
 
 const hasLocalStorage = () => typeof window !== "undefined" && !!window.localStorage;
 
@@ -380,6 +381,7 @@ const discoverArcGisDatasets = async (portalUrl: string, query: string, limit: n
   if (!response.ok || !response.data) return [];
   const results = Array.isArray(response.data?.results) ? response.data.results : [];
   const datasets: OpenDatasetMetadata[] = [];
+  let itemFetches = 0;
 
   for (const entry of results) {
     const itemId = asString(entry?.id);
@@ -401,7 +403,8 @@ const discoverArcGisDatasets = async (portalUrl: string, query: string, limit: n
     let licenseInfo = { ...entryLicenseInfo };
     let termsInfo = { ...entryTermsInfo };
 
-    if (itemId) {
+    if (itemId && itemFetches < OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES) {
+      itemFetches += 1;
       const itemUrl = `${base}/sharing/rest/content/items/${itemId}?f=json`;
       const itemResponse = await safeFetchJson(itemUrl, { portalType: "arcgis", portalUrl: base });
       if (itemResponse.ok && itemResponse.data) {
@@ -546,7 +549,8 @@ export type OpenDataDiscoveryResult = {
 export const discoverOpenDataDatasets = async (input: OpenDataDiscoveryInput): Promise<OpenDataDiscoveryResult> => {
   const portalUrl = normalizePortalUrl(input.portalUrl);
   const portalType = input.portalType && input.portalType !== "unknown" ? input.portalType : detectPortalType(portalUrl);
-  const limit = typeof input.limit === "number" && input.limit > 0 ? Math.floor(input.limit) : DEFAULT_LIMIT;
+  const requestedLimit = typeof input.limit === "number" && input.limit > 0 ? Math.floor(input.limit) : DEFAULT_LIMIT;
+  const limit = Math.max(1, Math.min(requestedLimit, OPEN_DATA_DISCOVERY_MAX_DATASETS));
   let datasets: OpenDatasetMetadata[] = [];
 
   if (portalType === "socrata") {
