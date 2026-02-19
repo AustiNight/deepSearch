@@ -45,6 +45,7 @@ export interface ReportSection {
   title: string;
   content: string;
   sources: string[];
+  confidence?: number;
 }
 
 export type VisualizationType = 'bar' | 'line' | 'area' | 'image';
@@ -120,6 +121,7 @@ export interface FinalReport {
     primaryRecordCoverage?: PrimaryRecordCoverage;
   };
   schemaVersion?: number;
+  propertyDossier?: PropertyDossier;
 }
 
 export type IsoDateString = string;

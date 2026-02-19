@@ -24,6 +24,20 @@ const PRIMARY_RECORD_LABELS: Record<string, string> = {
 const formatRecordTypeLabel = (recordType: string) =>
   PRIMARY_RECORD_LABELS[recordType] || recordType.replace(/_/g, ' ');
 
+const formatConfidenceLabel = (confidence?: number) => {
+  if (typeof confidence !== 'number') return null;
+  if (confidence >= 0.8) return 'High';
+  if (confidence >= 0.6) return 'Medium';
+  return 'Low';
+};
+
+const confidenceBadgeClasses = (confidence?: number) => {
+  if (typeof confidence !== 'number') return 'text-gray-400 bg-gray-800/40 border-gray-700';
+  if (confidence >= 0.8) return 'text-emerald-200 bg-emerald-500/15 border-emerald-500/40';
+  if (confidence >= 0.6) return 'text-yellow-200 bg-yellow-500/15 border-yellow-500/40';
+  return 'text-red-200 bg-red-500/15 border-red-500/40';
+};
+
 const isTableDivider = (line: string) => {
   const trimmed = line.trim();
   if (!trimmed) return false;
@@ -221,9 +235,16 @@ export const ReportView: React.FC<Props> = ({ report }) => {
 
         {report.sections.map((section, idx) => (
           <div key={idx} className="mb-8">
-            <h2 className="text-xl font-bold text-white mb-4 border-b border-gray-800 pb-2">
-              {idx + 1}. {section.title}
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-2 mb-4">
+              <h2 className="text-xl font-bold text-white">
+                {idx + 1}. {section.title}
+              </h2>
+              {typeof section.confidence === 'number' && (
+                <span className={`text-xs px-2 py-1 rounded-full border ${confidenceBadgeClasses(section.confidence)}`}>
+                  Confidence: {(section.confidence * 100).toFixed(0)}% ({formatConfidenceLabel(section.confidence)})
+                </span>
+              )}
+            </div>
             <div className="mb-4 space-y-4">{renderMarkdownBlocks(section.content)}</div>
             {section.sources.length > 0 ? (
               <div className="bg-black/20 p-3 rounded text-xs">

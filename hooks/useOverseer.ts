@@ -3,6 +3,7 @@ import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, L
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
+import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from '../services/propertyDossier';
 import {
   INITIAL_OVERSEER_ID,
   METHOD_TEMPLATES_GENERAL,
@@ -3223,8 +3224,9 @@ export const useOverseer = () => {
           kind: 'unknown'
         };
       });
+      const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike);
       const primaryRecordCoverage = addressLike
-        ? evaluatePrimaryRecordCoverage(reportSourceDetails, buildJurisdictionFromSlots(slotValuesAny, addressLike))
+        ? evaluatePrimaryRecordCoverage(reportSourceDetails, jurisdiction)
         : undefined;
       if (primaryRecordCoverage) {
         reportCandidate = {
@@ -3266,7 +3268,26 @@ export const useOverseer = () => {
         );
       }
 
-      setReportSafe(reportCandidate);
+      const citationRegistry = buildCitationRegistry(reportSourceDetails);
+      const propertyDossier = addressLike
+        ? buildPropertyDossier({
+            topic,
+            addressLike,
+            jurisdiction,
+            sections: reportCandidate.sections,
+            registry: citationRegistry,
+            primaryRecordCoverage
+          })
+        : undefined;
+      const reportWithConfidence = {
+        ...reportCandidate,
+        sections: applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier?.dataGaps || [])
+      };
+
+      setReportSafe({
+        ...reportWithConfidence,
+        propertyDossier: propertyDossier ?? undefined
+      });
       
       updateAgent(overseerId, { status: AgentStatus.COMPLETE });
       logOverseer(
