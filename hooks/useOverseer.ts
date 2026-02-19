@@ -24,6 +24,7 @@ import {
 } from '../constants';
 import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
+import { normalizeAddressVariants } from '../services/addressNormalization';
 
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
@@ -734,6 +735,13 @@ const normalizeHandle = (topic: string) => {
 
 const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boolean) => {
   const cleaned = topic.trim();
+  const addressVariants = addressLike ? uniqueList(normalizeAddressVariants(cleaned)) : [];
+  const addressSlotValues = addressLike
+    ? (addressVariants.length > 0 ? addressVariants : [cleaned])
+    : [];
+  const topicVariants = addressLike
+    ? (addressSlotValues.length > 0 ? addressSlotValues : [cleaned])
+    : [cleaned];
   const domain = extractDomainFromTopic(cleaned);
   const city = extractCityFromTopic(cleaned);
   const county = extractCountyFromTopic(cleaned);
@@ -750,7 +758,7 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
   const cityExpanded = cityMetro;
 
   return {
-    topic: [cleaned],
+    topic: topicVariants,
     name: names,
     handle: handle ? [handle] : [],
     hometown: city ? [city] : [],
@@ -768,7 +776,7 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
     countyExpanded: countyRegion,
     propertyAuthorityPrimary: propertyAuthorityTerms.primary,
     propertyAuthoritySecondary: propertyAuthorityTerms.secondary,
-    address: addressLike ? [cleaned] : [],
+    address: addressSlotValues,
     event: [cleaned],
     concept: [cleaned],
     alternative: [],
@@ -788,31 +796,35 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
 };
 
 const buildAddressDirectQueries = (slots: Record<string, unknown>) => {
-  const address = Array.isArray(slots.address) ? String(slots.address[0] || '') : '';
-  if (!address) return [];
+  const addresses = Array.isArray(slots.address)
+    ? slots.address.map(value => String(value || '').trim()).filter(Boolean)
+    : [];
+  if (addresses.length === 0) return [];
   const city = Array.isArray(slots.city) ? String(slots.city[0] || '') : '';
   const county = Array.isArray(slots.countyPrimary) ? String(slots.countyPrimary[0] || '') : '';
   const state = Array.isArray(slots.state) ? String(slots.state[0] || '') : '';
   const authorityPrimary = Array.isArray(slots.propertyAuthorityPrimary) ? String(slots.propertyAuthorityPrimary[0] || '') : '';
   const authoritySecondary = Array.isArray(slots.propertyAuthoritySecondary) ? String(slots.propertyAuthoritySecondary[0] || '') : '';
-  const addressQuoted = `"${address}"`;
 
-  return uniqueList([
-    `${addressQuoted} "property search"`,
-    `${addressQuoted} "property card"`,
-    `${addressQuoted} parcel`,
-    `${addressQuoted} "parcel map"`,
-    `${addressQuoted} zoning`,
-    `${addressQuoted} permits`,
-    `${addressQuoted} "code violations"`,
-    `${addressQuoted} "tax records"`,
-    `${addressQuoted} "assessment history"`,
-    `${addressQuoted} GIS`,
-    `${city ? `"${city}"` : ''} ${authorityPrimary} ${address}`.trim(),
-    `${county ? `"${county}"` : ''} ${authorityPrimary} ${address}`.trim(),
-    `${county ? `"${county}"` : ''} ${authoritySecondary} ${address}`.trim(),
-    `${addressQuoted} ${city ? `"${city}"` : ''} ${state}`.trim()
-  ]).filter(Boolean);
+  return uniqueList(addresses.flatMap((address) => {
+    const addressQuoted = `"${address}"`;
+    return [
+      `${addressQuoted} "property search"`,
+      `${addressQuoted} "property card"`,
+      `${addressQuoted} parcel`,
+      `${addressQuoted} "parcel map"`,
+      `${addressQuoted} zoning`,
+      `${addressQuoted} permits`,
+      `${addressQuoted} "code violations"`,
+      `${addressQuoted} "tax records"`,
+      `${addressQuoted} "assessment history"`,
+      `${addressQuoted} GIS`,
+      `${city ? `"${city}"` : ''} ${authorityPrimary} ${address}`.trim(),
+      `${county ? `"${county}"` : ''} ${authorityPrimary} ${address}`.trim(),
+      `${county ? `"${county}"` : ''} ${authoritySecondary} ${address}`.trim(),
+      `${addressQuoted} ${city ? `"${city}"` : ''} ${state}`.trim()
+    ];
+  })).filter(Boolean);
 };
 
 const buildTacticPacks = (
@@ -1383,7 +1395,10 @@ export const useOverseer = () => {
 
       if (classification.isUncertain) {
         const generalTemplates = listTacticsForVertical(taxonomy, 'general_discovery');
-        const expanded = expandTacticTemplates(generalTemplates, { topic }, { allowUnresolved: false });
+        const discoveryTopicVariants = isAddressLike(topic)
+          ? normalizeAddressVariants(topic)
+          : [topic];
+        const expanded = expandTacticTemplates(generalTemplates, { topic: discoveryTopicVariants }, { allowUnresolved: false });
         const discoveryQueries = uniqueList(expanded.map(e => e.query)).slice(0, Math.min(2, maxMethodAgents));
 
         if (discoveryQueries.length > 0) {
@@ -1502,6 +1517,9 @@ export const useOverseer = () => {
       const brandDomainHint = Array.isArray(slotValuesAny.brandDomain) ? String(slotValuesAny.brandDomain[0] || '') : '';
       const { packs: tacticPacks, expandedAll: expandedTactics } = buildTacticPacks(taxonomy, selectedVerticalIds, slotValues);
       const addressLike = isAddressLike(topic);
+      const topicVariants = addressLike && Array.isArray(slotValuesAny.topic)
+        ? slotValuesAny.topic.map(value => String(value || '').trim()).filter(Boolean)
+        : [topic];
       const addressDirectQueries = addressLike
         ? buildAddressDirectQueries(slotValues as Record<string, unknown>)
         : [];
@@ -1692,7 +1710,7 @@ export const useOverseer = () => {
       const discoveryTemplates = (selectedVerticalIds.includes('location') && isAddressLike(topic))
         ? METHOD_DISCOVERY_TEMPLATES_ADDRESS
         : (selectedVerticalIds.includes('individual') ? METHOD_DISCOVERY_TEMPLATES_PERSON : METHOD_DISCOVERY_TEMPLATES_GENERAL);
-      const discoveryTopics = nameVariants.length > 0 ? nameVariants : [topic];
+      const discoveryTopics = nameVariants.length > 0 ? nameVariants : (addressLike ? topicVariants : [topic]);
       const discoveryTemplateQueries = uniqueList(
         discoveryTemplates.flatMap(t => discoveryTopics.map(name => t.replace('{topic}', name)))
       );
@@ -1813,16 +1831,17 @@ export const useOverseer = () => {
           }));
         })
         .filter((sector) => Boolean(sector?.initialQuery)) as Array<{ name: string; focus: string; initialQuery: string }>;
+      const queryTopic = addressLike && topicVariants.length > 0 ? topicVariants[0] : topic;
       const verticalSeeds = subtopicSectors.length > 0
         ? []
-        : buildVerticalSeedSectors(selectedVerticals, verticalLabels, topic);
+        : buildVerticalSeedSectors(selectedVerticals, verticalLabels, queryTopic);
       let sectors = [
         ...subtopicSectors,
         ...verticalSeeds,
         ...rawSectors.map((sector: any, index: number) => {
         const name = sector?.name || sector?.title || `Researcher ${index + 1}`;
         const focus = sector?.focus || sector?.dimension || name || "General Research";
-        const initialQuery = sector?.initialQuery || sector?.initial_query || `${topic} ${focus}`;
+        const initialQuery = sector?.initialQuery || sector?.initial_query || `${queryTopic} ${focus}`;
         return { ...sector, name, focus, initialQuery };
         })
       ];
@@ -1840,12 +1859,14 @@ export const useOverseer = () => {
         status: AgentStatus.IDLE 
       });
 
-      if (sectors.length === 0) sectors.push({ name: "General Researcher", focus: "Overview", initialQuery: topic });
+      if (sectors.length === 0) sectors.push({ name: "General Researcher", focus: "Overview", initialQuery: queryTopic });
       if (sectors.length < minAgents) {
         const templates = tacticPackQueries.length > 0
           ? tacticPackQueries
-          : (isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL)
-            .map(t => t.replace('{topic}', topic));
+          : uniqueList(
+            (isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL)
+              .flatMap(t => (addressLike ? topicVariants : [topic]).map(value => t.replace('{topic}', value)))
+          );
         const needed = minAgents - sectors.length;
         for (let i = 0; i < needed; i++) {
           const fallbackQuery = templates[i % templates.length] || topic;
@@ -1875,12 +1896,20 @@ export const useOverseer = () => {
       const methodTemplates = isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL;
       const methodQueriesBase = tacticPackQueries.length > 0
         ? tacticPackQueries
-        : methodTemplates.map(t => t.replace('{topic}', topic));
+        : uniqueList(methodTemplates.flatMap(t => (addressLike ? topicVariants : [topic]).map(value => t.replace('{topic}', value))));
       if (tacticPackQueries.length === 0) {
         methodQueriesBase.forEach(q => registerMethodQuery(q, { source: 'method_template_fallback' }));
       }
-      const methodQueriesFromKB = knowledgeBase.domains.map(d => `site:${d} ${topic}`);
-      const methodQueriesFromKBMethods = (knowledgeBase.methods || []).map((q) => q.includes('{topic}') ? q.replace('{topic}', topic) : q);
+      const methodQueriesFromKB = uniqueList(
+        (addressLike ? topicVariants : [topic]).flatMap(value => knowledgeBase.domains.map(d => `site:${d} ${value}`))
+      );
+      const methodQueriesFromKBMethods = uniqueList(
+        (knowledgeBase.methods || []).flatMap((q) =>
+          q.includes('{topic}')
+            ? (addressLike ? topicVariants : [topic]).map(value => q.replace('{topic}', value))
+            : [q]
+        )
+      );
       methodQueriesFromKB.forEach(q => registerMethodQuery(q, { source: 'knowledge_base_domain' }));
       methodQueriesFromKBMethods.forEach(q => registerMethodQuery(q, { source: 'knowledge_base_method' }));
       methodCandidateQueries.forEach(q => registerMethodQuery(q, { source: 'llm_method_discovery' }));
@@ -2229,9 +2258,17 @@ export const useOverseer = () => {
         const exhaustTemplates = isAddressLike(topic) ? METHOD_TEMPLATES_ADDRESS : METHOD_TEMPLATES_GENERAL;
         const exhaustBase = tacticPackQueries.length > 0
           ? tacticPackQueries
-          : exhaustTemplates.map(t => t.replace('{topic}', topic));
-        const exhaustFromDomains = knowledgeBase.domains.map(d => `site:${d} ${topic}`);
-        const exhaustFromMethods = (knowledgeBase.methods || []).map((q) => q.includes('{topic}') ? q.replace('{topic}', topic) : q);
+          : uniqueList(exhaustTemplates.flatMap(t => (addressLike ? topicVariants : [topic]).map(value => t.replace('{topic}', value))));
+        const exhaustFromDomains = uniqueList(
+          (addressLike ? topicVariants : [topic]).flatMap(value => knowledgeBase.domains.map(d => `site:${d} ${value}`))
+        );
+        const exhaustFromMethods = uniqueList(
+          (knowledgeBase.methods || []).flatMap((q) =>
+            q.includes('{topic}')
+              ? (addressLike ? topicVariants : [topic]).map(value => q.replace('{topic}', value))
+              : [q]
+          )
+        );
         const exhaustQueries = uniqueList([...exhaustBase, ...exhaustFromDomains, ...exhaustFromMethods])
           .filter(q => !usedQueries.has(q))
           .slice(0, Math.min(remainingCapacity, maxMethodAgents));
