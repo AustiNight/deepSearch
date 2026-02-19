@@ -192,6 +192,7 @@ const renderMarkdownBlocks = (content: string) => {
 
 export const ReportView: React.FC<Props> = ({ report }) => {
   const primaryRecordCoverage = report.provenance?.primaryRecordCoverage;
+  const compliance = report.provenance?.compliance;
   const isCoverageComplete = primaryRecordCoverage ? primaryRecordCoverage.complete : true;
   const missingEntries = primaryRecordCoverage?.entries?.filter(
     (entry) => entry.status !== 'covered' && entry.status !== 'unavailable'
@@ -288,6 +289,36 @@ export const ReportView: React.FC<Props> = ({ report }) => {
           </div>
         ))}
 
+        {compliance && (
+          <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">Compliance Gate</p>
+            <div className="mt-2 space-y-2 text-gray-400">
+              <div>
+                Mode: <span className="text-gray-200">{compliance.mode}</span>
+              </div>
+              {compliance.gateStatus === "signoff_required" && (
+                <div className="text-amber-300">
+                  Sign-off required before rollout. Set approver + date in compliance policy.
+                </div>
+              )}
+              {compliance.blockedSources.length > 0 && (
+                <div className="text-amber-300">
+                  Blocked sources: {compliance.blockedSources.length}
+                </div>
+              )}
+            </div>
+            {compliance.blockedSources.length > 0 && (
+              <div className="mt-3 space-y-1 text-gray-400">
+                {compliance.blockedSources.slice(0, 6).map((entry, idx) => (
+                  <div key={`${entry.uri}-${idx}`} className="text-[11px] text-gray-400">
+                    {entry.domain} — {entry.reason}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {hasDatasetCompliance && (
           <div className="mt-10 rounded-lg border border-gray-800 bg-black/20 p-4 text-xs text-gray-300">
             <p className="text-[11px] uppercase tracking-wide text-gray-500">Dataset Compliance</p>
@@ -315,6 +346,19 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                       )}
                     </div>
                     <div className="mt-2 space-y-1 text-gray-400">
+                      {entry.complianceAction && entry.complianceAction !== "allow" && (
+                        <div className="text-amber-300">
+                          Compliance: {entry.complianceAction.toUpperCase()}
+                        </div>
+                      )}
+                      {entry.attribution && (
+                        <div>
+                          Attribution: <span className="text-gray-300">{entry.attribution}</span>
+                          {entry.attributionRequired && entry.attributionStatus !== "ok" && (
+                            <span className="ml-2 text-amber-300">Missing required fields</span>
+                          )}
+                        </div>
+                      )}
                       {portalLabel && (
                         <div>Portal: <span className="text-gray-300">{portalLabel}</span></div>
                       )}

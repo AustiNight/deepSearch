@@ -4,7 +4,7 @@ import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemin
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
 import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from '../services/propertyDossier';
-import { buildDatasetComplianceSummary } from '../services/openDataDiscovery';
+import { enforceCompliance } from '../services/complianceEnforcement';
 import {
   INITIAL_OVERSEER_ID,
   METHOD_TEMPLATES_GENERAL,
@@ -3073,7 +3073,26 @@ export const useOverseer = () => {
       );
 
       const allRawSources = findingsRef.current.flatMap((f: any) => f.rawSources || []);
-      const rankedSources = rankSourcesByAuthorityAndRecency(allRawSources);
+      const complianceResult = enforceCompliance(allRawSources);
+      if (complianceResult.blockedSources.length > 0) {
+        logOverseer(
+          'PHASE 4: COMPLIANCE',
+          'blocked disallowed sources',
+          `blocked ${complianceResult.blockedSources.length} sources`,
+          complianceResult.blockedSources.slice(0, 3).map((entry) => entry.domain).join(', '),
+          'warning'
+        );
+      }
+      if (complianceResult.summary.gateStatus === 'signoff_required') {
+        logOverseer(
+          'PHASE 4: COMPLIANCE',
+          'sign-off required',
+          'compliance gate not approved',
+          undefined,
+          'warning'
+        );
+      }
+      const rankedSources = rankSourcesByAuthorityAndRecency(complianceResult.allowedSources);
       const allowedSources = rankedSources.map((entry) => entry.source.uri);
       const finalReportData = await runSafely(synthesizeGrandReport(
         topic,
@@ -3261,13 +3280,23 @@ export const useOverseer = () => {
           kind: 'unknown'
         };
       });
-      const datasetCompliance = buildDatasetComplianceSummary(reportSources);
+      const postCompliance = enforceCompliance(reportSourceDetails);
+      const datasetCompliance = postCompliance.datasetCompliance;
       if (datasetCompliance.length > 0) {
         reportCandidate = {
           ...reportCandidate,
           provenance: {
             ...reportCandidate.provenance,
             datasetCompliance
+          }
+        };
+      }
+      if (complianceResult.summary) {
+        reportCandidate = {
+          ...reportCandidate,
+          provenance: {
+            ...reportCandidate.provenance,
+            compliance: complianceResult.summary
           }
         };
       }

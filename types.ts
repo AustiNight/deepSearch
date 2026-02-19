@@ -120,6 +120,7 @@ export interface FinalReport {
     methodAudit: string;
     primaryRecordCoverage?: PrimaryRecordCoverage;
     datasetCompliance?: DatasetComplianceEntry[];
+    compliance?: ComplianceSummary;
   };
   schemaVersion?: number;
   propertyDossier?: PropertyDossier;
@@ -137,6 +138,27 @@ export type SourceTaxonomy =
   | 'aggregator'
   | 'social'
   | 'unknown';
+
+export type ComplianceMode = 'audit' | 'enforce';
+
+export type ComplianceGateStatus = 'clear' | 'signoff_required';
+
+export type ComplianceBlockedSource = {
+  uri: string;
+  domain: string;
+  reason: string;
+  datasetTitle?: string;
+  datasetId?: string;
+};
+
+export type ComplianceSummary = {
+  mode: ComplianceMode;
+  signoffRequired: boolean;
+  signoffProvided: boolean;
+  gateStatus: ComplianceGateStatus;
+  blockedSources: ComplianceBlockedSource[];
+  notes?: string[];
+};
 
 export interface CitationSource {
   id: string;
@@ -434,6 +456,11 @@ export interface DatasetComplianceEntry extends DatasetComplianceFields {
   source?: string;
   retrievedAt?: IsoDateTimeString;
   lastUpdated?: IsoDateString;
+  attribution?: string;
+  attributionRequired?: boolean;
+  attributionStatus?: 'ok' | 'missing' | 'invalid';
+  complianceAction?: 'allow' | 'block' | 'review';
+  complianceNotes?: string[];
 }
 
 export type TaxonomyProvenanceSource = 'seed' | 'agent_proposal' | 'overseer_vet' | 'manual';

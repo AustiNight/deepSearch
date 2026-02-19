@@ -1,5 +1,6 @@
 import type {
   DatasetComplianceEntry,
+  ComplianceSummary,
   FinalReport,
   PrimaryRecordCoverage,
   ReportSection,
@@ -60,10 +61,47 @@ const normalizeDatasetCompliance = (value: unknown): DatasetComplianceEntry[] | 
       termsUrl: typeof entry.termsUrl === "string" ? entry.termsUrl : undefined,
       accessConstraints: accessConstraints.length > 0 ? accessConstraints : undefined,
       retrievedAt: typeof entry.retrievedAt === "string" ? entry.retrievedAt : undefined,
-      lastUpdated: typeof entry.lastUpdated === "string" ? entry.lastUpdated : undefined
+      lastUpdated: typeof entry.lastUpdated === "string" ? entry.lastUpdated : undefined,
+      attribution: typeof entry.attribution === "string" ? entry.attribution : undefined,
+      attributionRequired: typeof entry.attributionRequired === "boolean" ? entry.attributionRequired : undefined,
+      attributionStatus:
+        entry.attributionStatus === "ok" || entry.attributionStatus === "missing" || entry.attributionStatus === "invalid"
+          ? entry.attributionStatus
+          : undefined,
+      complianceAction:
+        entry.complianceAction === "allow" || entry.complianceAction === "block" || entry.complianceAction === "review"
+          ? entry.complianceAction
+          : undefined,
+      complianceNotes: normalizeStringList(entry.complianceNotes, 6)
     });
   }
   return out.length > 0 ? out : undefined;
+};
+
+const normalizeComplianceSummary = (value: unknown): ComplianceSummary | undefined => {
+  if (!isPlainObject(value)) return undefined;
+  const mode = value.mode === "audit" || value.mode === "enforce" ? value.mode : undefined;
+  const gateStatus = value.gateStatus === "clear" || value.gateStatus === "signoff_required" ? value.gateStatus : undefined;
+  if (!mode || !gateStatus) return undefined;
+  const blockedSources = Array.isArray(value.blockedSources) ? value.blockedSources : [];
+  const normalizedBlocked = blockedSources
+    .filter(isPlainObject)
+    .map((entry) => ({
+      uri: typeof entry.uri === "string" ? entry.uri : "",
+      domain: typeof entry.domain === "string" ? entry.domain : "",
+      reason: typeof entry.reason === "string" ? entry.reason : "",
+      datasetTitle: typeof entry.datasetTitle === "string" ? entry.datasetTitle : undefined,
+      datasetId: typeof entry.datasetId === "string" ? entry.datasetId : undefined
+    }))
+    .filter((entry) => entry.uri && entry.reason);
+  return {
+    mode,
+    signoffRequired: Boolean(value.signoffRequired),
+    signoffProvided: Boolean(value.signoffProvided),
+    gateStatus,
+    blockedSources: normalizedBlocked,
+    notes: normalizeStringList(value.notes, 6)
+  };
 };
 
 const toTitleCase = (input: string) => {
@@ -426,6 +464,7 @@ export const coerceReportData = (input: any, topic: string): FinalReport => {
 
   const primaryRecordCoverage = normalizePrimaryRecordCoverage(input?.provenance?.primaryRecordCoverage);
   const datasetCompliance = normalizeDatasetCompliance(input?.provenance?.datasetCompliance);
+  const compliance = normalizeComplianceSummary(input?.provenance?.compliance);
 
   return {
     title,
@@ -440,7 +479,8 @@ export const coerceReportData = (input: any, topic: string): FinalReport => {
           ? input.provenance.methodAudit
           : DEFAULT_METHOD_AUDIT,
       primaryRecordCoverage,
-      datasetCompliance
+      datasetCompliance,
+      compliance
     },
     schemaVersion:
       typeof input?.schemaVersion === "number" && Number.isFinite(input.schemaVersion)

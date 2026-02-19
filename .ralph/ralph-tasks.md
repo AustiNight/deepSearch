@@ -26,7 +26,7 @@
   - [x] Tighten synthesis prompts to require claim-level citations, explicit “Source not found” labels, and a “Data Gaps & Next Steps” section with exact portal/endpoint pointers
   - [x] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)
   - [x] Add compliance/provenance capture for dataset license/ToS and access constraints and surface them in report metadata
-  - [ ] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
+  - [x] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
   - [ ] Add privacy/compliance review checks tied to zero-cost mode and portal ToS/license enforcement
   - [ ] Add instrumentation for parcel-resolution success, evidence-recovery success, latency, and a measurable confidence-quality proxy metric
   - [ ] Define SLO targets for parcel resolution, evidence recovery, and median latency; gate releases when below baseline
