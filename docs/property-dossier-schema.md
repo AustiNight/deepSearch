@@ -243,3 +243,254 @@ EnvironmentalSite
 | `endpoint` | string | URL or path | no | API or search endpoint. |
 | `query` | string | free text | no | Suggested query text. |
 | `notes` | string | free text | no | Access notes or instructions. |
+
+## Field-Level Lineage Rules
+
+### Global Precedence and Conflict Resolution
+- If a field has a listed authoritative system, that system takes precedence over aggregators, mirrors, or third-party summaries.
+- For conflicts within the same precedence tier, prefer the record with the most recent `dataCurrency.asOf`, then `sourceUpdatedAt`, then `retrievedAt`.
+- For conflicts where parcel identity is unclear, prefer the record with an exact `parcelId` match; if still ambiguous, do not select a value and add a `DataGap` with `status=ambiguous`.
+- For derived values, include `ClaimCitation.derivation` and cite every input used in the derivation.
+- If conflicting authoritative values cannot be resolved, keep the highest-precedence value, and add a `DataGap` with `status=conflict`.
+
+### PropertyDossier (Root)
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/schemaVersion` | Internal schema constant | Set to schema version | Not applicable. |
+| `/subject` | Input + resolution pipeline | Assemble from input, geocode, parcel resolution | If subject is incomplete, add `DataGap` entries for missing subfields. |
+| `/parcel` | Assessor/CAD parcel record, then GIS parcel layer | Populate from parcel record and derived geometry | If parcel unresolved, omit and add `DataGap` with `status=ambiguous` or `missing`. |
+| `/ownership` | Assessor ownership roll, then recorder/deed index | Populate from ownership roll and deed chain | If conflicting ownership, prefer most recent authoritative record; add `DataGap` on conflict. |
+| `/taxAppraisal` | Assessor tax roll, then tax collector | Populate from latest assessment year | Conflicts resolved by latest assessment year. |
+| `/zoningLandUse` | Official zoning GIS, then zoning ordinance/plan docs | Map zoning fields from GIS attributes and ordinance references | If GIS/ordinance conflict, prefer most recently updated authoritative source; add `DataGap` if unresolved. |
+| `/permitsAndCode` | Official permitting/code systems, then open-data mirrors | Normalize permit/violation records | Dedupe by permit/case id; prefer latest authoritative status. |
+| `/hazardsEnvironmental` | Federal/state hazard registries, then local GIS | Spatial join and registry lookups | Prefer authoritative registries; add `DataGap` on conflicts. |
+| `/neighborhoodContext` | Official GIS boundaries, then Census | Spatial join based on subject geo | If multiple matches, treat as boundary ambiguity and add `DataGap`. |
+| `/dataGaps` | Internal pipeline | Generated from missing/failed checks | Not applicable. |
+| `/claims` | Internal pipeline | Generated for every non-null field | Not applicable. |
+| `/sources` | Internal pipeline | Generated from citations and provenance | Not applicable. |
+
+### PropertySubject
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/subject/address` | User input | Raw input string | Not applicable. |
+| `/subject/normalizedAddress` | Normalization rules | Normalize `/subject/address` using USPS abbreviations and unit handling | If multiple variants, select canonical USPS-style form. |
+| `/subject/jurisdiction` | Official boundary GIS, then geocoder admin fields | Spatially join geocode point to boundaries | Prefer boundary GIS over geocoder fields. |
+| `/subject/geo` | Parcel centroid, then rooftop geocode, then interpolated geocode | Choose best available geocode with accuracy metadata | Prefer higher precision; if outside parcel, add `DataGap`. |
+| `/subject/parcelId` | Assessor/CAD lookup, then GIS parcel join, then tax collector | Resolve parcel from address/geo | If multiple parcel matches, leave unset and add `DataGap` with `status=ambiguous`. |
+| `/subject/accountId` | Assessor or tax account record | Map from parcel record | Prefer tax collector if it is the billing account of record. |
+
+### Jurisdiction
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/subject/jurisdiction/city` | Official city boundary GIS | Spatial join to city boundaries | Prefer boundary GIS; if missing, use geocoder. |
+| `/subject/jurisdiction/county` | Official county boundary GIS | Spatial join to county boundaries | Prefer boundary GIS; if missing, use geocoder. |
+| `/subject/jurisdiction/state` | Official state boundary GIS | Spatial join to state boundaries | Prefer boundary GIS; if missing, use geocoder. |
+| `/subject/jurisdiction/postalCode` | USPS/postal boundary data, then geocoder | Spatial join to postal boundaries | Prefer postal boundary source; if missing, use geocoder. |
+| `/subject/jurisdiction/country` | Boundary GIS, then geocoder | Spatial join or parse from input | Prefer boundary GIS; if missing, use geocoder. |
+
+### GeoPoint
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/subject/geo/lat` | Parcel centroid, then rooftop geocode | Extract latitude | Prefer higher-accuracy geocode. |
+| `/subject/geo/lon` | Parcel centroid, then rooftop geocode | Extract longitude | Prefer higher-accuracy geocode. |
+| `/subject/geo/accuracyMeters` | Geocoder metadata | Map from geocoder or parcel centroid precision | Prefer source-provided accuracy; otherwise estimate. |
+
+### ParcelInfo
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/parcel/parcelId` | Assessor/CAD parcel record | Copy from authoritative parcel record | If mismatch, prefer CAD/assessor record. |
+| `/parcel/accountId` | Assessor or tax account record | Copy from authoritative account record | Prefer tax collector account if billing-focused; otherwise assessor. |
+| `/parcel/situsAddress` | Assessor parcel roll, then GIS parcel layer | Copy from parcel record | Prefer assessor roll; if conflict, choose normalized address match. |
+| `/parcel/legalDescription` | Recorder/deed, then assessor | Copy legal description | Prefer most recent recorded deed. |
+| `/parcel/mapReference` | Assessor/CAD, then GIS parcel layer | Copy map/plat reference | Prefer assessor/CAD. |
+| `/parcel/subdivision` | Recorded plat, then assessor | Copy subdivision | Prefer recorded plat. |
+| `/parcel/lot` | Recorded plat, then assessor | Copy lot identifier | Prefer recorded plat. |
+| `/parcel/block` | Recorded plat, then assessor | Copy block identifier | Prefer recorded plat. |
+| `/parcel/landUseCode` | Assessor land use code | Copy code | Prefer assessor code over inferred zoning. |
+| `/parcel/landUseDescription` | Assessor description, then code table | Map code to description if missing | Prefer assessor-provided description. |
+| `/parcel/lotSize/value` | Assessor lot size, then GIS parcel area | Convert area to value | Prefer assessor; if GIS used, convert to `sq_ft` or `acres`. |
+| `/parcel/lotSize/unit` | Assessor lot size unit, then derived | Derive unit from source or conversion | Prefer original unit; if derived, use `sq_ft`. |
+| `/parcel/buildingAreaSqFt` | Assessor improvements, then building footprint dataset | Normalize to square feet | Prefer assessor; if GIS, sum footprint areas. |
+| `/parcel/yearBuilt` | Assessor, then permit records | Use earliest known construction year | Prefer assessor; if only permits, use earliest permit issue year with new construction. |
+| `/parcel/unitCount` | Assessor, then permit/occupancy data | Copy unit count | Prefer assessor; if permit data used, pick latest verified occupancy. |
+
+### OwnershipInfo
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/ownership/ownerName` | Assessor ownership roll, then recorder/deed | Copy owner name | Prefer most recent authoritative record; if multiple, keep assessor format. |
+| `/ownership/ownerType` | Assessor classification, then derived from name | Classify owner based on source or heuristics | Prefer assessor classification; otherwise derived with explanation in derivation. |
+| `/ownership/mailingAddress` | Assessor or tax mailing address | Normalize to PostalAddress | Prefer tax collector if explicitly marked as billing. |
+| `/ownership/ownershipStartDate` | Recorder/deed, then assessor | Use deed recording date for current owner | Prefer recorder; if missing, assessor ownership start. |
+| `/ownership/lastTransferDate` | Recorder/deed, then assessor | Use most recent transfer date | Prefer recorder. |
+| `/ownership/lastTransferPriceUsd` | Recorder/deed, then assessor | Use price from most recent transfer | Prefer recorder. |
+| `/ownership/deedInstrument` | Recorder/deed | Copy instrument type/code | Prefer recorder. |
+| `/ownership/deedBookPage` | Recorder/deed | Copy book/page reference | Prefer recorder. |
+| `/ownership/ownershipHistory` | Recorder/deed index, then assessor history | Build transfer list sorted by date | Dedupe by document id + date; prefer recorder for duplicates. |
+
+### PostalAddress (Ownership Mailing Address)
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/ownership/mailingAddress/address1` | Assessor/tax mailing address | Parse address line 1 | Prefer tax collector if billing. |
+| `/ownership/mailingAddress/address2` | Assessor/tax mailing address | Parse address line 2 | Prefer tax collector if billing. |
+| `/ownership/mailingAddress/city` | Assessor/tax mailing address | Parse city | Prefer tax collector if billing. |
+| `/ownership/mailingAddress/county` | Assessor/tax mailing address | Parse county | Prefer tax collector if billing. |
+| `/ownership/mailingAddress/state` | Assessor/tax mailing address | Parse state | Prefer tax collector if billing. |
+| `/ownership/mailingAddress/postalCode` | Assessor/tax mailing address | Parse postal code | Prefer tax collector if billing. |
+| `/ownership/mailingAddress/country` | Assessor/tax mailing address | Parse country if present | Prefer tax collector if billing. |
+
+### OwnershipTransfer
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/ownership/ownershipHistory[].transferDate` | Recorder/deed, then assessor | Copy transfer date | Prefer recorder. |
+| `/ownership/ownershipHistory[].recordedDate` | Recorder/deed | Copy recorded date | Prefer recorder. |
+| `/ownership/ownershipHistory[].priceUsd` | Recorder/deed, then assessor | Copy transfer price | Prefer recorder. |
+| `/ownership/ownershipHistory[].grantor` | Recorder/deed | Copy grantor | Prefer recorder. |
+| `/ownership/ownershipHistory[].grantee` | Recorder/deed | Copy grantee | Prefer recorder. |
+| `/ownership/ownershipHistory[].instrument` | Recorder/deed | Copy instrument type | Prefer recorder. |
+| `/ownership/ownershipHistory[].documentId` | Recorder/deed | Copy document id | Prefer recorder. |
+| `/ownership/ownershipHistory[].documentUrl` | Recorder/deed | Copy public document URL | Prefer recorder; omit if restricted. |
+
+### TaxAppraisal
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/taxAppraisal/assessmentYear` | Assessor roll, then tax collector | Select latest available year | Prefer latest year with complete values. |
+| `/taxAppraisal/assessedValueUsd` | Assessor roll | Copy assessed value for selected year | Prefer value aligned to `assessmentYear`. |
+| `/taxAppraisal/marketValueUsd` | Assessor roll | Copy market value for selected year | Prefer value aligned to `assessmentYear`. |
+| `/taxAppraisal/landValueUsd` | Assessor roll | Copy land value for selected year | Prefer value aligned to `assessmentYear`. |
+| `/taxAppraisal/improvementValueUsd` | Assessor roll | Copy improvement value for selected year | Prefer value aligned to `assessmentYear`. |
+| `/taxAppraisal/taxableValueUsd` | Assessor roll, then tax collector | Copy taxable value for selected year | Prefer assessor if consistent with exemptions. |
+| `/taxAppraisal/taxAmountUsd` | Tax collector, then assessor | Copy tax amount for latest bill | Prefer tax collector. |
+| `/taxAppraisal/taxRatePct` | Tax collector, then assessor | Compute from levy or rate data | Prefer tax collector; if derived, include derivation. |
+| `/taxAppraisal/exemptions` | Assessor roll | Normalize exemption codes to labels | Prefer assessor; if multiple sources, union unique codes for same year. |
+| `/taxAppraisal/taxStatus` | Tax collector | Copy payment or delinquency status | Prefer tax collector; if missing, omit. |
+
+### ZoningLandUse
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/zoningLandUse/zoningCode` | Official zoning GIS, then ordinance text | Copy zoning code | Prefer GIS; if multiple codes, choose parcel-intersecting primary zone. |
+| `/zoningLandUse/zoningDescription` | Zoning ordinance/legend | Map zoning code to description | Prefer ordinance description; if missing, GIS label. |
+| `/zoningLandUse/overlayDistricts` | Official GIS overlays | List overlays intersecting parcel | Prefer GIS overlays; dedupe by code. |
+| `/zoningLandUse/futureLandUse` | Official future land use map | Map from plan layer | Prefer latest adopted plan. |
+| `/zoningLandUse/landUseDesignation` | Official land use map | Map from land use layer | Prefer GIS land use layer. |
+| `/zoningLandUse/lotCoveragePct` | Zoning ordinance | Extract numeric standard | Prefer ordinance; if multiple, choose most restrictive. |
+| `/zoningLandUse/far` | Zoning ordinance | Extract FAR standard | Prefer ordinance; if multiple, choose most restrictive. |
+| `/zoningLandUse/maxHeightFt` | Zoning ordinance | Extract height standard | Prefer ordinance; if multiple, choose most restrictive. |
+| `/zoningLandUse/setbacks/frontFt` | Zoning ordinance | Extract front setback | Prefer ordinance; if multiple, choose most restrictive. |
+| `/zoningLandUse/setbacks/rearFt` | Zoning ordinance | Extract rear setback | Prefer ordinance; if multiple, choose most restrictive. |
+| `/zoningLandUse/setbacks/sideFt` | Zoning ordinance | Extract side setback | Prefer ordinance; if multiple, choose most restrictive. |
+
+### PermitsAndCode
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/permitsAndCode/permits` | Official permit system, then open-data mirror | Normalize permit records | Dedupe by `permitId`; prefer authoritative status. |
+| `/permitsAndCode/codeViolations` | Official code enforcement system, then open-data mirror | Normalize violation records | Dedupe by `caseId`; prefer authoritative status. |
+
+### PermitRecord
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/permitsAndCode/permits[].permitId` | Official permit system | Copy permit id | Prefer official system. |
+| `/permitsAndCode/permits[].permitType` | Official permit system | Copy permit type | Prefer official system. |
+| `/permitsAndCode/permits[].status` | Official permit system | Use most recent status update | Prefer record with latest update date. |
+| `/permitsAndCode/permits[].issuedDate` | Official permit system | Copy issue date | Prefer earliest issue date for same permit id. |
+| `/permitsAndCode/permits[].finalDate` | Official permit system | Copy final/closed date | Prefer latest final date for same permit id. |
+| `/permitsAndCode/permits[].valuationUsd` | Official permit system | Normalize valuation | Prefer official system; if multiple, choose latest update. |
+| `/permitsAndCode/permits[].workDescription` | Official permit system | Copy work description | Prefer official system; if multiple, choose most detailed. |
+| `/permitsAndCode/permits[].contractor` | Official permit system | Copy contractor name | Prefer official system; if multiple, choose latest update. |
+
+### CodeViolation
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/permitsAndCode/codeViolations[].caseId` | Official code enforcement system | Copy case id | Prefer official system. |
+| `/permitsAndCode/codeViolations[].status` | Official code enforcement system | Use most recent status update | Prefer record with latest update date. |
+| `/permitsAndCode/codeViolations[].openedDate` | Official code enforcement system | Copy opened date | Prefer earliest opened date. |
+| `/permitsAndCode/codeViolations[].resolvedDate` | Official code enforcement system | Copy resolved date | Prefer latest resolved date. |
+| `/permitsAndCode/codeViolations[].description` | Official code enforcement system | Copy violation description | Prefer official system; if multiple, choose most detailed. |
+| `/permitsAndCode/codeViolations[].fineUsd` | Official code enforcement system | Normalize fine amount | Prefer official system; if multiple, choose latest update. |
+
+### HazardsEnvironmental
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/hazardsEnvironmental/floodZone` | FEMA NFHL, then local floodplain GIS | Spatial join to flood layer | Prefer FEMA; if local is newer and FEMA missing, use local with note. |
+| `/hazardsEnvironmental/femaPanel` | FEMA NFHL | Copy panel id | Prefer FEMA. |
+| `/hazardsEnvironmental/floodRiskPercentile` | Official risk dataset, then reputable risk model | Normalize to 0-100 scale | Prefer authoritative dataset; if model-based, include derivation. |
+| `/hazardsEnvironmental/wildfireRisk` | State forestry agency, then federal datasets | Map risk category | Prefer state agency; if multiple, choose most recent. |
+| `/hazardsEnvironmental/seismicZone` | USGS or state geological survey | Map seismic zone | Prefer USGS; if state provides higher resolution, prefer state. |
+| `/hazardsEnvironmental/environmentalSites` | EPA/state registries, then local GIS | Spatial join and registry lookup | Dedupe by `epaId` or site name; prefer authoritative registry. |
+
+### EnvironmentalSite
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/hazardsEnvironmental/environmentalSites[].siteName` | EPA/state registry | Copy site name | Prefer authoritative registry. |
+| `/hazardsEnvironmental/environmentalSites[].program` | EPA/state registry | Copy program | Prefer authoritative registry. |
+| `/hazardsEnvironmental/environmentalSites[].epaId` | EPA/state registry | Copy registry id | Prefer authoritative registry. |
+| `/hazardsEnvironmental/environmentalSites[].distance/value` | Derived from subject geo + site geo | Compute distance | Prefer higher-precision coordinates. |
+| `/hazardsEnvironmental/environmentalSites[].distance/unit` | Derived | Use `ft` for local, `mi` for regional | Standardize units; prefer `ft` when distance < 1 mile. |
+| `/hazardsEnvironmental/environmentalSites[].status` | EPA/state registry | Copy site status | Prefer authoritative registry. |
+
+### NeighborhoodContext
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/neighborhoodContext/censusTract` | Census TIGER/Line | Spatial join from subject geo | Prefer Census boundary; if near boundary, add `DataGap` with `status=ambiguous`. |
+| `/neighborhoodContext/censusBlockGroup` | Census TIGER/Line | Spatial join from subject geo | Prefer Census boundary; if near boundary, add `DataGap` with `status=ambiguous`. |
+| `/neighborhoodContext/neighborhood` | Official city neighborhood GIS | Spatial join from subject geo | Prefer official GIS; if none, omit. |
+| `/neighborhoodContext/schoolDistrict` | Official school district GIS | Spatial join from subject geo | Prefer official GIS; if none, omit. |
+| `/neighborhoodContext/communityPlanArea` | Official planning GIS | Spatial join from subject geo | Prefer official GIS; if none, omit. |
+| `/neighborhoodContext/cityCouncilDistrict` | Official city council GIS | Spatial join from subject geo | Prefer official GIS; if none, omit. |
+
+### DataGap (Embedded)
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/dataGaps[].id` | Internal pipeline | Generated id | Not applicable. |
+| `/dataGaps[].fieldPath` | Internal pipeline | Derived from missing field path | Not applicable. |
+| `/dataGaps[].recordType` | Internal pipeline | Derived from expected record type | Not applicable. |
+| `/dataGaps[].description` | Internal pipeline | Generated from validation | Not applicable. |
+| `/dataGaps[].reason` | Internal pipeline | Generated from failure taxonomy | Not applicable. |
+| `/dataGaps[].expectedSources` | Internal pipeline | Populated from known portals | Not applicable. |
+| `/dataGaps[].severity` | Internal policy | Derived from impact rules | Not applicable. |
+| `/dataGaps[].status` | Internal policy | Set from failure state | Not applicable. |
+| `/dataGaps[].detectedAt` | Internal pipeline | Set at detection time | Not applicable. |
+| `/dataGaps[].impact` | Internal pipeline | Generated from validation | Not applicable. |
+
+### ClaimCitation (Embedded)
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/claims[].id` | Internal pipeline | Generated id | Not applicable. |
+| `/claims[].fieldPath` | Internal pipeline | Set to field being supported | Not applicable. |
+| `/claims[].claim` | Internal pipeline | Generated claim text | Not applicable. |
+| `/claims[].value` | Derived from field value | Copy field value | Not applicable. |
+| `/claims[].unit` | Derived from field metadata | Use field unit if numeric | Not applicable. |
+| `/claims[].confidence` | Internal scoring | Set from scoring model | Not applicable. |
+| `/claims[].citations` | Internal pipeline | Link to sources used | Not applicable. |
+| `/claims[].derivation` | Internal pipeline | Describe derivation when computed | Not applicable. |
+| `/claims[].createdAt` | Internal pipeline | Set at creation time | Not applicable. |
+
+### CitationSource (Embedded)
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/sources[].id` | Internal pipeline | Generated id | Not applicable. |
+| `/sources[].url` | Source metadata | Canonical source URL | If multiple URLs for same source, prefer canonical portal URL. |
+| `/sources[].title` | Source metadata | Page or record title | Prefer official title if available. |
+| `/sources[].publisher` | Source metadata | Publishing org | Prefer official publisher name. |
+| `/sources[].sourceType` | Internal taxonomy | Map source to taxonomy | Not applicable. |
+| `/sources[].retrievedAt` | Internal pipeline | Set at fetch time | Not applicable. |
+| `/sources[].sourceUpdatedAt` | Source metadata | Copy update date if available | Prefer explicit source update date. |
+| `/sources[].dataCurrency/asOf` | Source metadata | Copy record as-of date | Prefer explicit record date. |
+| `/sources[].dataCurrency/ageDays` | Derived | Compute from `retrievedAt` and `dataCurrency.asOf` | Recompute if either input changes. |
+
+### CitationSourceRef (Embedded)
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/claims[].citations[].sourceId` | Internal pipeline | Link to `/sources[].id` | Not applicable. |
+| `/claims[].citations[].page` | Source metadata | Copy page reference if known | Prefer authoritative pagination. |
+| `/claims[].citations[].section` | Source metadata | Copy section reference if known | Prefer authoritative section label. |
+| `/claims[].citations[].quote` | Source metadata | Short excerpt if available | Prefer primary source quote. |
+| `/claims[].citations[].note` | Internal pipeline | Supporting note | Not applicable. |
+
+### SourcePointer (Embedded)
+| Field | Source precedence | Derivation steps | Conflict resolution |
+| --- | --- | --- | --- |
+| `/dataGaps[].expectedSources[].label` | Internal pipeline | Portal/system name | Not applicable. |
+| `/dataGaps[].expectedSources[].portalUrl` | Internal registry | Base portal URL | Prefer authoritative portal. |
+| `/dataGaps[].expectedSources[].endpoint` | Internal registry | API/search endpoint | Prefer official endpoint. |
+| `/dataGaps[].expectedSources[].query` | Internal pipeline | Suggested query text | Not applicable. |
+| `/dataGaps[].expectedSources[].notes` | Internal pipeline | Access notes | Not applicable. |
