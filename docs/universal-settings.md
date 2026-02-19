@@ -4,7 +4,7 @@
 Universal settings are tied to the Cloudflare Access identity presented to the worker. Requests must include `Cf-Access-Authenticated-User-Email` and `Cf-Access-Jwt-Assertion`. The email header is used as the per-user storage key.
 
 **Storage Model**
-Settings are stored in Cloudflare KV under `SETTINGS_KV` using the key format `user_settings:<email>`. Each record contains the settings payload plus metadata for conflict detection.
+Settings are stored in Cloudflare KV under `SETTINGS_KV` using the key format `user_settings:<sha256(email)>`. Each record contains the settings payload (no allowlist, no keys) plus metadata for conflict detection. The Access email is hashed before storage to avoid PII in KV keys.
 
 **Settings Schema**
 Schema version: `1`
@@ -14,7 +14,6 @@ Fields
 - `provider` (`google` or `openai`)
 - `runConfig` (object)
 - `modelOverrides` (object)
-- `accessAllowlist` (array of emails)
 
 RunConfig fields
 - `minAgents`
@@ -48,4 +47,4 @@ Example scenarios
 If the cloud record is missing and local storage contains settings, the client performs a one-time import. The migration flag is set only after a successful cloud write. If migration fails, the client keeps local settings and retries later.
 
 **Storage Governance**
-Retention is indefinite unless manually cleared. Payloads are capped at 50 KB and allowlist entries are capped at 500. Worker logs record update events, including the Access email and version number. Secrets such as API keys are never stored or transmitted.
+Retention is indefinite unless manually cleared. Payloads are capped at 50 KB. KV records exclude PII (no email allowlists, no access emails) and never store API keys. Worker logs record update events and version numbers without persisting PII.

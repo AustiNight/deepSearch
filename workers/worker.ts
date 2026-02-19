@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { buildAllowlistMetadata, hashEntries, hashValue, stripSettingsForKv } from "./kvPolicy";
 
 export interface Env {
   OPENAI_API_KEY: string;
@@ -71,10 +72,11 @@ const getCorsHeaders = (origin: string | null, env: Env) => {
 };
 
 type AllowlistRecord = {
-  entries: string[];
   updatedAt: string;
-  updatedBy: string;
+  updatedBy: string | null;
   version: number;
+  count: number;
+  entriesHash: string;
 };
 
 type RunConfig = {
@@ -95,13 +97,12 @@ type SettingsPayload = {
   provider: "google" | "openai";
   runConfig: RunConfig;
   modelOverrides: Record<string, string>;
-  accessAllowlist: string[];
 };
 
 type SettingsRecord = {
   settings: SettingsPayload;
   updatedAt: string;
-  updatedBy: string;
+  updatedBy: string | null;
   version: number;
 };
 
@@ -164,6 +165,13 @@ const normalizeAllowlistEntries = (rawEntries: unknown) => {
   }
   return { entries, invalid, error: "" };
 };
+
+const getSettingsStorageKey = async (email: string) => {
+  const hashed = await hashValue(email);
+  return `${SETTINGS_KEY_PREFIX}${hashed}`;
+};
+
+const getLegacySettingsKey = (email: string) => `${SETTINGS_KEY_PREFIX}${email}`;
 
 const isPrivateHostname = (hostname: string) => {
   const lower = hostname.toLowerCase();
@@ -282,17 +290,11 @@ const normalizeSettingsPayload = (rawPayload: unknown) => {
   const provider = payload.provider === "openai" ? "openai" : "google";
   const runConfig = normalizeRunConfig(payload.runConfig);
   const modelOverrides = normalizeModelOverrides(payload.modelOverrides);
-  const allowlistRaw = Array.isArray(payload.accessAllowlist) ? payload.accessAllowlist : [];
-  const allowlistParsed = normalizeAllowlistEntries(allowlistRaw);
-  if (allowlistParsed.entries.length > MAX_ALLOWLIST_ENTRIES) {
-    return { error: `Allowlist exceeds ${MAX_ALLOWLIST_ENTRIES} entries.` };
-  }
   const settings: SettingsPayload = {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     provider,
     runConfig,
     modelOverrides,
-    accessAllowlist: allowlistParsed.entries,
   };
   return { settings };
 };
@@ -363,7 +365,7 @@ const getPolicyField = <T>(policy: Record<string, unknown>, snake: string, camel
   return undefined;
 };
 
-const updateAccessPolicy = async (env: Env, entries: string[]) => {
+const fetchAccessPolicy = async (env: Env) => {
   const { CF_API_TOKEN, CF_ACCOUNT_ID, CF_ACCESS_APP_ID, CF_ACCESS_POLICY_ID } = env;
   if (!CF_API_TOKEN || !CF_ACCOUNT_ID || !CF_ACCESS_APP_ID || !CF_ACCESS_POLICY_ID) {
     throw new Error("Cloudflare Access policy secrets are not configured.");
@@ -385,8 +387,33 @@ const updateAccessPolicy = async (env: Env, entries: string[]) => {
   if (!currentResponse.ok || !currentJson?.success) {
     throw new Error("Failed to fetch Cloudflare Access policy.");
   }
+  return {
+    policy: currentJson.result as Record<string, unknown>,
+    url,
+    headers
+  };
+};
 
-  const currentPolicy = currentJson.result as Record<string, unknown>;
+const extractAllowlistEntries = (policy: Record<string, unknown>) => {
+  const includeRules = Array.isArray(policy.include) ? policy.include : [];
+  const entries: string[] = [];
+  for (const rule of includeRules) {
+    if (!rule || typeof rule !== "object") continue;
+    const emailRule = (rule as Record<string, any>).email;
+    if (!emailRule) continue;
+    if (typeof emailRule === "string") {
+      entries.push(emailRule);
+      continue;
+    }
+    if (typeof emailRule === "object" && typeof emailRule.email === "string") {
+      entries.push(emailRule.email);
+    }
+  }
+  return Array.from(new Set(entries.map((entry) => entry.trim().toLowerCase()).filter(Boolean))).sort();
+};
+
+const updateAccessPolicy = async (env: Env, entries: string[]) => {
+  const { policy: currentPolicy, url, headers } = await fetchAccessPolicy(env);
   const includeRules = Array.isArray(currentPolicy.include) ? currentPolicy.include : [];
   const emailRules = entries.map((entry) => ({ email: { email: entry } }));
   const updatedInclude = replaceEmailIncludeRules(includeRules, emailRules);
@@ -518,21 +545,55 @@ export default {
         return json({ error: "Method not allowed" }, 405, corsHeaders);
       }
 
-      if (request.method === "GET") {
+      const getPolicyTimestamp = (policy: Record<string, unknown>) => {
+        return getPolicyField<string>(policy, "updated_at", "updatedAt")
+          || getPolicyField<string>(policy, "modified_on", "modifiedOn")
+          || null;
+      };
+
+      const loadAllowlistSnapshot = async () => {
+        const { policy } = await fetchAccessPolicy(env);
+        const entries = extractAllowlistEntries(policy);
+        const entriesHash = await hashEntries(entries);
         const stored = await env.ACCESS_ALLOWLIST_KV.get<AllowlistRecord>(ACCESS_ALLOWLIST_KEY, "json");
-        const responseBody = {
-          entries: stored?.entries || [],
-          updatedAt: stored?.updatedAt || null,
-          updatedBy: stored?.updatedBy || null,
-          version: stored?.version || 0,
-          count: stored?.entries?.length || 0,
-          policyUpdated: false,
+        const policyUpdatedAt = getPolicyTimestamp(policy);
+        const updatedAt = stored?.updatedAt || policyUpdatedAt || new Date().toISOString();
+        const version = stored?.version || 0;
+        const record: AllowlistRecord = {
+          updatedAt,
+          updatedBy: null,
+          version,
+          count: entries.length,
+          entriesHash,
         };
-        const headers = {
-          ...corsHeaders,
-          "ETag": stored?.updatedAt || "",
-        };
-        return json(responseBody, 200, headers);
+
+        if (!stored || stored.entriesHash !== entriesHash || stored.count !== entries.length || stored.updatedBy) {
+          await env.ACCESS_ALLOWLIST_KV.put(ACCESS_ALLOWLIST_KEY, JSON.stringify(record));
+        }
+
+        return { entries, record };
+      };
+
+      if (request.method === "GET") {
+        try {
+          const { entries, record } = await loadAllowlistSnapshot();
+          const responseBody = {
+            entries,
+            updatedAt: record.updatedAt || null,
+            updatedBy: record.updatedBy || null,
+            version: record.version,
+            count: entries.length,
+            policyUpdated: false,
+          };
+          const headers = {
+            ...corsHeaders,
+            "ETag": record.updatedAt || "",
+          };
+          return json(responseBody, 200, headers);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to fetch allowlist.";
+          return json({ error: message }, 502, corsHeaders);
+        }
       }
 
       const accessJwt = request.headers.get(ACCESS_JWT_HEADER);
@@ -556,14 +617,20 @@ export default {
         return json({ error: "expectedUpdatedAt is required for updates.", updatedAt: stored.updatedAt }, 428, corsHeaders);
       }
       if (stored?.updatedAt && expectedUpdatedAt && stored.updatedAt !== expectedUpdatedAt) {
-        return json({
-          error: "Allowlist has been updated since last fetch.",
-          updatedAt: stored.updatedAt,
-          updatedBy: stored.updatedBy,
-          entries: stored.entries,
-          count: stored.entries.length,
-          version: stored.version,
-        }, 409, corsHeaders);
+        try {
+          const { entries, record } = await loadAllowlistSnapshot();
+          return json({
+            error: "Allowlist has been updated since last fetch.",
+            updatedAt: record.updatedAt,
+            updatedBy: record.updatedBy,
+            entries,
+            count: entries.length,
+            version: record.version,
+          }, 409, corsHeaders);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Allowlist has been updated since last fetch.";
+          return json({ error: message }, 409, corsHeaders);
+        }
       }
 
       const normalized = normalizeAllowlistEntries(data?.entries);
@@ -589,24 +656,23 @@ export default {
       }
 
       const updatedAt = new Date().toISOString();
-      const record: AllowlistRecord = {
+      const record = await buildAllowlistMetadata({
         entries: normalized.entries,
         updatedAt,
-        updatedBy: accessEmail,
         version: (stored?.version || 0) + 1,
-      };
+      });
       await env.ACCESS_ALLOWLIST_KV.put(ACCESS_ALLOWLIST_KEY, JSON.stringify(record));
       console.log("Allowlist updated.", {
-        count: record.entries.length,
-        domains: summarizeDomains(record.entries),
+        count: normalized.entries.length,
+        domains: summarizeDomains(normalized.entries),
       });
 
       return json({
-        entries: record.entries,
+        entries: normalized.entries,
         updatedAt: record.updatedAt,
         updatedBy: record.updatedBy,
         version: record.version,
-        count: record.entries.length,
+        count: normalized.entries.length,
         policyUpdated: true,
       }, 200, corsHeaders);
     }
@@ -622,19 +688,46 @@ export default {
         return json({ error: "Access authentication required." }, 401, corsHeaders);
       }
 
-      const storageKey = `${SETTINGS_KEY_PREFIX}${accessEmail}`;
+      const storageKey = await getSettingsStorageKey(accessEmail);
+      const legacyStorageKey = getLegacySettingsKey(accessEmail);
+
+      const loadStoredSettings = async () => {
+        const current = await env.SETTINGS_KV.get<SettingsRecord>(storageKey, "json");
+        if (current) {
+          return { record: current, key: storageKey, legacy: false };
+        }
+        const legacy = await env.SETTINGS_KV.get<SettingsRecord>(legacyStorageKey, "json");
+        if (legacy) {
+          return { record: legacy, key: legacyStorageKey, legacy: true };
+        }
+        return { record: null, key: storageKey, legacy: false };
+      };
 
       if (request.method === "GET") {
-        const stored = await env.SETTINGS_KV.get<SettingsRecord>(storageKey, "json");
+        const { record: stored, legacy } = await loadStoredSettings();
+        let resolved = stored
+          ? {
+            settings: stripSettingsForKv(stored.settings),
+            updatedAt: stored.updatedAt,
+            updatedBy: null,
+            version: stored.version,
+          }
+          : null;
+        if (stored && (legacy || stored.updatedBy)) {
+          await env.SETTINGS_KV.put(storageKey, JSON.stringify(resolved));
+          if (legacy) {
+            await env.SETTINGS_KV.delete(legacyStorageKey);
+          }
+        }
         const responseBody = {
-          settings: stored?.settings || null,
-          updatedAt: stored?.updatedAt || null,
-          updatedBy: stored?.updatedBy || null,
-          version: stored?.version || 0,
+          settings: resolved ? resolved.settings : null,
+          updatedAt: resolved?.updatedAt || null,
+          updatedBy: resolved?.updatedBy || null,
+          version: resolved?.version || 0,
         };
         const headers = {
           ...corsHeaders,
-          "ETag": stored?.updatedAt || "",
+          "ETag": resolved?.updatedAt || "",
         };
         return json(responseBody, 200, headers);
       }
@@ -647,7 +740,23 @@ export default {
       const expectedUpdatedAt = (data?.expectedUpdatedAt || request.headers.get("If-Match") || "").trim();
       const expectedVersionRaw = data?.expectedVersion;
       const expectedVersion = Number.isFinite(Number(expectedVersionRaw)) ? Number(expectedVersionRaw) : null;
-      const stored = await env.SETTINGS_KV.get<SettingsRecord>(storageKey, "json");
+      const { record: stored, legacy } = await loadStoredSettings();
+      const storedSanitized = stored
+        ? {
+          settings: stripSettingsForKv(stored.settings),
+          updatedAt: stored.updatedAt,
+          updatedBy: null,
+          version: stored.version,
+        }
+        : null;
+      const redactStoredIfNeeded = async () => {
+        if (stored && (legacy || stored.updatedBy)) {
+          await env.SETTINGS_KV.put(storageKey, JSON.stringify(storedSanitized));
+          if (legacy) {
+            await env.SETTINGS_KV.delete(legacyStorageKey);
+          }
+        }
+      };
 
       if (stored?.updatedAt && !expectedUpdatedAt && expectedVersion === null) {
         return json({
@@ -659,21 +768,23 @@ export default {
 
       if (stored?.updatedAt) {
         if (expectedUpdatedAt && stored.updatedAt !== expectedUpdatedAt) {
+          await redactStoredIfNeeded();
           return json({
             error: "Settings have been updated since last fetch.",
-            updatedAt: stored.updatedAt,
-            updatedBy: stored.updatedBy,
-            version: stored.version,
-            settings: stored.settings,
+            updatedAt: storedSanitized?.updatedAt || null,
+            updatedBy: storedSanitized?.updatedBy || null,
+            version: storedSanitized?.version || 0,
+            settings: storedSanitized?.settings || null,
           }, 409, corsHeaders);
         }
         if (expectedVersion !== null && stored.version !== expectedVersion) {
+          await redactStoredIfNeeded();
           return json({
             error: "Settings version mismatch.",
-            updatedAt: stored.updatedAt,
-            updatedBy: stored.updatedBy,
-            version: stored.version,
-            settings: stored.settings,
+            updatedAt: storedSanitized?.updatedAt || null,
+            updatedBy: storedSanitized?.updatedBy || null,
+            version: storedSanitized?.version || 0,
+            settings: storedSanitized?.settings || null,
           }, 409, corsHeaders);
         }
       }
@@ -685,18 +796,20 @@ export default {
 
       const updatedAt = new Date().toISOString();
       const record: SettingsRecord = {
-        settings: settings as SettingsPayload,
+        settings: stripSettingsForKv(settings as SettingsPayload),
         updatedAt,
-        updatedBy: accessEmail,
+        updatedBy: null,
         version: (stored?.version || 0) + 1,
       };
       await env.SETTINGS_KV.put(storageKey, JSON.stringify(record));
+      if (legacy) {
+        await env.SETTINGS_KV.delete(legacyStorageKey);
+      }
       console.log("Settings updated.", {
         email: accessEmail,
         version: record.version,
         provider: record.settings.provider,
         modelOverrides: Object.keys(record.settings.modelOverrides || {}).length,
-        allowlist: record.settings.accessAllowlist?.length || 0,
       });
 
       return json({

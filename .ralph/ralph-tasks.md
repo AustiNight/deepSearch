@@ -115,14 +115,14 @@
   - [x] Add tests for US vs non-US address inputs (UK, CA, EU formats) and verify correct policy behavior
   - [x] Acceptance: non-US address inputs are explicitly flagged as out-of-scope, evidence recovery and provider calls are skipped, and US-only record gates are not applied
 
-- [ ] Epic: Constraint Check (Guardrails)
-  - [ ] Add an automated guardrail check that validates new tasks/changes against the Guardrails section before execution
-  - [ ] Ensure any changes that would violate guardrails are blocked or require explicit feature flags that default to off
-  - [ ] Add repo-level secret scanning in CI to enforce “no secrets committed” (regex + allowlist)
-  - [ ] Add KV data policy (metadata-only, no PII, no keys) and tests that enforce redaction
-  - [ ] Add a CI/static check that forbids non-`/api/*` fetches in frontend code
-  - [ ] Add a GitHub Pages routing sanity check (asset paths + 404 handling) to preserve Pages hosting
-  - [ ] Acceptance: tasks and changes that violate guardrails or require user approvals are detected and prevented by automated checks
+- [x] Epic: Constraint Check (Guardrails)
+  - [x] Add an automated guardrail check that validates new tasks/changes against the Guardrails section before execution
+  - [x] Ensure any changes that would violate guardrails are blocked or require explicit feature flags that default to off
+  - [x] Add repo-level secret scanning in CI to enforce “no secrets committed” (regex + allowlist)
+  - [x] Add KV data policy (metadata-only, no PII, no keys) and tests that enforce redaction
+  - [x] Add a CI/static check that forbids non-`/api/*` fetches in frontend code
+  - [x] Add a GitHub Pages routing sanity check (asset paths + 404 handling) to preserve Pages hosting
+  - [x] Acceptance: tasks and changes that violate guardrails or require user approvals are detected and prevented by automated checks
 
 - [ ] Epic: Storage Policy Layer + Migration
   - [ ] Define a centralized storage policy module (e.g., `services/storagePolicy.ts`) that governs where each data class may be stored (memory, sessionStorage, localStorage)

@@ -773,7 +773,7 @@ export type UniversalSettingsPayload = {
   provider: LLMProvider;
   runConfig: RunConfig;
   modelOverrides: ModelOverrides;
-  accessAllowlist: string[];
+  accessAllowlist?: string[];
 };
 
 export type UniversalSettingsResponse = {

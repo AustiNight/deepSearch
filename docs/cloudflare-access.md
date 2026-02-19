@@ -13,18 +13,18 @@ The Settings modal provides a **CLOUDFLARE ACCESS ALLOWLIST** section and syncs 
 
 1. Open **SYSTEM_CONFIG** and add emails under **CLOUDFLARE ACCESS ALLOWLIST**.
 2. Click **SAVE**. The app calls the Worker endpoint `POST /api/access/allowlist` (relative to `PROXY_BASE_URL`).
-3. The Worker normalizes and stores the list in KV (`ACCESS_ALLOWLIST_KV`) and updates the Cloudflare Access policy.
+3. The Worker normalizes the list, updates the Cloudflare Access policy, and stores metadata only in KV (`ACCESS_ALLOWLIST_KV`) for conflict detection.
 4. A successful response includes the updated list and timestamp.
 
 Notes:
 - The allowlist helper is a convenience for policy entry; it does not secure the client app.
-- The KV list is the source of truth. CI/CD reconciliation reads from KV and applies policy updates.
+- The Cloudflare Access policy is the source of truth; KV stores metadata only (count/hash/version).
 - Manual fallback: **COPY ALLOWLIST** still formats the list for Cloudflare Access → Include → Emails in.
 
 ## Worker Endpoint Contract
 The Worker endpoint is guarded by Cloudflare Access. Requests must include Access headers (`Cf-Access-Jwt-Assertion` and `Cf-Access-Authenticated-User-Email`).
 
-- `GET /api/access/allowlist` returns `{ entries, updatedAt, updatedBy, version, count }` plus `ETag: <updatedAt>`.
+- `GET /api/access/allowlist` returns `{ entries, updatedAt, updatedBy, version, count }` plus `ETag: <updatedAt>`. Entries are sourced from the Access policy; `updatedBy` may be null (PII not persisted).
 - `POST`/`PUT /api/access/allowlist` accepts `{ entries, expectedUpdatedAt }`.
   - If `expectedUpdatedAt` (or `If-Match`) is missing and the KV list already exists, the Worker responds with `428`.
   - If `expectedUpdatedAt` is stale, the Worker responds with `409` and the current list/metadata.

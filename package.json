@@ -18,7 +18,11 @@
     "test:failure-modes": "node --loader ./scripts/ts-loader.mjs scripts/failure-modes.test.mjs",
     "test:open-data": "node --loader ./scripts/ts-loader.mjs scripts/open-data-providers.test.mjs",
     "test:same-origin": "node scripts/same-origin-fetch.test.mjs",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:guardrails": "node scripts/guardrails-check.mjs",
+    "test:secrets": "node scripts/secret-scan.test.mjs",
+    "test:kv-policy": "node --loader ./scripts/ts-loader.mjs scripts/kv-policy.test.mjs",
+    "test:pages": "node scripts/pages-sanity.test.mjs"
   },
   "dependencies": {
     "framer-motion": "^12.34.0",

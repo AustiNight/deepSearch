@@ -219,16 +219,20 @@ const App: React.FC = () => {
     setProvider(payload.provider);
     setRunConfig(payload.runConfig);
     setModelOverrides(payload.modelOverrides);
-    setAccessAllowlist(payload.accessAllowlist);
     localStorage.setItem('overseer_provider', payload.provider);
     localStorage.setItem('overseer_run_config', JSON.stringify(payload.runConfig));
-    localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(payload.accessAllowlist));
     saveModelOverrides(payload.modelOverrides);
+    if (Array.isArray(payload.accessAllowlist)) {
+      setAccessAllowlist(payload.accessAllowlist);
+      localStorage.setItem(ACCESS_ALLOWLIST_STORAGE_KEY, JSON.stringify(payload.accessAllowlist));
+    }
     if (options?.updateDraft) {
       setDraftProvider(payload.provider);
       setDraftRunConfig(payload.runConfig);
       setDraftModelOverrides(payload.modelOverrides);
-      setDraftAllowlistText(payload.accessAllowlist.join('\n'));
+      if (Array.isArray(payload.accessAllowlist)) {
+        setDraftAllowlistText(payload.accessAllowlist.join('\n'));
+      }
     }
   };
 
@@ -447,7 +451,6 @@ const App: React.FC = () => {
       provider: resolvedProvider,
       runConfig: resolvedRunConfig,
       modelOverrides: storedOverrides,
-      accessAllowlist: resolvedAllowlist,
       defaults: { runConfig: DEFAULT_RUN_CONFIG }
     });
 
@@ -569,7 +572,6 @@ const App: React.FC = () => {
       provider: draftProvider,
       runConfig: nextRunConfig,
       modelOverrides: sanitizedOverrides,
-      accessAllowlist: sanitizedAllowlist,
       defaults: { runConfig: DEFAULT_RUN_CONFIG }
     });
 

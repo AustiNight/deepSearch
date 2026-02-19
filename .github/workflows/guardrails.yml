@@ -1,0 +1,37 @@
+name: Guardrails
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Guardrail policy check
+        run: npm run test:guardrails
+
+      - name: Secret scan
+        run: npm run test:secrets
+
+      - name: KV policy check
+        run: npm run test:kv-policy
+
+      - name: Same-origin fetch check
+        run: npm run test:same-origin
+
+      - name: Pages routing sanity check
+        run: npm run test:pages

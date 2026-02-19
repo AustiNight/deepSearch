@@ -58,9 +58,9 @@ Visible only when **LLM PROVIDER** is set to OpenAI.
 | Validation | `validation` | Reasoning | `OPENAI_MODEL_REASONING` |
 
 ## Cloudflare Access Allowlist
-- **CLOUDFLARE ACCESS ALLOWLIST**: normalized, de-duplicated email list stored in `overseer_access_allowlist` (with `overseer_access_allowlist_updated_at` as the last sync timestamp).
-- **SAVE**: syncs the list to the Worker (`/api/access/allowlist`), which persists to KV and updates the Cloudflare Access policy.
-- **REFRESH**: fetches the KV-backed list and updates the local cache.
+- **CLOUDFLARE ACCESS ALLOWLIST**: normalized, de-duplicated email list cached locally (`overseer_access_allowlist`) with `overseer_access_allowlist_updated_at` as the last sync timestamp.
+- **SAVE**: syncs the list to the Worker (`/api/access/allowlist`), which updates the Cloudflare Access policy and stores metadata only in KV for conflict detection.
+- **REFRESH**: fetches the Access policy-backed list and updates the local cache.
 - **COPY ALLOWLIST**: formats the list for Cloudflare Access → Include → Emails in (manual fallback).
 - This helper does not secure the client app; Cloudflare Access policy does.
 

@@ -32,4 +32,11 @@ const serialized = JSON.stringify(payload);
 assert.ok(!serialized.includes('sk-test-should-not-leak'));
 assert.ok(!serialized.includes('AIza-test-should-not-leak'));
 
+const payloadWithoutAllowlist = buildUniversalSettingsPayload({
+  provider: 'google',
+  runConfig,
+  modelOverrides: {},
+});
+assert.ok(!('accessAllowlist' in payloadWithoutAllowlist));
+
 console.log('settings-serialization.test.mjs: ok');

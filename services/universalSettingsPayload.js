@@ -97,13 +97,16 @@ export const buildUniversalSettingsPayload = (input) => {
   const runConfig = sanitizeRunConfig(input?.runConfig, runConfigDefaults);
   const modelOverrides = sanitizeModelOverrides(input?.modelOverrides);
   const accessAllowlist = sanitizeAllowlistEntries(input?.accessAllowlist);
-  return {
+  const payload = {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     provider,
     runConfig,
-    modelOverrides,
-    accessAllowlist
+    modelOverrides
   };
+  if (Object.prototype.hasOwnProperty.call(input || {}, 'accessAllowlist')) {
+    payload.accessAllowlist = accessAllowlist;
+  }
+  return payload;
 };
 
 export const normalizeUniversalSettingsPayload = (rawPayload, defaults) => {
@@ -116,13 +119,17 @@ export const normalizeUniversalSettingsPayload = (rawPayload, defaults) => {
 
   const runConfig = sanitizeRunConfig(rawPayload.runConfig, defaults?.runConfig || {});
   const modelOverrides = sanitizeModelOverrides(rawPayload.modelOverrides);
-  const accessAllowlist = sanitizeAllowlistEntries(rawPayload.accessAllowlist);
+  const hasAllowlist = Object.prototype.hasOwnProperty.call(rawPayload, 'accessAllowlist');
+  const accessAllowlist = hasAllowlist ? sanitizeAllowlistEntries(rawPayload.accessAllowlist) : undefined;
 
-  return {
+  const payload = {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     provider,
     runConfig,
-    modelOverrides,
-    accessAllowlist
+    modelOverrides
   };
+  if (hasAllowlist) {
+    payload.accessAllowlist = accessAllowlist;
+  }
+  return payload;
 };
