@@ -1,4 +1,4 @@
-import type { DataGap, DataGapReasonCode, GeoPoint, Jurisdiction, ParcelInfo, PropertySubject, SourcePointer } from "../types";
+import type { DataGap, DataGapReasonCode, GeoPoint, Jurisdiction, ParcelInfo, ParcelResolutionMetrics, PropertySubject, SourcePointer } from "../types";
 import { normalizeAddressVariants } from "./addressNormalization";
 import { DATA_SOURCE_CONTRACTS } from "../data/dataSourceContracts";
 import { FAILURE_TAXONOMY } from "../data/failureTaxonomy";
@@ -85,6 +85,7 @@ export type ParcelResolutionResult = {
   gisCandidates: ParcelCandidate[];
   resolutionMethod?: ParcelResolutionMethod;
   dataGaps: DataGap[];
+  metrics?: ParcelResolutionMetrics;
 };
 
 const uniqueList = <T>(items: T[]) => Array.from(new Set(items));
@@ -285,6 +286,8 @@ export const resolveParcelWorkflow = async (
   input: ParcelResolutionInput,
   providers: ParcelResolutionProviders
 ): Promise<ParcelResolutionResult> => {
+  const startedAt = Date.now();
+  const hasProviders = Boolean(providers.geocode || providers.assessorLookup || providers.gisParcelLayer);
   const normalizedAddress = input.normalizedAddress
     || normalizeAddressVariants(input.address)[0]
     || input.address;
@@ -411,6 +414,26 @@ export const resolveParcelWorkflow = async (
   if (resolvedCandidate?.parcelId) subject.parcelId = resolvedCandidate.parcelId;
   if (resolvedCandidate?.accountId) subject.accountId = resolvedCandidate.accountId;
 
+  const failureReason = (() => {
+    if (!hasProviders) return "not_attempted";
+    if (resolvedCandidate) return undefined;
+    if (hasParcelAmbiguity) return "parcel_ambiguous";
+    const gapReason = dataGaps.find(gap => gap.reasonCode === "parcel_not_found" || gap.reasonCode === "data_unavailable")?.reasonCode;
+    return gapReason;
+  })();
+
+  const metrics: ParcelResolutionMetrics = {
+    attempted: hasProviders,
+    success: Boolean(resolvedCandidate),
+    method: resolutionMethod,
+    latencyMs: Date.now() - startedAt,
+    assessorCandidates: assessorCandidates.length,
+    gisCandidates: gisCandidates.length,
+    ambiguity: hasParcelAmbiguity,
+    failureReason,
+    derivedFrom: "workflow"
+  };
+
   return {
     subject,
     parcel: buildParcelFromCandidate(resolvedCandidate),
@@ -418,6 +441,7 @@ export const resolveParcelWorkflow = async (
     assessorCandidates,
     gisCandidates,
     resolutionMethod,
-    dataGaps
+    dataGaps,
+    metrics
   };
 };

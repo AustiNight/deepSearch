@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -507,6 +507,73 @@ const evaluatePrimaryRecordCoverage = (
     missing,
     unavailable,
     generatedAt: isoDateToday()
+  };
+};
+
+const roundMetric = (value: number, digits = 3) => {
+  const factor = Math.pow(10, digits);
+  return Math.round(value * factor) / factor;
+};
+
+const computeConfidenceQualityProxy = (
+  sections: ReportSection[],
+  primaryRecordCoverage?: PrimaryRecordCoverage
+): ConfidenceQualityMetrics => {
+  const confidences = sections
+    .map(section => (typeof section.confidence === 'number' ? section.confidence : null))
+    .filter((value): value is number => Number.isFinite(value));
+  if (confidences.length === 0) {
+    return {
+      averageSectionConfidence: 0,
+      minSectionConfidence: 0,
+      sectionsMeasured: 0,
+      proxyScore: 0
+    };
+  }
+  const average = confidences.reduce((sum, value) => sum + value, 0) / confidences.length;
+  const min = Math.min(...confidences);
+  const coveragePenalty = primaryRecordCoverage && !primaryRecordCoverage.complete ? 0.85 : 1;
+  const proxyScore = clamp(average * coveragePenalty, 0, 1);
+  return {
+    averageSectionConfidence: roundMetric(average),
+    minSectionConfidence: roundMetric(min),
+    sectionsMeasured: confidences.length,
+    coveragePenalty,
+    proxyScore: roundMetric(proxyScore)
+  };
+};
+
+const deriveParcelResolutionMetrics = (
+  primaryRecordCoverage?: PrimaryRecordCoverage,
+  addressLike?: boolean
+): ParcelResolutionMetrics | undefined => {
+  if (!addressLike) return undefined;
+  const entry = primaryRecordCoverage?.entries?.find(item => item.recordType === 'assessor_parcel');
+  if (!entry) {
+    return {
+      attempted: false,
+      success: false,
+      failureReason: 'not_attempted',
+      derivedFrom: 'primary_record_coverage'
+    };
+  }
+  const success = entry.status === 'covered';
+  const attempted = entry.status !== 'unavailable';
+  const failureReason = success
+    ? undefined
+    : entry.status === 'unavailable' || entry.status === 'restricted'
+      ? 'data_unavailable'
+      : entry.status === 'missing' || entry.status === 'partial' || entry.status === 'unknown'
+        ? 'parcel_not_found'
+        : undefined;
+
+  return {
+    attempted,
+    success,
+    method: success ? 'assessor' : undefined,
+    ambiguity: false,
+    failureReason,
+    derivedFrom: 'primary_record_coverage'
   };
 };
 
@@ -1555,6 +1622,8 @@ export const useOverseer = () => {
     setReport(null);
     setFindings([]);
     findingsRef.current = [];
+    const runStartedAt = Date.now();
+    const runMetrics: RunMetrics = {};
   }, []);
 
   const startResearch = useCallback(async (topic: string, provider: LLMProvider, apiKey: string, runConfig?: {
@@ -2826,9 +2895,20 @@ export const useOverseer = () => {
       }
 
       // --- PHASE 3C: EVIDENCE RECOVERY (ADDRESS-LIKE) ---
+      let evidenceRecoveryMetrics: EvidenceRecoveryMetrics | undefined;
       if (addressLike) {
+        const evidenceRecoveryStart = Date.now();
         const collectSources = () => findingsRef.current.flatMap((f: any) => Array.isArray(f.rawSources) ? f.rawSources : []);
         let evidenceStatus = evaluateEvidence(collectSources());
+        evidenceRecoveryMetrics = {
+          needed: !evidenceStatus.meetsAll,
+          attempted: false,
+          success: evidenceStatus.meetsAll,
+          executedQueries: 0,
+          sourcesRecovered: 0,
+          totalQueries: 0,
+          latencyMs: 0
+        };
         if (!evidenceStatus.meetsAll) {
           logOverseer(
             'PHASE 3C: EVIDENCE RECOVERY',
@@ -2858,6 +2938,9 @@ export const useOverseer = () => {
           const queriesToRun = [...priorityQueries, ...fallbackQueries]
             .slice(0, targetQueries)
             .map(item => item.query);
+
+          evidenceRecoveryMetrics.totalQueries = queriesToRun.length;
+          evidenceRecoveryMetrics.attempted = queriesToRun.length > 0;
 
           if (queriesToRun.length === 0) {
             logOverseer(
@@ -2893,6 +2976,7 @@ export const useOverseer = () => {
               }
 
               usedQueries.add(query);
+              evidenceRecoveryMetrics.executedQueries += 1;
 
               const agentId = generateId();
               const agentName = buildAgentNameForQuery('Evidence Recovery', query, index);
@@ -2928,6 +3012,7 @@ export const useOverseer = () => {
                 addLog(agentId, agentName, `Cache hit. Sources: ${cached.sources.length}`, 'success');
                 pushFinding({ ...cachedFinding, ...{ rawSources: cached.sources } } as any);
                 recoverySources.push(...cached.sources.map(s => s.uri));
+                evidenceRecoveryMetrics.sourcesRecovered += cached.sources.length;
                 evidenceStatus = evaluateEvidence(collectSources());
                 if (evidenceStatus.meetsAll) {
                   break;
@@ -3014,6 +3099,7 @@ export const useOverseer = () => {
               addLog(agentId, agentName, `Evidence recovery complete. Sources: ${result.sources.length}`, 'success');
               pushFinding({ ...recoveryFinding, ...{ rawSources: result.sources } } as any);
               recoverySources.push(...result.sources.map(s => s.uri));
+              evidenceRecoveryMetrics.sourcesRecovered += result.sources.length;
 
               evidenceStatus = evaluateEvidence(collectSources());
               if (evidenceStatus.meetsAll) {
@@ -3022,6 +3108,7 @@ export const useOverseer = () => {
             }
 
             if (recoveryTimedOut) {
+              evidenceRecoveryMetrics.timedOut = true;
               logOverseer(
                 'PHASE 3C: EVIDENCE RECOVERY',
                 EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_timeout.summary,
@@ -3043,6 +3130,7 @@ export const useOverseer = () => {
 
           evidenceStatus = evaluateEvidence(collectSources());
           if (!evidenceStatus.meetsAll) {
+            evidenceRecoveryMetrics.exhausted = true;
             logOverseer(
               'PHASE 3C: EVIDENCE RECOVERY',
               EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_exhausted.summary,
@@ -3059,7 +3147,10 @@ export const useOverseer = () => {
               'success'
             );
           }
+          evidenceRecoveryMetrics.success = evidenceStatus.meetsAll;
         }
+        evidenceRecoveryMetrics.latencyMs = Date.now() - evidenceRecoveryStart;
+        runMetrics.evidenceRecovery = evidenceRecoveryMetrics;
       }
 
       // --- PHASE 4: GRAND SYNTHESIS ---
@@ -3331,6 +3422,10 @@ export const useOverseer = () => {
           );
         }
       }
+      const parcelResolutionMetrics = deriveParcelResolutionMetrics(primaryRecordCoverage, addressLike);
+      if (parcelResolutionMetrics) {
+        runMetrics.parcelResolution = parcelResolutionMetrics;
+      }
       if (isValid) {
         const newDomains = uniqueList(reportSources.map((s: string) => normalizeDomain(s)));
         const validatedMethods = Array.from(methodQuerySources.entries())
@@ -3368,9 +3463,18 @@ export const useOverseer = () => {
         ...reportCandidate,
         sections: applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier?.dataGaps || [])
       };
+      runMetrics.confidenceQuality = computeConfidenceQualityProxy(reportWithConfidence.sections, primaryRecordCoverage);
+      runMetrics.runLatencyMs = Date.now() - runStartedAt;
+      const reportWithMetrics = {
+        ...reportWithConfidence,
+        provenance: {
+          ...reportWithConfidence.provenance,
+          runMetrics
+        }
+      };
 
       setReportSafe({
-        ...reportWithConfidence,
+        ...reportWithMetrics,
         propertyDossier: propertyDossier ?? undefined
       });
       

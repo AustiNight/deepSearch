@@ -110,6 +110,45 @@ export interface PrimaryRecordCoverage {
   generatedAt?: IsoDateString;
 }
 
+export interface ParcelResolutionMetrics {
+  attempted: boolean;
+  success: boolean;
+  method?: 'assessor' | 'gis';
+  latencyMs?: number;
+  assessorCandidates?: number;
+  gisCandidates?: number;
+  ambiguity?: boolean;
+  failureReason?: DataGapReasonCode | 'not_attempted';
+  derivedFrom?: 'workflow' | 'primary_record_coverage';
+}
+
+export interface EvidenceRecoveryMetrics {
+  needed: boolean;
+  attempted: boolean;
+  success: boolean;
+  timedOut?: boolean;
+  exhausted?: boolean;
+  totalQueries?: number;
+  executedQueries?: number;
+  sourcesRecovered?: number;
+  latencyMs?: number;
+}
+
+export interface ConfidenceQualityMetrics {
+  averageSectionConfidence: number;
+  minSectionConfidence: number;
+  sectionsMeasured: number;
+  coveragePenalty?: number;
+  proxyScore: number;
+}
+
+export interface RunMetrics {
+  runLatencyMs?: number;
+  parcelResolution?: ParcelResolutionMetrics;
+  evidenceRecovery?: EvidenceRecoveryMetrics;
+  confidenceQuality?: ConfidenceQualityMetrics;
+}
+
 export interface FinalReport {
   title: string;
   summary: string;
@@ -121,6 +160,7 @@ export interface FinalReport {
     primaryRecordCoverage?: PrimaryRecordCoverage;
     datasetCompliance?: DatasetComplianceEntry[];
     compliance?: ComplianceSummary;
+    runMetrics?: RunMetrics;
   };
   schemaVersion?: number;
   propertyDossier?: PropertyDossier;
