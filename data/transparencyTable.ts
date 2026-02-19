@@ -32,6 +32,22 @@ export type TransparencyCounts = {
   fields: number;
 };
 
+export type TransparencyMapInvalidationSource =
+  | 'panel-open'
+  | 'settings-save'
+  | 'settings-storage'
+  | 'taxonomy-update'
+  | 'taxonomy-storage'
+  | 'blueprint-update';
+
+export type TransparencyMapInvalidationDetail = {
+  source: TransparencyMapInvalidationSource;
+  at: number;
+  reason?: string;
+  updatedAt?: number;
+  changes?: Array<'taxonomy' | 'blueprint' | 'vertical' | 'subtopic' | 'method' | 'tactic' | 'settings'>;
+};
+
 export type TransparencyIntegrity = {
   ok: boolean;
   missingVerticals: string[];
@@ -50,6 +66,20 @@ export const TRANSPARENCY_TABLE_PERF = {
   expectedMaxRows: 24,
   virtualizationThreshold: 48,
   containIntrinsicRowSize: 140
+};
+
+export const TRANSPARENCY_MAP_UPDATE_POLICY = {
+  eventSources: [
+    'panel-open',
+    'settings-save',
+    'settings-storage',
+    'taxonomy-update',
+    'taxonomy-storage',
+    'blueprint-update'
+  ] as TransparencyMapInvalidationSource[],
+  debounceMs: 80,
+  throttleMs: 240,
+  maxComputeMs: 16
 };
 
 const groupHintRules = () => {

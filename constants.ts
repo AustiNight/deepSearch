@@ -9,6 +9,7 @@ export const SETTINGS_VERSION_KEY = 'overseer_settings_version';
 export const SETTINGS_LOCAL_UPDATED_AT_KEY = 'overseer_settings_local_updated_at';
 export const SETTINGS_UPDATED_EVENT = 'overseer:settings-updated';
 export const TAXONOMY_UPDATED_EVENT = 'overseer:taxonomy-updated';
+export const TRANSPARENCY_MAP_INVALIDATE_EVENT = 'overseer:transparency-map-invalidate';
 
 export const DEFAULT_LLM_PROVIDER = 'google';
 

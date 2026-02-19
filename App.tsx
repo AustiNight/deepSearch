@@ -18,6 +18,7 @@ import {
   setOpenDataPersistencePreference,
   updateOpenDataConfig
 } from './services/openDataConfig';
+import { dispatchTransparencyMapInvalidate } from './services/transparencyMapEvents';
 import {
   MODEL_OVERRIDE_STORAGE_KEY,
   SETTINGS_UPDATED_AT_KEY,
@@ -192,6 +193,11 @@ const App: React.FC = () => {
     if (typeof window === 'undefined') return;
     try {
       window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT, { detail }));
+      dispatchTransparencyMapInvalidate({
+        source: 'settings-save',
+        reason: 'settings update dispatched',
+        changes: ['settings']
+      });
     } catch (_) {
       // ignore
     }

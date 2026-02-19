@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal } from 'lucide-react';
-import { TAXONOMY_UPDATED_EVENT, SETTINGS_LOCAL_UPDATED_AT_KEY, SETTINGS_UPDATED_AT_KEY, SETTINGS_UPDATED_EVENT, SETTINGS_VERSION_KEY } from '../constants';
-import { getResearchTaxonomy, TAXONOMY_STORAGE_KEY } from '../data/researchTaxonomy';
+import { SETTINGS_LOCAL_UPDATED_AT_KEY, SETTINGS_UPDATED_AT_KEY, SETTINGS_VERSION_KEY, TRANSPARENCY_MAP_INVALIDATE_EVENT } from '../constants';
+import { TAXONOMY_STORAGE_KEY } from '../data/researchTaxonomy';
 import { TRANSPARENCY_LAYOUT } from '../data/transparencyLayout';
-import { buildTransparencyMapData, TRANSPARENCY_TABLE_PERF, type TransparencySettingsStamp } from '../data/transparencyTable';
-import { readTransparencySettingsStamp } from '../services/settingsSnapshot';
+import { TRANSPARENCY_MAP_UPDATE_POLICY, TRANSPARENCY_TABLE_PERF, type TransparencyMapInvalidationDetail } from '../data/transparencyTable';
+import { dispatchTransparencyMapInvalidate } from '../services/transparencyMapEvents';
+import { buildTransparencyMapSnapshot } from '../services/transparencyMapStore';
 
 type TransparencyPanelProps = {
   open: boolean;
@@ -30,31 +31,75 @@ const renderList = (items: React.ReactNode[], emptyLabel = '—') => {
 };
 
 export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onClose }) => {
-  const [taxonomy, setTaxonomy] = useState(() => getResearchTaxonomy());
-  const [settingsStamp, setSettingsStamp] = useState<TransparencySettingsStamp | null>(() => readTransparencySettingsStamp());
+  const [mapData, setMapData] = useState(() => buildTransparencyMapSnapshot());
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [activeRowIndex, setActiveRowIndex] = useState(0);
+  const pendingRefreshRef = useRef<number | null>(null);
+  const lastRefreshAtRef = useRef(0);
 
-  const mapData = useMemo(() => buildTransparencyMapData(taxonomy, settingsStamp), [taxonomy, settingsStamp]);
   const rows = mapData.rows;
   const counts = mapData.counts;
 
+  const recomputeMap = useCallback((detail?: TransparencyMapInvalidationDetail) => {
+    const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    setMapData(buildTransparencyMapSnapshot());
+    const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const elapsed = end - start;
+    if (elapsed > TRANSPARENCY_MAP_UPDATE_POLICY.maxComputeMs) {
+      console.warn('[TransparencyMap] recompute exceeded budget', { elapsedMs: Math.round(elapsed), detail });
+    }
+    lastRefreshAtRef.current = Date.now();
+  }, []);
+
+  const scheduleRefresh = useCallback((detail?: TransparencyMapInvalidationDetail) => {
+    if (!open || typeof window === 'undefined') return;
+    const now = Date.now();
+    const elapsed = now - lastRefreshAtRef.current;
+    const delay = elapsed < TRANSPARENCY_MAP_UPDATE_POLICY.throttleMs
+      ? TRANSPARENCY_MAP_UPDATE_POLICY.throttleMs - elapsed
+      : TRANSPARENCY_MAP_UPDATE_POLICY.debounceMs;
+
+    if (pendingRefreshRef.current) {
+      window.clearTimeout(pendingRefreshRef.current);
+    }
+    pendingRefreshRef.current = window.setTimeout(() => {
+      pendingRefreshRef.current = null;
+      recomputeMap(detail);
+    }, delay);
+  }, [open, recomputeMap]);
+
   useEffect(() => {
     if (!open) return;
-    setTaxonomy(getResearchTaxonomy());
-    setSettingsStamp(readTransparencySettingsStamp());
-  }, [open]);
+    recomputeMap({
+      source: 'panel-open',
+      at: Date.now(),
+      reason: 'panel opened',
+      changes: ['taxonomy', 'settings']
+    });
+  }, [open, recomputeMap]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingRefreshRef.current && typeof window !== 'undefined') {
+        window.clearTimeout(pendingRefreshRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const refreshTaxonomy = () => setTaxonomy(getResearchTaxonomy());
-    const refreshSettings = () => setSettingsStamp(readTransparencySettingsStamp());
-    const handleTaxonomyEvent = () => refreshTaxonomy();
-    const handleSettingsEvent = () => refreshSettings();
+    const handleInvalidate = (event: Event) => {
+      const detail = (event as CustomEvent<TransparencyMapInvalidationDetail>).detail;
+      scheduleRefresh(detail);
+    };
     const handleStorage = (event: StorageEvent) => {
       if (!event.key) return;
       if (event.key === TAXONOMY_STORAGE_KEY) {
-        refreshTaxonomy();
+        dispatchTransparencyMapInvalidate({
+          source: 'taxonomy-storage',
+          reason: 'taxonomy storage updated',
+          changes: ['taxonomy', 'vertical', 'subtopic', 'method', 'tactic', 'blueprint']
+        });
         return;
       }
       if (
@@ -62,19 +107,27 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
         event.key === SETTINGS_UPDATED_AT_KEY ||
         event.key === SETTINGS_VERSION_KEY
       ) {
-        refreshSettings();
+        dispatchTransparencyMapInvalidate({
+          source: 'settings-storage',
+          reason: 'settings storage updated',
+          changes: ['settings']
+        });
       }
     };
 
-    window.addEventListener(TAXONOMY_UPDATED_EVENT, handleTaxonomyEvent as EventListener);
-    window.addEventListener(SETTINGS_UPDATED_EVENT, handleSettingsEvent as EventListener);
+    window.addEventListener(TRANSPARENCY_MAP_INVALIDATE_EVENT, handleInvalidate as EventListener);
     window.addEventListener('storage', handleStorage);
     return () => {
-      window.removeEventListener(TAXONOMY_UPDATED_EVENT, handleTaxonomyEvent as EventListener);
-      window.removeEventListener(SETTINGS_UPDATED_EVENT, handleSettingsEvent as EventListener);
+      window.removeEventListener(TRANSPARENCY_MAP_INVALIDATE_EVENT, handleInvalidate as EventListener);
       window.removeEventListener('storage', handleStorage);
     };
-  }, []);
+  }, [scheduleRefresh]);
+
+  useEffect(() => {
+    if (!mapData.integrity.ok) {
+      console.warn('[TransparencyMap] integrity check failed', mapData.integrity);
+    }
+  }, [mapData.integrity]);
 
   useEffect(() => {
     if (activeRowIndex >= rows.length) {
@@ -83,6 +136,12 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
   }, [activeRowIndex, rows.length]);
 
   const scale = TRANSPARENCY_LAYOUT.scale?.default ?? 0.8;
+  const normalizedScale = Math.max(TRANSPARENCY_LAYOUT.scale?.hardMin ?? 0.6, scale);
+  const tableScaleStyle: React.CSSProperties = {
+    transform: `scale(${normalizedScale})`,
+    transformOrigin: 'top left',
+    width: `${100 / normalizedScale}%`
+  };
   const integrityLabel = !mapData.integrity.ok
     ? `Integrity warning: ${mapData.integrity.missingVerticals.length} vertical(s), ${mapData.integrity.missingSubtopics.length} subtopic(s) missing.`
     : null;
@@ -184,80 +243,81 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
             move in larger steps.
           </p>
           <div className="h-full w-full overflow-auto">
-            <table
-              className="min-w-[1200px] w-full border-collapse text-[13px] md:text-[14px] font-mono text-gray-200 print:text-gray-900"
-              aria-label="Transparency Map"
-              aria-describedby={KEYBOARD_HELP_ID}
-              style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}
-            >
-              <colgroup>
-                <col style={{ width: '16%' }} />
-                <col style={{ width: '16%' }} />
-                <col style={{ width: '16%' }} />
-                <col style={{ width: '28%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
-              </colgroup>
-              <thead>
-                <tr className="text-[12px] md:text-[13px] uppercase tracking-widest">
-                  {['Vertical', 'Blueprint Fields', 'Subtopics', 'Methods/Tactics', 'Seed Query', 'Hint Rules'].map((header) => (
-                    <th
-                      key={header}
-                      scope="col"
-                      className="sticky top-0 z-20 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-3 py-2 text-left text-gray-400 print:bg-white print:text-gray-700 print:border-gray-300"
-                    >
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, index) => (
-                  <tr
-                    key={row.id}
-                    ref={(element) => {
-                      rowRefs.current[index] = element;
-                    }}
-                    tabIndex={index === activeRowIndex ? 0 : -1}
-                    onFocus={() => setActiveRowIndex(index)}
-                    onKeyDown={(event) => handleRowKeyDown(event, index)}
-                    className="border-b border-gray-800 even:bg-gray-900/40 focus:outline-none focus:ring-2 focus:ring-cyber-blue/50 print:border-gray-300 print:even:bg-gray-100"
-                    style={rowStyle}
-                  >
-                    <th scope="row" className="align-top px-3 py-3 text-left font-semibold text-cyber-green print:text-black">
-                      <div className="text-[13px] uppercase tracking-widest">{row.label}</div>
-                      <div className="text-[11px] text-gray-500 print:text-gray-700">{row.id}</div>
-                      {row.description && (
-                        <div className="mt-1 text-[11px] text-gray-400 print:text-gray-700">{row.description}</div>
-                      )}
-                    </th>
-                    <td className="align-top px-3 py-3">
-                      {renderList(row.blueprintFields, 'No blueprint fields defined.')}
-                    </td>
-                    <td className="align-top px-3 py-3">
-                      {renderList(row.subtopics, 'No subtopics defined.')}
-                    </td>
-                    <td className="align-top px-3 py-3">
-                      {renderList(row.methods, 'No methods or tactics defined.')}
-                    </td>
-                    <td className="align-top px-3 py-3 text-cyber-blue print:text-black">
-                      <span className="font-semibold">{row.seedQuery}</span>
-                    </td>
-                    <td className="align-top px-3 py-3">
-                      {renderList(
-                        row.hintRules.map((rule) => (
-                          <span key={rule.id}>
-                            {rule.signals}{' '}
-                            <span className="text-gray-500 print:text-gray-700">({rule.id})</span>
-                          </span>
-                        )),
-                        'No hint rules defined.'
-                      )}
-                    </td>
+            <div style={tableScaleStyle}>
+              <table
+                className="min-w-[1200px] w-full table-fixed border-collapse text-[14px] md:text-[15px] lg:text-[16px] leading-5 font-mono text-gray-200 print:text-gray-900"
+                aria-label="Transparency Map"
+                aria-describedby={KEYBOARD_HELP_ID}
+              >
+                <colgroup>
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '28%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '12%' }} />
+                </colgroup>
+                <thead>
+                  <tr className="text-[12px] md:text-[13px] uppercase tracking-widest">
+                    {['Vertical', 'Blueprint Fields', 'Subtopics', 'Methods/Tactics', 'Seed Query', 'Hint Rules'].map((header) => (
+                      <th
+                        key={header}
+                        scope="col"
+                        className="sticky top-0 z-20 bg-gray-950/95 backdrop-blur border-b border-gray-800 px-3 py-2 text-left text-gray-400 print:bg-white print:text-gray-700 print:border-gray-300"
+                      >
+                        {header}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.map((row, index) => (
+                    <tr
+                      key={row.id}
+                      ref={(element) => {
+                        rowRefs.current[index] = element;
+                      }}
+                      tabIndex={index === activeRowIndex ? 0 : -1}
+                      onFocus={() => setActiveRowIndex(index)}
+                      onKeyDown={(event) => handleRowKeyDown(event, index)}
+                      className="border-b border-gray-800 even:bg-gray-900/40 focus:outline-none focus:ring-2 focus:ring-cyber-blue/50 print:border-gray-300 print:even:bg-gray-100"
+                      style={rowStyle}
+                    >
+                      <th scope="row" className="align-top px-3 py-3 text-left font-semibold text-cyber-green print:text-black">
+                        <div className="text-[13px] uppercase tracking-widest">{row.label}</div>
+                        <div className="text-[11px] text-gray-500 print:text-gray-700">{row.id}</div>
+                        {row.description && (
+                          <div className="mt-1 text-[11px] text-gray-400 print:text-gray-700">{row.description}</div>
+                        )}
+                      </th>
+                      <td className="align-top px-3 py-3">
+                        {renderList(row.blueprintFields, 'No blueprint fields defined.')}
+                      </td>
+                      <td className="align-top px-3 py-3">
+                        {renderList(row.subtopics, 'No subtopics defined.')}
+                      </td>
+                      <td className="align-top px-3 py-3">
+                        {renderList(row.methods, 'No methods or tactics defined.')}
+                      </td>
+                      <td className="align-top px-3 py-3 text-cyber-blue print:text-black">
+                        <span className="font-semibold">{row.seedQuery}</span>
+                      </td>
+                      <td className="align-top px-3 py-3">
+                        {renderList(
+                          row.hintRules.map((rule) => (
+                            <span key={rule.id}>
+                              {rule.signals}{' '}
+                              <span className="text-gray-500 print:text-gray-700">({rule.id})</span>
+                            </span>
+                          )),
+                          'No hint rules defined.'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 

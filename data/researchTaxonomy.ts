@@ -1,4 +1,5 @@
 import { TAXONOMY_UPDATED_EVENT } from '../constants';
+import { dispatchTransparencyMapInvalidate } from '../services/transparencyMapEvents';
 
 export type ResearchVerticalId = string;
 
@@ -940,6 +941,12 @@ export interface TaxonomyStore {
   addedTactics: Record<string, Record<string, ResearchTacticTemplate[]>>;
 }
 
+type TaxonomyInvalidationOverride = {
+  source?: 'taxonomy-update' | 'blueprint-update';
+  reason?: string;
+  changes?: Array<'taxonomy' | 'blueprint' | 'vertical' | 'subtopic' | 'method' | 'tactic'>;
+};
+
 const emptyStore = (): TaxonomyStore => ({
   version: TAXONOMY_VERSION,
   updatedAt: 0,
@@ -967,12 +974,18 @@ export const loadTaxonomyStore = (): TaxonomyStore => {
   }
 };
 
-export const saveTaxonomyStore = (store: TaxonomyStore) => {
+export const saveTaxonomyStore = (store: TaxonomyStore, invalidation?: TaxonomyInvalidationOverride) => {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
     window.localStorage.setItem(TAXONOMY_STORAGE_KEY, JSON.stringify(store));
     try {
       window.dispatchEvent(new CustomEvent(TAXONOMY_UPDATED_EVENT, { detail: { updatedAt: store.updatedAt, version: store.version } }));
+      dispatchTransparencyMapInvalidate({
+        source: invalidation?.source ?? 'taxonomy-update',
+        reason: invalidation?.reason ?? 'taxonomy fetch/save completed',
+        updatedAt: store.updatedAt,
+        changes: invalidation?.changes ?? ['taxonomy', 'vertical', 'subtopic', 'method', 'tactic', 'blueprint']
+      });
     } catch (_) {
       // ignore
     }
@@ -1420,7 +1433,14 @@ export const vetAndPersistTaxonomyProposals = (
 
   if (accepted > 0) {
     store.updatedAt = now;
-    saveTaxonomyStore(store);
+    const includesBlueprints = Array.isArray(proposals?.verticals) && proposals.verticals.length > 0;
+    saveTaxonomyStore(store, {
+      source: includesBlueprints ? 'blueprint-update' : 'taxonomy-update',
+      reason: includesBlueprints ? 'taxonomy + blueprint update' : 'taxonomy update',
+      changes: includesBlueprints
+        ? ['taxonomy', 'vertical', 'subtopic', 'method', 'tactic', 'blueprint']
+        : ['taxonomy', 'vertical', 'subtopic', 'method', 'tactic']
+    });
   }
 
   return { accepted, rejected, acceptedItems, rejectedItems };
