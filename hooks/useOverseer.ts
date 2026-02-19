@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -20,7 +20,10 @@ import {
   EARLY_STOP_DIMINISHING_SCORE,
   EARLY_STOP_NOVELTY_RATIO,
   EARLY_STOP_NEW_DOMAINS,
-  EARLY_STOP_NEW_SOURCES
+  EARLY_STOP_NEW_SOURCES,
+  MIN_EVIDENCE_TOTAL_SOURCES,
+  MIN_EVIDENCE_AUTHORITATIVE_SOURCES,
+  MIN_EVIDENCE_AUTHORITY_SCORE
 } from '../constants';
 import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
@@ -37,6 +40,83 @@ const normalizeDomain = (url: string) => {
   } catch (_) {
     return '';
   }
+};
+
+const EVIDENCE_RECOVERY_CACHE_KEY = 'overseer_evidence_recovery_cache_v1';
+const EVIDENCE_RECOVERY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const EVIDENCE_RECOVERY_MAX_ATTEMPTS = 3;
+const EVIDENCE_RECOVERY_BASE_DELAY_MS = 700;
+const EVIDENCE_RECOVERY_MAX_QUERIES = 6;
+const EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES = 200;
+const EVIDENCE_RECOVERY_MAX_TEXT_CHARS = 12000;
+
+type EvidenceRecoveryCacheEntry = {
+  text: string;
+  sources: NormalizedSource[];
+  timestamp: number;
+};
+
+type EvidenceRecoveryCache = Record<string, EvidenceRecoveryCacheEntry>;
+
+type EvidenceRecoveryErrorCode =
+  | 'threshold_unmet'
+  | 'recovery_failed'
+  | 'recovery_exhausted'
+  | 'recovery_timeout';
+
+const EVIDENCE_RECOVERY_ERROR_TAXONOMY: Record<EvidenceRecoveryErrorCode, { severity: 'info' | 'warning' | 'error'; summary: string }> = {
+  threshold_unmet: {
+    severity: 'warning',
+    summary: 'Evidence thresholds not met for address-like topic.'
+  },
+  recovery_failed: {
+    severity: 'warning',
+    summary: 'Evidence recovery search failed to return sources.'
+  },
+  recovery_exhausted: {
+    severity: 'error',
+    summary: 'Evidence recovery exhausted and thresholds remain unmet.'
+  },
+  recovery_timeout: {
+    severity: 'warning',
+    summary: 'Evidence recovery timed out or was interrupted.'
+  }
+};
+
+const loadEvidenceRecoveryCache = (): EvidenceRecoveryCache => {
+  try {
+    const stored = localStorage.getItem(EVIDENCE_RECOVERY_CACHE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object') return parsed as EvidenceRecoveryCache;
+    }
+  } catch (_) {
+    // ignore cache failures
+  }
+  return {};
+};
+
+const saveEvidenceRecoveryCache = (cache: EvidenceRecoveryCache) => {
+  try {
+    localStorage.setItem(EVIDENCE_RECOVERY_CACHE_KEY, JSON.stringify(cache));
+  } catch (_) {
+    // ignore cache failures
+  }
+};
+
+const pruneEvidenceRecoveryCache = (cache: EvidenceRecoveryCache) => {
+  const now = Date.now();
+  const entries = Object.entries(cache)
+    .filter(([_, entry]) => entry && typeof entry.timestamp === 'number' && now - entry.timestamp <= EVIDENCE_RECOVERY_CACHE_TTL_MS)
+    .sort((a, b) => b[1].timestamp - a[1].timestamp)
+    .slice(0, EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES);
+  return Object.fromEntries(entries);
+};
+
+const buildEvidenceRecoveryCacheKey = (provider: LLMProvider, topic: string, query: string) => {
+  const normalizedQuery = query.toLowerCase().replace(/\s+/g, ' ').trim();
+  const normalizedTopic = topic.toLowerCase().replace(/\s+/g, ' ').trim();
+  return `${provider}:${normalizedTopic}:${normalizedQuery}`;
 };
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
@@ -77,6 +157,127 @@ const normalizeForMatch = (value: string) => {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+};
+
+const AGGREGATOR_DOMAINS = new Set([
+  'zillow.com',
+  'redfin.com',
+  'realtor.com',
+  'trulia.com',
+  'loopnet.com',
+  'propertyshark.com',
+  'homes.com',
+  'apartments.com'
+]);
+
+const SOCIAL_DOMAINS = new Set([
+  'facebook.com',
+  'twitter.com',
+  'x.com',
+  'reddit.com',
+  'instagram.com',
+  'tiktok.com',
+  'linkedin.com'
+]);
+
+const scoreAuthority = (source: NormalizedSource) => {
+  const domain = (source.domain || '').toLowerCase();
+  const title = (source.title || '').toLowerCase();
+  let score = 20;
+
+  if (domain.endsWith('.gov') || domain.includes('.gov.')) score += 60;
+  if (domain.endsWith('.mil') || domain.includes('.mil.')) score += 60;
+  if (domain.endsWith('.us')) score += 30;
+
+  if (/assessor|appraiser|appraisal|cad|property|parcel|tax|treasurer|recorder|clerk|register|gis|zoning|planning|permit|code\s*enforcement|deed/.test(domain)) {
+    score += 20;
+  }
+  if (/assessor|appraiser|parcel|property|tax|treasurer|recorder|clerk|gis|zoning|permit|deed/.test(title)) {
+    score += 10;
+  }
+  if (/arcgis|opendata|socrata|data\.city|data\.county/.test(domain)) {
+    score += 10;
+  }
+
+  if (AGGREGATOR_DOMAINS.has(domain) || /zillow|redfin|realtor|trulia|loopnet|propertyshark/.test(domain)) {
+    score -= 25;
+  }
+  if (SOCIAL_DOMAINS.has(domain) || /facebook|twitter|reddit|instagram|tiktok|linkedin/.test(domain)) {
+    score -= 30;
+  }
+
+  return Math.max(0, Math.min(100, score));
+};
+
+const evaluateEvidence = (sources: NormalizedSource[]) => {
+  const uniqueSources = Array.from(new Map(sources.map(source => [source.uri, source])).values());
+  let authoritativeSources = 0;
+  let maxAuthorityScore = 0;
+  uniqueSources.forEach((source) => {
+    const score = scoreAuthority(source);
+    if (score >= 60) authoritativeSources += 1;
+    if (score > maxAuthorityScore) maxAuthorityScore = score;
+  });
+  const totalSources = uniqueSources.length;
+  const meetsTotal = totalSources >= MIN_EVIDENCE_TOTAL_SOURCES;
+  const meetsAuthoritative = authoritativeSources >= MIN_EVIDENCE_AUTHORITATIVE_SOURCES;
+  const meetsAuthorityScore = maxAuthorityScore >= MIN_EVIDENCE_AUTHORITY_SCORE;
+  return {
+    totalSources,
+    authoritativeSources,
+    maxAuthorityScore,
+    meetsTotal,
+    meetsAuthoritative,
+    meetsAuthorityScore,
+    meetsAll: meetsTotal && meetsAuthoritative && meetsAuthorityScore
+  };
+};
+
+const buildEvidenceRecoveryQueries = (slots: Record<string, unknown>, addressDirectQueries: string[]) => {
+  const addresses = Array.isArray(slots.address)
+    ? slots.address.map(value => String(value || '').trim()).filter(Boolean)
+    : [];
+  const address = addresses[0] || '';
+  const addressQuoted = address ? `"${address}"` : '';
+  const city = Array.isArray(slots.city) ? String(slots.city[0] || '').trim() : '';
+  const county = Array.isArray(slots.countyPrimary) ? String(slots.countyPrimary[0] || '').trim() : '';
+  const state = Array.isArray(slots.state) ? String(slots.state[0] || '').trim() : '';
+  const authorityPrimary = Array.isArray(slots.propertyAuthorityPrimary) ? String(slots.propertyAuthorityPrimary[0] || '').trim() : '';
+  const authoritySecondary = Array.isArray(slots.propertyAuthoritySecondary) ? String(slots.propertyAuthoritySecondary[0] || '').trim() : '';
+
+  const baseQueries = [
+    `${county} ${authorityPrimary} parcel search`,
+    `${county} ${authorityPrimary} property search`,
+    `${county} assessor property card`,
+    `${county} tax assessor parcel`,
+    `${county} tax collector property`,
+    `${county} recorder deed search`,
+    `${county} GIS parcel map`,
+    `${county} zoning GIS`,
+    `${addressQuoted} ${authorityPrimary}`.trim(),
+    `${addressQuoted} assessor`.trim(),
+    `${addressQuoted} "property appraiser"`.trim(),
+    `${addressQuoted} GIS parcel`.trim(),
+    `${addressQuoted} parcel map site:.gov`.trim(),
+    `${addressQuoted} property card site:.gov`.trim(),
+    `${city ? `"${city}"` : ''} ${authoritySecondary} ${address}`.trim(),
+    `${addressQuoted} ${city ? `"${city}"` : ''} ${state}`.trim()
+  ].filter(Boolean);
+
+  return uniqueList([...baseQueries, ...addressDirectQueries]);
+};
+
+const scoreEvidenceRecoveryQuery = (query: string) => {
+  const lower = query.toLowerCase();
+  let score = 0;
+  if (lower.includes('assessor') || lower.includes('appraiser') || lower.includes('appraisal district')) score += 3;
+  if (lower.includes('parcel') || lower.includes('property card')) score += 3;
+  if (lower.includes('gis')) score += 3;
+  if (lower.includes('tax') || lower.includes('collector')) score += 2;
+  if (lower.includes('recorder') || lower.includes('clerk') || lower.includes('deed')) score += 2;
+  if (lower.includes('zoning') || lower.includes('permit')) score += 1;
+  if (lower.includes('site:.gov') || lower.includes('site:.us')) score += 2;
+  return score;
 };
 
 const STATE_NAME_TO_CODE: Record<string, string> = {
@@ -1190,6 +1391,7 @@ export const useOverseer = () => {
     const modelOverrides = runConfig?.modelOverrides;
     const requestOptions = { signal };
     const knowledgeBase = loadKnowledgeBase();
+    let evidenceRecoveryCache = pruneEvidenceRecoveryCache(loadEvidenceRecoveryCache());
     const usedQueries = new Set<string>();
     const methodCandidateQueries: string[] = [];
     const methodQuerySources = new Map<string, string[]>();
@@ -2343,6 +2545,180 @@ export const useOverseer = () => {
             undefined,
             'warning'
           );
+        }
+      }
+
+      // --- PHASE 3C: EVIDENCE RECOVERY (ADDRESS-LIKE) ---
+      if (addressLike) {
+        const collectSources = () => findingsRef.current.flatMap((f: any) => Array.isArray(f.rawSources) ? f.rawSources : []);
+        let evidenceStatus = evaluateEvidence(collectSources());
+        if (!evidenceStatus.meetsAll) {
+          logOverseer(
+            'PHASE 3C: EVIDENCE RECOVERY',
+            EVIDENCE_RECOVERY_ERROR_TAXONOMY.threshold_unmet.summary,
+            'prioritize authoritative property records + GIS layers',
+            `sources total ${evidenceStatus.totalSources}, authoritative ${evidenceStatus.authoritativeSources}, maxAuthorityScore ${evidenceStatus.maxAuthorityScore}`,
+            'warning'
+          );
+
+          const recoveryQueries = buildEvidenceRecoveryQueries(slotValuesAny, addressDirectQueries);
+          const prioritizedQueries = recoveryQueries
+            .map(query => ({ query, score: scoreEvidenceRecoveryQuery(query) }))
+            .sort((a, b) => b.score - a.score)
+            .map(item => item.query);
+
+          const neededTotal = Math.max(0, MIN_EVIDENCE_TOTAL_SOURCES - evidenceStatus.totalSources);
+          const neededAuthoritative = Math.max(0, MIN_EVIDENCE_AUTHORITATIVE_SOURCES - evidenceStatus.authoritativeSources);
+          const targetQueries = Math.min(
+            EVIDENCE_RECOVERY_MAX_QUERIES,
+            Math.max(1, neededTotal + neededAuthoritative)
+          );
+          const queriesToRun = prioritizedQueries.filter(q => !usedQueries.has(q)).slice(0, targetQueries);
+
+          if (queriesToRun.length === 0) {
+            logOverseer(
+              'PHASE 3C: EVIDENCE RECOVERY',
+              'no recovery queries available',
+              'skip recovery pass',
+              'all candidate queries already used',
+              'warning'
+            );
+          } else {
+            const recoverySources: string[] = [];
+            for (const [index, query] of queriesToRun.entries()) {
+              ensureActive();
+              usedQueries.add(query);
+
+              const agentId = generateId();
+              const agentName = buildAgentNameForQuery('Evidence Recovery', query, index);
+              const agent: Agent = {
+                id: agentId,
+                name: agentName,
+                type: AgentType.RESEARCHER,
+                status: AgentStatus.SEARCHING,
+                task: 'Evidence recovery',
+                reasoning: [`Recovery query: ${query}`],
+                findings: [],
+                parentId: overseerId
+              };
+              addAgent(agent);
+              addLog(agentId, agentName, `Evidence recovery query: ${query}`, 'info');
+
+              const cacheKey = buildEvidenceRecoveryCacheKey(provider, topic, query);
+              const cached = evidenceRecoveryCache[cacheKey];
+              const cacheFresh = cached ? Date.now() - cached.timestamp <= EVIDENCE_RECOVERY_CACHE_TTL_MS : false;
+
+              if (cached && cacheFresh && cached.sources.length > 0) {
+                const cachedFinding: Finding = {
+                  source: agentName,
+                  content: cached.text || 'Cached evidence recovery result.',
+                  confidence: 0.85,
+                  url: cached.sources.map(s => s.uri).join(', ')
+                };
+                updateAgent(agentId, {
+                  status: AgentStatus.COMPLETE,
+                  findings: [cachedFinding],
+                  reasoning: ['cache hit', `sources ${cached.sources.length}`]
+                });
+                addLog(agentId, agentName, `Cache hit. Sources: ${cached.sources.length}`, 'success');
+                pushFinding({ ...cachedFinding, ...{ rawSources: cached.sources } } as any);
+                recoverySources.push(...cached.sources.map(s => s.uri));
+                continue;
+              }
+
+              let attempt = 0;
+              let result: { text: string; sources: NormalizedSource[] } | null = null;
+              while (attempt < EVIDENCE_RECOVERY_MAX_ATTEMPTS) {
+                ensureActive();
+                attempt += 1;
+                try {
+                  result = await runSafely(performDeepResearch(
+                    agentName,
+                    'Evidence recovery',
+                    query,
+                    (msg) => addLog(agentId, agentName, msg, 'info'),
+                    { modelOverrides, l1Role: 'deep_research_l1', l2Role: 'deep_research_l2', signal }
+                  ));
+                } catch (err: any) {
+                  if (err?.name === 'AbortError') throw err;
+                  result = null;
+                }
+
+                if (result && result.sources.length > 0) break;
+                if (attempt < EVIDENCE_RECOVERY_MAX_ATTEMPTS) {
+                  const delay = EVIDENCE_RECOVERY_BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 250;
+                  await wait(delay, signal);
+                }
+              }
+
+              if (!result || result.sources.length === 0) {
+                updateAgent(agentId, { status: AgentStatus.FAILED });
+                logOverseer(
+                  'PHASE 3C: EVIDENCE RECOVERY',
+                  EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_failed.summary,
+                  'query failed',
+                  query,
+                  'warning'
+                );
+                continue;
+              }
+
+              const resultText = result.text || '';
+              const trimmedText = resultText.length > EVIDENCE_RECOVERY_MAX_TEXT_CHARS
+                ? `${resultText.slice(0, EVIDENCE_RECOVERY_MAX_TEXT_CHARS)}\n...[truncated]`
+                : resultText;
+              evidenceRecoveryCache[cacheKey] = {
+                text: trimmedText,
+                sources: result.sources,
+                timestamp: Date.now()
+              };
+              evidenceRecoveryCache = pruneEvidenceRecoveryCache(evidenceRecoveryCache);
+              saveEvidenceRecoveryCache(evidenceRecoveryCache);
+
+              const recoveryFinding: Finding = {
+                source: agentName,
+                content: trimmedText,
+                confidence: 0.85,
+                url: result.sources.map(s => s.uri).join(', ')
+              };
+              updateAgent(agentId, {
+                status: AgentStatus.COMPLETE,
+                findings: [recoveryFinding],
+                reasoning: [`Indexed ${result.sources.length} sources`, 'evidence recovery complete']
+              });
+              addLog(agentId, agentName, `Evidence recovery complete. Sources: ${result.sources.length}`, 'success');
+              pushFinding({ ...recoveryFinding, ...{ rawSources: result.sources } } as any);
+              recoverySources.push(...result.sources.map(s => s.uri));
+            }
+
+            if (recoverySources.length > 0) {
+              recordExhaustionRound(
+                exhaustionTracker,
+                'evidence_recovery',
+                queriesToRun,
+                recoverySources
+              );
+            }
+          }
+
+          evidenceStatus = evaluateEvidence(collectSources());
+          if (!evidenceStatus.meetsAll) {
+            logOverseer(
+              'PHASE 3C: EVIDENCE RECOVERY',
+              EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_exhausted.summary,
+              'thresholds still unmet',
+              `sources total ${evidenceStatus.totalSources}, authoritative ${evidenceStatus.authoritativeSources}, maxAuthorityScore ${evidenceStatus.maxAuthorityScore}`,
+              'warning'
+            );
+          } else {
+            logOverseer(
+              'PHASE 3C: EVIDENCE RECOVERY',
+              'thresholds met after recovery',
+              'resume synthesis',
+              `sources total ${evidenceStatus.totalSources}, authoritative ${evidenceStatus.authoritativeSources}, maxAuthorityScore ${evidenceStatus.maxAuthorityScore}`,
+              'success'
+            );
+          }
         }
       }
 
