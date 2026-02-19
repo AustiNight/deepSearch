@@ -9,7 +9,7 @@
   - [x] Set explicit evidence thresholds as constants (min total sources, min authoritative sources, min authority score) and document them in taxonomy/overseer prompts
   - [x] Define a data currency policy per record type (max acceptable age, recency weighting, and out-of-date handling)
   - [x] Build a jurisdiction availability matrix for primary records (CAD/assessor, tax collector, deed/recorder, zoning/GIS, permits, code enforcement) with explicit “unavailable” semantics
-  - [ ] Specify data source contracts per record type (endpoint/portal, query inputs, expected fields, rate limits, and parsing rules) and store them in a centralized config
+  - [x] Specify data source contracts per record type (endpoint/portal, query inputs, expected fields, rate limits, and parsing rules) and store them in a centralized config
   - [ ] Define a ground-truth calibration plan for thresholds/confidence (sample addresses, expected parcel IDs, rubric) and tune scoring against it
   - [ ] Implement address normalization rules (USPS abbreviations, directional variants, unit handling) and reuse normalized variants across all queries
   - [ ] Implement parcel-resolution workflow: geocode to lat/lon, resolve parcel ID via CAD/assessor lookup, and fall back to GIS parcel-layer spatial join
