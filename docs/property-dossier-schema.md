@@ -265,6 +265,27 @@ Mapping rules:
 - If a page mixes sources, assign `sourceType` per cited record, not per page.
 - If provenance cannot be established, set `sourceType` to `unknown` and add a `DataGap` noting missing publisher/provenance.
 
+## Data Currency Policy
+
+Data currency is evaluated per record type using `CitationSource.dataCurrency`. Set `dataCurrency.asOf` to the effective date of the record when available. If missing, fall back to `sourceUpdatedAt`, then `retrievedAt`. `dataCurrency.ageDays` is derived as the age between `dataCurrency.asOf` and `retrievedAt` (or current date if `retrievedAt` is missing).
+
+Recency weighting uses the claim confidence `R` component: `R = clamp(1 - (minAgeDays / maxAgeDays), 0, 1)`. `maxAgeDays` is defined per record type below. When multiple record types can support a field, use the smallest applicable `maxAgeDays` to avoid overstating recency.
+
+Out-of-date handling:
+If `dataCurrency.ageDays > maxAgeDays`, add a `DataGap` with `status=stale` for the affected field(s), include the last known `dataCurrency.asOf`, and surface an "Out of date as of YYYY-MM-DD" note in the report. For scoring, set `R = 0` for those claims and cap `confidence` at `0.40` to reflect staleness.
+
+| recordType | Applies to fields | maxAgeDays | Out-of-date handling |
+| --- | --- | --- | --- |
+| `assessor_parcel` | `/parcel/*`, structural characteristics (year built, building area), parcel land use | 730 | Mark stale if parcel record or assessor roll is older than 2 years. |
+| `tax_appraisal` | `/taxAppraisal/assessmentYear`, `/taxAppraisal/assessedValueUsd`, `/taxAppraisal/marketValueUsd`, `/taxAppraisal/landValueUsd`, `/taxAppraisal/improvementValueUsd`, `/taxAppraisal/taxableValueUsd` | 730 | Mark stale if assessment roll older than 2 years. |
+| `tax_collector` | `/taxAppraisal/taxAmountUsd`, `/taxAppraisal/taxRatePct`, `/taxAppraisal/taxStatus`, `/taxAppraisal/exemptions` | 540 | Mark stale if tax billing data older than 18 months. |
+| `deed_recorder` | `/ownership/*`, `/ownershipHistory/*` | 36500 | Do not mark stale based on transfer date alone. Mark stale only when the recorder dataset update is older than 100 years or explicitly flagged as outdated. |
+| `zoning_gis` | `/zoningLandUse/*` | 1095 | Mark stale if zoning GIS or ordinance update older than 3 years. |
+| `permits` | `/permitsAndCode/permits/*` | 1825 | For permit records, use the last status update date as `dataCurrency.asOf`. Mark stale if the permitting dataset update is older than 5 years. |
+| `code_enforcement` | `/permitsAndCode/codeViolations/*` | 1095 | For violations, use the last status update date. Mark stale if the dataset update is older than 3 years. |
+| `hazards_environmental` | `/hazardsEnvironmental/*` | 1825 | Mark stale if registry/GIS updates older than 5 years. |
+| `neighborhood_context` | `/neighborhoodContext/*` | 3650 | Mark stale if boundary or Census vintage is older than 10 years. |
+
 ## Field-Level Lineage Rules
 
 ### Global Precedence and Conflict Resolution
