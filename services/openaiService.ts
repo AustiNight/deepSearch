@@ -5,6 +5,7 @@ import type {
   Skill,
   SourceNormalizationDiagnostics
 } from "../types";
+import { isAddressLike } from "../data/verticalLogic";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
 import { coerceReportData } from "./reportFormatter";
@@ -635,6 +636,16 @@ export const synthesizeGrandReport = async (
     ? `ALLOWED SOURCES (use ONLY these URLs in citations and bibliography):\n${allowedSources.join('\n')}\n`
     : `ALLOWED SOURCES: none provided\n`;
 
+  const addressDirective = isAddressLike(topic)
+    ? `
+    ADDRESS DOSSIER REQUIREMENTS (address-like topic detected):
+    - Resolve parcel/address identifiers first (parcel/account, legal description if present).
+    - Include official records: appraisal district / assessor, tax collector, county clerk deed chain, zoning, permits/inspections, code violations, GIS parcel map, flood/insurance risk.
+    - Add a "Property Dossier" section with subsections: Parcel & Legal, Ownership/Transfers, Tax & Appraisal, Zoning/Land Use, Permits & Code, Hazards/Environmental, Neighborhood Context, Data Gaps & Next Steps.
+    - If a data item is not found, write "Source not found" and list the exact portal/record system that should contain it.
+    `
+    : '';
+
   const buildPrompt = (input: string, strict: boolean) => `
     Topic: ${topic}
     Current Date: ${currentDate}
@@ -644,6 +655,7 @@ export const synthesizeGrandReport = async (
     ${allowedSourcesText}
 
     You are the Chief Intelligence Officer. Write a "DEEP DIVE" RESEARCH REPORT.
+    ${addressDirective}
 
     RULES:
     1. **NO FLUFF**. Every sentence must convey a fact or analysis.

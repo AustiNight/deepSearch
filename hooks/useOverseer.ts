@@ -787,6 +787,34 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
   };
 };
 
+const buildAddressDirectQueries = (slots: Record<string, unknown>) => {
+  const address = Array.isArray(slots.address) ? String(slots.address[0] || '') : '';
+  if (!address) return [];
+  const city = Array.isArray(slots.city) ? String(slots.city[0] || '') : '';
+  const county = Array.isArray(slots.countyPrimary) ? String(slots.countyPrimary[0] || '') : '';
+  const state = Array.isArray(slots.state) ? String(slots.state[0] || '') : '';
+  const authorityPrimary = Array.isArray(slots.propertyAuthorityPrimary) ? String(slots.propertyAuthorityPrimary[0] || '') : '';
+  const authoritySecondary = Array.isArray(slots.propertyAuthoritySecondary) ? String(slots.propertyAuthoritySecondary[0] || '') : '';
+  const addressQuoted = `"${address}"`;
+
+  return uniqueList([
+    `${addressQuoted} "property search"`,
+    `${addressQuoted} "property card"`,
+    `${addressQuoted} parcel`,
+    `${addressQuoted} "parcel map"`,
+    `${addressQuoted} zoning`,
+    `${addressQuoted} permits`,
+    `${addressQuoted} "code violations"`,
+    `${addressQuoted} "tax records"`,
+    `${addressQuoted} "assessment history"`,
+    `${addressQuoted} GIS`,
+    `${city ? `"${city}"` : ''} ${authorityPrimary} ${address}`.trim(),
+    `${county ? `"${county}"` : ''} ${authorityPrimary} ${address}`.trim(),
+    `${county ? `"${county}"` : ''} ${authoritySecondary} ${address}`.trim(),
+    `${addressQuoted} ${city ? `"${city}"` : ''} ${state}`.trim()
+  ]).filter(Boolean);
+};
+
 const buildTacticPacks = (
   taxonomy: { verticals: any[] },
   selectedVerticalIds: string[],
@@ -1639,10 +1667,14 @@ export const useOverseer = () => {
       const tacticDiscoveryQueries = uniqueList(
         tacticPacks.flatMap(pack => pack.expanded.slice(1, 3).map(t => t.query))
       );
+      const addressDirectQueries = isAddressLike(topic)
+        ? buildAddressDirectQueries(slotValues as Record<string, unknown>)
+        : [];
       const forcedDiscoveryQueries = discoveryTemplateQueries
         .filter(q => q.toLowerCase().includes('public records'))
         .slice(0, 1);
       const discoveryQueries = uniqueList([
+        ...addressDirectQueries,
         ...forcedDiscoveryQueries,
         ...(tacticDiscoveryQueries.length > 0 ? tacticDiscoveryQueries : subtopicSeedQueries),
         ...discoveryTemplateQueries
@@ -2410,7 +2442,16 @@ export const useOverseer = () => {
       ));
       const isValid = validation?.isValid === true;
       if (!isValid) {
-        const issues = Array.isArray(validation?.issues) ? validation.issues : [];
+        const issues = Array.isArray(validation?.issues)
+          ? validation.issues.map((issue: any) => {
+              if (typeof issue === 'string') return issue;
+              try {
+                return JSON.stringify(issue);
+              } catch (_) {
+                return String(issue);
+              }
+            })
+          : [];
         logOverseer(
           'PHASE 4: VALIDATION',
           'report failed validation',
