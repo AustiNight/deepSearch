@@ -134,6 +134,58 @@ export interface EvidenceRecoveryMetrics {
   latencyMs?: number;
 }
 
+export type EvidenceGateStage = 'pre_synthesis' | 'post_synthesis' | 'pre_render';
+export type EvidenceGateStatus = 'clear' | 'soft_fail' | 'hard_fail';
+
+export interface EvidenceGateMetrics {
+  totalSources?: number;
+  authoritativeSources?: number;
+  maxAuthorityScore?: number;
+  minTotalSources?: number;
+  minAuthoritativeSources?: number;
+  minAuthorityScore?: number;
+  validationIssues?: number;
+  missingCitations?: number;
+  primaryRecordsMissing?: number;
+}
+
+export interface EvidenceGateDecision {
+  stage: EvidenceGateStage;
+  status: EvidenceGateStatus;
+  passed: boolean;
+  reasons?: string[];
+  metrics?: EvidenceGateMetrics;
+  recordedAt: IsoDateTimeString;
+}
+
+export type PortalErrorCode =
+  | 'network_error'
+  | 'invalid_json'
+  | 'http_401'
+  | 'http_403'
+  | 'http_404'
+  | 'http_429'
+  | 'http_500'
+  | 'http_503'
+  | 'http_5xx'
+  | 'http_other';
+
+export interface PortalErrorSample {
+  code: PortalErrorCode;
+  status?: number;
+  portalType?: OpenDataPortalType;
+  portalUrl?: string;
+  endpoint?: string;
+  occurredAt: IsoDateTimeString;
+}
+
+export interface PortalErrorMetrics {
+  total: number;
+  byCode: Partial<Record<PortalErrorCode, number>>;
+  byStatus?: Record<string, number>;
+  samples?: PortalErrorSample[];
+}
+
 export interface ConfidenceQualityMetrics {
   averageSectionConfidence: number;
   minSectionConfidence: number;
@@ -146,7 +198,9 @@ export interface RunMetrics {
   runLatencyMs?: number;
   parcelResolution?: ParcelResolutionMetrics;
   evidenceRecovery?: EvidenceRecoveryMetrics;
+  evidenceGates?: EvidenceGateDecision[];
   confidenceQuality?: ConfidenceQualityMetrics;
+  portalErrors?: PortalErrorMetrics;
 }
 
 export type SloMetricStatus = 'met' | 'missed' | 'not_applicable';

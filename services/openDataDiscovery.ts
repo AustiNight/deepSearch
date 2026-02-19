@@ -1,4 +1,5 @@
 import type { DatasetComplianceEntry, IsoDateString, IsoDateTimeString, OpenDataPortalType, OpenDatasetIndex, OpenDatasetMetadata } from "../types";
+import { recordPortalError } from "./portalErrorTelemetry";
 
 const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
 const OPEN_DATA_INDEX_STORAGE_KEY = "overseer_open_data_index";
@@ -239,16 +240,44 @@ const upsertOpenDatasets = (datasets: OpenDatasetMetadata[]) => {
   return updated;
 };
 
-const safeFetchJson = async (url: string) => {
-  const res = await fetch(url, { method: "GET" });
-  if (!res.ok) {
-    return { ok: false, status: res.status, data: null } as const;
-  }
+type PortalRequestContext = {
+  portalType?: OpenDataPortalType;
+  portalUrl?: string;
+};
+
+const safeFetchJson = async (url: string, context: PortalRequestContext = {}) => {
   try {
-    const data = await res.json();
-    return { ok: true, status: res.status, data } as const;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) {
+      recordPortalError({
+        status: res.status,
+        portalType: context.portalType,
+        portalUrl: context.portalUrl,
+        endpoint: url
+      });
+      return { ok: false, status: res.status, data: null } as const;
+    }
+    try {
+      const data = await res.json();
+      return { ok: true, status: res.status, data } as const;
+    } catch (_) {
+      recordPortalError({
+        status: res.status,
+        portalType: context.portalType,
+        portalUrl: context.portalUrl,
+        endpoint: url,
+        kind: "invalid_json"
+      });
+      return { ok: false, status: res.status, data: null } as const;
+    }
   } catch (_) {
-    return { ok: false, status: res.status, data: null } as const;
+    recordPortalError({
+      portalType: context.portalType,
+      portalUrl: context.portalUrl,
+      endpoint: url,
+      kind: "network"
+    });
+    return { ok: false, status: 0, data: null } as const;
   }
 };
 
@@ -303,7 +332,7 @@ const normalizeDataset = (input: {
 const discoverSocrataDatasets = async (portalUrl: string, query: string, limit: number): Promise<OpenDatasetMetadata[]> => {
   const base = normalizePortalUrl(portalUrl);
   const searchUrl = `${base}/api/search/views?q=${encodeURIComponent(query)}&limit=${limit}`;
-  const response = await safeFetchJson(searchUrl);
+  const response = await safeFetchJson(searchUrl, { portalType: "socrata", portalUrl: base });
   if (!response.ok || !response.data) return [];
   const results = Array.isArray(response.data?.results) ? response.data.results : [];
   const datasets: OpenDatasetMetadata[] = [];
@@ -347,7 +376,7 @@ const discoverSocrataDatasets = async (portalUrl: string, query: string, limit: 
 const discoverArcGisDatasets = async (portalUrl: string, query: string, limit: number): Promise<OpenDatasetMetadata[]> => {
   const base = normalizePortalUrl(portalUrl);
   const searchUrl = `${base}/sharing/rest/search?f=json&q=${encodeURIComponent(query)}+AND+type%3A%22Feature%20Service%22&num=${limit}`;
-  const response = await safeFetchJson(searchUrl);
+  const response = await safeFetchJson(searchUrl, { portalType: "arcgis", portalUrl: base });
   if (!response.ok || !response.data) return [];
   const results = Array.isArray(response.data?.results) ? response.data.results : [];
   const datasets: OpenDatasetMetadata[] = [];
@@ -374,7 +403,7 @@ const discoverArcGisDatasets = async (portalUrl: string, query: string, limit: n
 
     if (itemId) {
       const itemUrl = `${base}/sharing/rest/content/items/${itemId}?f=json`;
-      const itemResponse = await safeFetchJson(itemUrl);
+      const itemResponse = await safeFetchJson(itemUrl, { portalType: "arcgis", portalUrl: base });
       if (itemResponse.ok && itemResponse.data) {
         const itemLicenseInfo = parseLicenseDetails(itemResponse.data?.licenseInfo || itemResponse.data?.license);
         licenseInfo = {
@@ -438,7 +467,7 @@ const discoverDcatDatasets = async (portalUrl: string, query: string, limit: num
   let catalogUrl = candidates[0];
 
   for (const candidate of candidates) {
-    const response = await safeFetchJson(candidate);
+    const response = await safeFetchJson(candidate, { portalType: "dcat", portalUrl: normalizePortalUrl(portalUrl) });
     if (response.ok && response.data) {
       catalogData = response.data;
       catalogUrl = candidate;

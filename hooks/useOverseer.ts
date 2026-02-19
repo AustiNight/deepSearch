@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
 import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from '../services/propertyDossier';
 import { enforceCompliance } from '../services/complianceEnforcement';
 import { evaluateSloGate } from '../services/sloGate';
+import { getPortalErrorMetrics, resetPortalErrorMetrics } from '../services/portalErrorTelemetry';
 import {
   INITIAL_OVERSEER_ID,
   METHOD_TEMPLATES_GENERAL,
@@ -364,6 +365,20 @@ const evaluateEvidence = (sources: NormalizedSource[]) => {
     meetsAuthorityScore,
     meetsAll: meetsTotal && meetsAuthoritative && meetsAuthorityScore
   };
+};
+
+const buildEvidenceGateReasons = (status: ReturnType<typeof evaluateEvidence>) => {
+  const reasons: string[] = [];
+  if (!status.meetsTotal) {
+    reasons.push(`total_sources_below_min (${status.totalSources}/${MIN_EVIDENCE_TOTAL_SOURCES})`);
+  }
+  if (!status.meetsAuthoritative) {
+    reasons.push(`authoritative_sources_below_min (${status.authoritativeSources}/${MIN_EVIDENCE_AUTHORITATIVE_SOURCES})`);
+  }
+  if (!status.meetsAuthorityScore) {
+    reasons.push(`authority_score_below_min (${status.maxAuthorityScore}/${MIN_EVIDENCE_AUTHORITY_SCORE})`);
+  }
+  return reasons;
 };
 
 const PRIMARY_RECORD_KEYWORDS: Record<PrimaryRecordType, RegExp[]> = {
@@ -1704,6 +1719,12 @@ export const useOverseer = () => {
     setReport(null);
     setFindings([]);
     findingsRef.current = [];
+    resetPortalErrorMetrics();
+    const runStartedAt = Date.now();
+    const runMetrics: RunMetrics = {};
+    const evidenceGateDecisions: EvidenceGateDecision[] = [];
+    let preSynthesisGatePassed: boolean | null = null;
+    let postSynthesisGatePassed: boolean | null = null;
 
     const resolveNumber = (value: any, fallback: number) => {
       const n = Number(value);
@@ -1791,6 +1812,31 @@ export const useOverseer = () => {
       type: LogEntry['type'] = 'info'
     ) => {
       addLog(overseerId, overseer.name, buildNarrativeMessage(phase, decision, action, outcome), type);
+    };
+
+    const recordEvidenceGate = (
+      stage: EvidenceGateDecision['stage'],
+      input: Omit<EvidenceGateDecision, 'stage' | 'recordedAt'>
+    ) => {
+      const status = input.status || (input.passed ? 'clear' : 'soft_fail');
+      const decision: EvidenceGateDecision = {
+        stage,
+        status,
+        passed: input.passed,
+        reasons: input.reasons && input.reasons.length > 0 ? input.reasons : undefined,
+        metrics: input.metrics,
+        recordedAt: new Date().toISOString()
+      };
+      evidenceGateDecisions.push(decision);
+      const stageLabel = stage.replace(/_/g, ' ').toUpperCase();
+      const reasonText = decision.reasons?.slice(0, 2).join(' | ');
+      logOverseer(
+        `EVIDENCE GATE: ${stageLabel}`,
+        decision.passed ? 'gate clear' : 'soft-fail',
+        decision.metrics ? `sources ${decision.metrics.totalSources ?? 'n/a'}` : 'capture gate decision',
+        reasonText,
+        decision.passed ? 'success' : 'warning'
+      );
     };
     logOverseer('PHASE 0: INIT', 'start run', 'initialize providers + taxonomy', `topic "${topic}"`, 'action');
     try {
@@ -3150,6 +3196,21 @@ export const useOverseer = () => {
           }
           evidenceRecoveryMetrics.success = evidenceStatus.meetsAll;
         }
+        const preSynthesisReasons = evidenceStatus.meetsAll ? [] : buildEvidenceGateReasons(evidenceStatus);
+        recordEvidenceGate('pre_synthesis', {
+          passed: evidenceStatus.meetsAll,
+          status: evidenceStatus.meetsAll ? 'clear' : 'soft_fail',
+          reasons: preSynthesisReasons,
+          metrics: {
+            totalSources: evidenceStatus.totalSources,
+            authoritativeSources: evidenceStatus.authoritativeSources,
+            maxAuthorityScore: evidenceStatus.maxAuthorityScore,
+            minTotalSources: MIN_EVIDENCE_TOTAL_SOURCES,
+            minAuthoritativeSources: MIN_EVIDENCE_AUTHORITATIVE_SOURCES,
+            minAuthorityScore: MIN_EVIDENCE_AUTHORITY_SCORE
+          }
+        });
+        preSynthesisGatePassed = evidenceStatus.meetsAll;
         evidenceRecoveryMetrics.latencyMs = Date.now() - evidenceRecoveryStart;
         runMetrics.evidenceRecovery = evidenceRecoveryMetrics;
       }
@@ -3343,9 +3404,34 @@ export const useOverseer = () => {
         requestOptions
       ));
       const isValid = validation?.isValid === true;
+      const validationIssues = Array.isArray(validation?.issues) ? validation.issues : [];
+      const missingCitationCount = validationIssues.filter((issue: any) => {
+        if (!issue || typeof issue !== 'object') return false;
+        const problem = issue.problem || issue.type || issue.issueType;
+        return problem === 'missing_citation' || problem === 'missing_citations';
+      }).length;
+      const postSynthesisPassed = isValid && validationIssues.length === 0;
+      if (addressLike) {
+        const reasons: string[] = [];
+        if (!isValid) reasons.push('validation_failed');
+        if (missingCitationCount > 0) reasons.push(`missing_citations:${missingCitationCount}`);
+        if (validationIssues.length > 0 && reasons.length === 0) {
+          reasons.push(`validation_issues:${validationIssues.length}`);
+        }
+        recordEvidenceGate('post_synthesis', {
+          passed: postSynthesisPassed,
+          status: postSynthesisPassed ? 'clear' : 'soft_fail',
+          reasons,
+          metrics: {
+            validationIssues: validationIssues.length,
+            missingCitations: missingCitationCount
+          }
+        });
+        postSynthesisGatePassed = postSynthesisPassed;
+      }
       if (!isValid) {
-        const issues = Array.isArray(validation?.issues)
-          ? validation.issues.map((issue: any) => formatValidationIssue(issue))
+        const issues = validationIssues.length > 0
+          ? validationIssues.map((issue: any) => formatValidationIssue(issue))
           : [];
         logOverseer(
           'PHASE 4: VALIDATION',
@@ -3464,8 +3550,41 @@ export const useOverseer = () => {
         ...reportCandidate,
         sections: applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier?.dataGaps || [])
       };
+      if (addressLike) {
+        const preRenderPassed = (preSynthesisGatePassed ?? true) && (postSynthesisGatePassed ?? true);
+        const reasons: string[] = [];
+        if (preSynthesisGatePassed === false) reasons.push('pre_synthesis_soft_fail');
+        if (postSynthesisGatePassed === false) reasons.push('post_synthesis_soft_fail');
+        recordEvidenceGate('pre_render', {
+          passed: preRenderPassed,
+          status: preRenderPassed ? 'clear' : 'soft_fail',
+          reasons,
+          metrics: {
+            primaryRecordsMissing: primaryRecordCoverage?.missing?.length ?? 0
+          }
+        });
+      }
+      if (evidenceGateDecisions.length > 0) {
+        runMetrics.evidenceGates = evidenceGateDecisions;
+      }
       runMetrics.confidenceQuality = computeConfidenceQualityProxy(reportWithConfidence.sections, primaryRecordCoverage);
       runMetrics.runLatencyMs = Date.now() - runStartedAt;
+      const portalErrors = getPortalErrorMetrics();
+      if (portalErrors) {
+        runMetrics.portalErrors = portalErrors;
+        const topCodes = Object.entries(portalErrors.byCode || {})
+          .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+          .slice(0, 2)
+          .map(([code, count]) => `${code}:${count}`)
+          .join(' | ');
+        logOverseer(
+          'PHASE 4: PORTAL ERRORS',
+          'portal errors observed',
+          `total ${portalErrors.total}`,
+          topCodes || undefined,
+          'warning'
+        );
+      }
       const sloGate = evaluateSloGate(runMetrics);
       if (sloGate.gateStatus === 'blocked') {
         logOverseer(
