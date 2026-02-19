@@ -21,6 +21,21 @@ This document maps the current Overseer workflow and the target architecture for
 8. Phase 4: Grand Synthesis
    Calls `synthesizeGrandReport`, filters sources, validates the report with `validateReport`, updates knowledge base if valid, and completes the run. (`hooks/useOverseer.ts`, `services/*Service.ts`)
 
+## Evidence Gating Enforcement Points
+Evidence gating is enforced at three checkpoints to prevent unsupported coverage claims while still delivering a usable report.
+
+1. Pre-synthesis gate (after evidence recovery, before `synthesizeGrandReport`)
+   Condition: `evaluateEvidence` fails to meet `MIN_EVIDENCE_TOTAL_SOURCES`, `MIN_EVIDENCE_AUTHORITATIVE_SOURCES`, or `MIN_EVIDENCE_AUTHORITY_SCORE`.
+   Behavior: soft-fail. Continue to synthesis but require a Data Gaps section to enumerate the missing evidence, and prevent any "complete coverage" messaging for address-like topics.
+2. Post-synthesis gate (after synthesis + validation, before report candidate is finalized)
+   Condition: Missing claim-level citations, missing required Property Dossier sections, or validation failures tied to evidence thresholds.
+   Behavior: soft-fail. Append a "Validation Issues" or "Data Gaps & Next Steps" section, downgrade section confidence where evidence is missing, and keep report status as "incomplete".
+3. Pre-render gate (immediately before UI render)
+   Condition: Evidence gate unmet or validation failed.
+   Behavior: soft-fail. Render the report but surface a visible gating banner, suppress any "complete" badge, and ensure Data Gaps are visible in the report and metadata.
+
+Hard-fail behavior for critical evidence failures (e.g., unresolved parcel ambiguity, zero authoritative sources, confidence below minimum) is defined separately in the hard-fail policy and should override the soft-fail defaults above.
+
 ## Current Agent Spawning Points
 1. Method Discovery Agents (Phase 0.5)
    Names: `Method Discovery {n}`. Task: "Discover research methods". Spawned from `METHOD_DISCOVERY_TEMPLATES_*`.
