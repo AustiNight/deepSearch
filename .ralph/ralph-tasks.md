@@ -4,7 +4,7 @@
   - [x] Define schemas for `PropertyDossier`, `DataGap`, and claim-level citations (field names, types, units, optionality, and source linkage rules)
   - [x] Add provenance fields for retrieval timestamp, source update date, and data currency to support recency weighting
   - [x] Define field-level lineage rules for every `PropertyDossier` field (source precedence, derivation steps, and conflict resolution)
-  - [ ] Define authority scoring and confidence scoring formulas with explicit numeric scales and weighting rules
+  - [x] Define authority scoring and confidence scoring formulas with explicit numeric scales and weighting rules
   - [ ] Define a source taxonomy (authoritative, quasi-official, aggregator, social) with canonical examples and mapping rules
   - [ ] Set explicit evidence thresholds as constants (min total sources, min authoritative sources, min authority score) and document them in taxonomy/overseer prompts
   - [ ] Define a data currency policy per record type (max acceptable age, recency weighting, and out-of-date handling)

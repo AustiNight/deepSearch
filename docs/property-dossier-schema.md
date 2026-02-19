@@ -494,3 +494,79 @@ EnvironmentalSite
 | `/dataGaps[].expectedSources[].endpoint` | Internal registry | API/search endpoint | Prefer official endpoint. |
 | `/dataGaps[].expectedSources[].query` | Internal pipeline | Suggested query text | Not applicable. |
 | `/dataGaps[].expectedSources[].notes` | Internal pipeline | Access notes | Not applicable. |
+
+## Authority And Confidence Scoring
+
+### Authority Score (Per Source)
+
+Scale: `authorityScore` is 0 to 100.
+
+Base score by `CitationSource.sourceType`:
+
+| sourceType | Base score |
+| --- | --- |
+| `authoritative` | 90 |
+| `quasi-official` | 70 |
+| `aggregator` | 50 |
+| `social` | 20 |
+| `unknown` | 35 |
+
+Modifiers:
+
+| Condition | Adjustment |
+| --- | --- |
+| Official government domain or verified government portal | +5 |
+| Primary record system for the record type (assessor, tax collector, recorder, zoning GIS, permits, code enforcement) | +5 |
+| Record-level access with parcel identifiers and update timestamps | +5 |
+| Rehosted or mirrored data without a canonical record link | -10 |
+| Paywalled aggregation without record provenance | -10 |
+| User-generated or anonymous content | -15 |
+| Publisher missing or unverified | -5 |
+
+Formula:
+
+`authorityScore = clamp(baseScore + sum(adjustments), 0, 100)`
+
+### Claim Confidence (Per Field Claim)
+
+Scale: `confidence` is 0 to 1 and stored on each `ClaimCitation`.
+
+Definitions:
+
+`A` (authority component) = `max(authorityScore_i) / 100` across citations for the claim.
+
+`R` (recency component) = `clamp(1 - (minAgeDays / maxAgeDays), 0, 1)`
+
+`minAgeDays` is the minimum `dataCurrency.ageDays` across citations.
+
+`maxAgeDays` is defined by the data currency policy for the record type.
+
+If all citations lack `dataCurrency`, set `R = 0.5`.
+
+`C` (corroboration component) based on distinct publishers or domains:
+
+| Independent sources | `C` |
+| --- | --- |
+| 1 | 0.35 |
+| 2 | 0.70 |
+| 3+ | 1.00 |
+
+`S` (consistency component) from `DataGap` status for the field:
+
+| Status | `S` |
+| --- | --- |
+| No conflict or ambiguity | 1.00 |
+| `status=conflict` or `status=ambiguous` but resolved | 0.50 |
+| Unresolved conflict or ambiguous identity | 0.00 |
+
+Formula:
+
+`confidence = clamp(0.50*A + 0.25*R + 0.15*C + 0.10*S, 0, 1)`
+
+### Section Confidence (Per Report Section)
+
+Scale: 0 to 1.
+
+`sectionConfidence = average(confidence)` across all `ClaimCitation` entries whose `fieldPath` falls under the section.
+
+If a section has zero claims, `sectionConfidence = 0`.
