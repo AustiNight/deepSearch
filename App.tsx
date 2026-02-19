@@ -5,12 +5,13 @@ import { AgentGraph } from './components/AgentGraph';
 import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
 import { TransparencyPanel } from './components/TransparencyPanel';
-import { LLMProvider, ModelOverrides, ModelRole, RunConfig, UniversalSettingsPayload } from './types';
+import { LLMProvider, ModelOverrides, ModelRole, OpenDataAuthConfig, RunConfig, UniversalSettingsPayload } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
 import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistService';
 import { fetchUniversalSettings, updateUniversalSettings } from './services/universalSettingsService';
 import { buildUniversalSettingsPayload, normalizeUniversalSettingsPayload } from './services/universalSettingsPayload';
 import { isSystemTestTopic } from './data/verticalLogic';
+import { getOpenDataConfig, updateOpenDataConfig } from './services/openDataConfig';
 import {
   MODEL_OVERRIDE_STORAGE_KEY,
   MIN_AGENT_COUNT,
@@ -129,6 +130,19 @@ const parseAllowlistText = (text: string) => {
   return { entries, invalid };
 };
 
+const sanitizeOpenDataAuth = (input: OpenDataAuthConfig): OpenDataAuthConfig => {
+  const normalize = (value?: string) => {
+    const trimmed = (value || '').trim();
+    return trimmed ? trimmed : undefined;
+  };
+  return {
+    socrataAppToken: normalize(input.socrataAppToken),
+    arcgisApiKey: normalize(input.arcgisApiKey),
+    geocodingEmail: normalize(input.geocodingEmail),
+    geocodingKey: normalize(input.geocodingKey)
+  };
+};
+
 const App: React.FC = () => {
   const [topic, setTopic] = useState('');
   const [provider, setProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
@@ -139,6 +153,7 @@ const App: React.FC = () => {
   const [draftKeys, setDraftKeys] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
   const [draftRunConfig, setDraftRunConfig] = useState<RunConfig>({ ...DEFAULT_RUN_CONFIG });
   const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
+  const [draftOpenDataAuth, setDraftOpenDataAuth] = useState<OpenDataAuthConfig>(() => ({ ...getOpenDataConfig().auth }));
   const [bulkModelValue, setBulkModelValue] = useState('');
   const [accessAllowlist, setAccessAllowlist] = useState<string[]>([]);
   const [draftAllowlistText, setDraftAllowlistText] = useState('');
@@ -484,6 +499,9 @@ const App: React.FC = () => {
       localStorage.removeItem('overseer_api_key_openai');
     }
 
+    const nextOpenDataAuth = sanitizeOpenDataAuth(draftOpenDataAuth);
+    updateOpenDataConfig({ auth: nextOpenDataAuth });
+
     const sanitizedOverrides = sanitizeModelOverrideDraft(draftModelOverrides);
     setModelOverrides(sanitizedOverrides);
     saveModelOverrides(sanitizedOverrides);
@@ -605,6 +623,7 @@ const App: React.FC = () => {
     setDraftKeys(keyOverrides);
     setDraftRunConfig(runConfig);
     setDraftModelOverrides(modelOverrides);
+    setDraftOpenDataAuth({ ...getOpenDataConfig().auth });
     setBulkModelValue('');
     setDraftAllowlistText(accessAllowlist.join('\n'));
     setAllowlistInput('');
@@ -645,6 +664,11 @@ const App: React.FC = () => {
     setDraftModelOverrides({});
     setBulkModelValue('');
   };
+
+  const socrataToken = (draftOpenDataAuth.socrataAppToken || '').trim();
+  const arcgisApiKey = (draftOpenDataAuth.arcgisApiKey || '').trim();
+  const geocodingEmail = (draftOpenDataAuth.geocodingEmail || '').trim();
+  const geocodingKey = (draftOpenDataAuth.geocodingKey || '').trim();
 
   const { entries: draftAllowlistEntries, invalid: draftAllowlistInvalid } = parseAllowlistText(draftAllowlistText);
 
@@ -975,6 +999,88 @@ const App: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-3">
+                <label className="block text-xs font-mono text-gray-400">OPEN DATA KEYS (OPTIONAL)</label>
+                <p className="text-[10px] text-gray-500">
+                  Zero-cost mode uses anonymous public endpoints by default. Adding keys only improves rate limits, reliability, and throughput without changing core functionality.
+                </p>
+                <p className="text-[10px] text-gray-500">
+                  Stored locally in this browser (sessionStorage by default), never synced to cloud settings or persisted in Worker/KV. No telemetry.
+                </p>
+                <div>
+                  <label className="block text-[10px] font-mono text-gray-500 mb-1">SOCRATA_APP_TOKEN</label>
+                  <input
+                    type="password"
+                    value={draftOpenDataAuth.socrataAppToken || ''}
+                    onChange={(e) => setDraftOpenDataAuth(prev => ({ ...prev, socrataAppToken: e.target.value }))}
+                    placeholder="X-App-Token"
+                    className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Paste the `X-App-Token` value (no prefix). <a href="https://dev.socrata.com/docs/app-tokens.html" target="_blank" className="underline hover:text-cyber-green">Socrata setup</a>.
+                  </p>
+                  {socrataToken ? (
+                    <p className="text-[10px] text-cyber-green font-mono">Token configured — higher rate limits.</p>
+                  ) : (
+                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Anonymous access has stricter rate limits.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-gray-500 mb-1">ARCGIS_API_KEY</label>
+                  <input
+                    type="password"
+                    value={draftOpenDataAuth.arcgisApiKey || ''}
+                    onChange={(e) => setDraftOpenDataAuth(prev => ({ ...prev, arcgisApiKey: e.target.value }))}
+                    placeholder="AAPK..."
+                    className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Create an API key and paste the token (often starts with `AAPK`). <a href="https://developers.arcgis.com/documentation/security-and-authentication/api-keys/" target="_blank" className="underline hover:text-cyber-green">ArcGIS API keys</a>.
+                  </p>
+                  {arcgisApiKey ? (
+                    <p className="text-[10px] text-cyber-green font-mono">Key configured — higher throughput.</p>
+                  ) : (
+                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Anonymous access has stricter rate limits.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-gray-500 mb-1">GEOCODING_CONTACT_EMAIL</label>
+                  <input
+                    type="email"
+                    value={draftOpenDataAuth.geocodingEmail || ''}
+                    onChange={(e) => setDraftOpenDataAuth(prev => ({ ...prev, geocodingEmail: e.target.value }))}
+                    placeholder="you@example.com"
+                    className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Optional contact email for Nominatim usage compliance. <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" className="underline hover:text-cyber-green">Nominatim policy</a>.
+                  </p>
+                  {geocodingEmail ? (
+                    <p className="text-[10px] text-cyber-green font-mono">Contact email configured.</p>
+                  ) : (
+                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Keyless geocoding runs at strict rate limits.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-gray-500 mb-1">GEOCODING_API_KEY (IF SUPPORTED)</label>
+                  <input
+                    type="password"
+                    value={draftOpenDataAuth.geocodingKey || ''}
+                    onChange={(e) => setDraftOpenDataAuth(prev => ({ ...prev, geocodingKey: e.target.value }))}
+                    placeholder="Optional provider token"
+                    className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Reserved for key-based geocoders (not enabled by default). Leave blank for Nominatim. <a href="https://nominatim.org/release-docs/latest/api/Overview/" target="_blank" className="underline hover:text-cyber-green">Nominatim overview</a>.
+                  </p>
+                  {geocodingKey ? (
+                    <p className="text-[10px] text-cyber-green font-mono">Key stored locally for supported providers.</p>
+                  ) : (
+                    <p className="text-[10px] text-yellow-500 font-mono">Optional. Keyless mode remains active with strict rate limits.</p>
+                  )}
+                </div>
+              </div>
 
               <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-2">
                 <div className="flex items-center justify-between">

@@ -31,7 +31,7 @@ const defaultConfig: OpenDataRuntimeConfig = {
   auth: defaultAuth
 };
 
-let memoryConfig: OpenDataRuntimeConfig = { ...defaultConfig };
+let memoryConfig: OpenDataRuntimeConfig | null = null;
 
 const loadFromStorage = (): OpenDataRuntimeConfig | null => {
   if (typeof window === "undefined") return null;
@@ -113,7 +113,7 @@ export const updateOpenDataConfig = (
   next: Partial<OpenDataRuntimeConfig>,
   options?: { persist?: boolean }
 ): OpenDataRuntimeConfig => {
-  memoryConfig = mergeConfig({ ...memoryConfig, ...next });
+  memoryConfig = mergeConfig({ ...(memoryConfig || defaultConfig), ...next });
   persistConfig(memoryConfig, options);
   return memoryConfig;
 };

@@ -90,7 +90,7 @@
   - [x] Add unit/integration tests for each provider (mocked API responses), and spatial-join fixtures for parcel lookups
   - [x] Acceptance: given a city/county portal URL, the system can discover datasets, query at least one dataset by address or geometry, and populate property-relevant fields with citations; provider tests cover Socrata, ArcGIS, and DCAT flows
 
-- [ ] Epic: Settings UI for Optional Open-Data Keys
+- [x] Epic: Settings UI for Optional Open-Data Keys
   - [ ] Add a Settings UI section that lists optional keys (Socrata app token, ArcGIS API key, optional geocoding key if supported) with clear “not required” language
   - [ ] Explain zero-cost mode defaults and what improves with keys (rate limits, reliability, throughput) without changing core functionality
   - [ ] Link to public setup instructions for each optional key and summarize required fields/format
