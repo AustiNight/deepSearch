@@ -47,6 +47,22 @@ const formatPortalLabel = (portalUrl?: string) => {
   }
 };
 
+const formatSloStatus = (status?: string) => {
+  if (status === 'met') return 'Met';
+  if (status === 'missed') return 'Missed';
+  return 'N/A';
+};
+
+const formatPercent = (value?: number) => {
+  if (typeof value !== 'number') return 'N/A';
+  return `${Math.round(value * 100)}%`;
+};
+
+const formatMs = (value?: number) => {
+  if (typeof value !== 'number') return 'N/A';
+  return `${Math.round(value)}ms`;
+};
+
 const truncateText = (value: string, max: number) => {
   if (value.length <= max) return value;
   return `${value.slice(0, max - 3)}...`;
@@ -193,6 +209,7 @@ const renderMarkdownBlocks = (content: string) => {
 export const ReportView: React.FC<Props> = ({ report }) => {
   const primaryRecordCoverage = report.provenance?.primaryRecordCoverage;
   const compliance = report.provenance?.compliance;
+  const sloGate = report.provenance?.sloGate;
   const isCoverageComplete = primaryRecordCoverage ? primaryRecordCoverage.complete : true;
   const missingEntries = primaryRecordCoverage?.entries?.filter(
     (entry) => entry.status !== 'covered' && entry.status !== 'unavailable'
@@ -288,6 +305,48 @@ export const ReportView: React.FC<Props> = ({ report }) => {
             )}
           </div>
         ))}
+
+        {sloGate && (
+          <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">Release SLO Gate</p>
+            <div className="mt-2 space-y-2 text-gray-400">
+              <div>
+                Status:{' '}
+                <span className={sloGate.gateStatus === 'blocked' ? 'text-amber-300' : 'text-emerald-200'}>
+                  {sloGate.gateStatus === 'blocked' ? 'Blocked' : 'Clear'}
+                </span>
+              </div>
+              <div>
+                Parcel resolution:{' '}
+                <span className="text-gray-200">
+                  {formatPercent(sloGate.parcelResolution.actual)} / target {formatPercent(sloGate.parcelResolution.target)} ({formatSloStatus(sloGate.parcelResolution.status)})
+                </span>
+              </div>
+              <div>
+                Evidence recovery:{' '}
+                <span className="text-gray-200">
+                  {formatPercent(sloGate.evidenceRecovery.actual)} / target {formatPercent(sloGate.evidenceRecovery.target)} ({formatSloStatus(sloGate.evidenceRecovery.status)})
+                </span>
+              </div>
+              <div>
+                Median latency:{' '}
+                <span className="text-gray-200">
+                  {formatMs(sloGate.medianLatencyMs.actual)} / target {formatMs(sloGate.medianLatencyMs.target)} ({formatSloStatus(sloGate.medianLatencyMs.status)})
+                </span>
+              </div>
+              <div>
+                Window: <span className="text-gray-200">{sloGate.totalRuns} runs (max {sloGate.windowSize})</span>
+              </div>
+            </div>
+            {sloGate.gateReasons && sloGate.gateReasons.length > 0 && (
+              <div className="mt-3 space-y-1 text-[11px] text-amber-300">
+                {sloGate.gateReasons.slice(0, 3).map((reason, idx) => (
+                  <div key={`slo-reason-${idx}`}>{reason}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {compliance && (
           <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">

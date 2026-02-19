@@ -5,6 +5,7 @@ import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenA
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
 import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from '../services/propertyDossier';
 import { enforceCompliance } from '../services/complianceEnforcement';
+import { evaluateSloGate } from '../services/sloGate';
 import {
   INITIAL_OVERSEER_ID,
   METHOD_TEMPLATES_GENERAL,
@@ -3465,11 +3466,22 @@ export const useOverseer = () => {
       };
       runMetrics.confidenceQuality = computeConfidenceQualityProxy(reportWithConfidence.sections, primaryRecordCoverage);
       runMetrics.runLatencyMs = Date.now() - runStartedAt;
+      const sloGate = evaluateSloGate(runMetrics);
+      if (sloGate.gateStatus === 'blocked') {
+        logOverseer(
+          'PHASE 4: SLO GATE',
+          'release gate blocked',
+          'SLOs below baseline',
+          sloGate.gateReasons?.slice(0, 2).join(' | '),
+          'warning'
+        );
+      }
       const reportWithMetrics = {
         ...reportWithConfidence,
         provenance: {
           ...reportWithConfidence.provenance,
-          runMetrics
+          runMetrics,
+          sloGate
         }
       };
 

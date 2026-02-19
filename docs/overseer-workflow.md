@@ -44,6 +44,18 @@ Evidence recovery enforces explicit retry and time budgets to limit spend and av
 - Priority stopping: run higher-scoring recovery queries first (score >= 4); skip low-priority queries once authoritative thresholds are satisfied.
 - Fallback cap: at most 2 low-priority recovery queries are attempted after priority queries.
 
+## Service Level Objectives (SLOs) + Release Gate
+SLOs are evaluated over a rolling window of recent runs and used as a release gate. The SLO summary is attached to `report.provenance.sloGate`.
+
+- Window: last 20 runs (rolling).
+- Parcel resolution success rate (attempted runs only): target >= 0.85.
+- Evidence recovery success rate (runs where recovery is needed): target >= 0.70.
+- Median end-to-end latency: target <= 60,000 ms.
+
+Release gate behavior:
+- Gate status is `blocked` if any SLO is below target.
+- Gate status is `clear` when all applicable SLOs meet target or are not applicable.
+
 ## Current Agent Spawning Points
 1. Method Discovery Agents (Phase 0.5)
    Names: `Method Discovery {n}`. Task: "Discover research methods". Spawned from `METHOD_DISCOVERY_TEMPLATES_*`.

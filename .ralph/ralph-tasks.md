@@ -29,7 +29,7 @@
   - [x] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
   - [x] Add privacy/compliance review checks tied to zero-cost mode and portal ToS/license enforcement
   - [x] Add instrumentation for parcel-resolution success, evidence-recovery success, latency, and a measurable confidence-quality proxy metric
-  - [ ] Define SLO targets for parcel resolution, evidence recovery, and median latency; gate releases when below baseline
+  - [x] Define SLO targets for parcel resolution, evidence recovery, and median latency; gate releases when below baseline
   - [ ] Add observability for evidence-gating decisions and portal error taxonomy
   - [ ] Add data privacy posture for address inputs and logs (PII handling and retention)
   - [ ] Add unit/integration tests for address normalization, parcel resolution (multi-parcel, unit-only, rural), evidence gating, and `PropertyDossier` population

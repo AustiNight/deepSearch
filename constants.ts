@@ -23,6 +23,11 @@ export const MIN_EVIDENCE_TOTAL_SOURCES = 3;
 export const MIN_EVIDENCE_AUTHORITATIVE_SOURCES = 1;
 export const MIN_EVIDENCE_AUTHORITY_SCORE = 75;
 
+export const SLO_HISTORY_WINDOW_RUNS = 20;
+export const SLO_PARCEL_RESOLUTION_SUCCESS_RATE = 0.85;
+export const SLO_EVIDENCE_RECOVERY_SUCCESS_RATE = 0.7;
+export const SLO_MEDIAN_LATENCY_MS = 60000;
+
 export const METHOD_TEMPLATES_GENERAL = [
   '{topic} official documentation',
   '{topic} primary source',

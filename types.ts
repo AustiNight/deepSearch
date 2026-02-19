@@ -149,6 +149,28 @@ export interface RunMetrics {
   confidenceQuality?: ConfidenceQualityMetrics;
 }
 
+export type SloMetricStatus = 'met' | 'missed' | 'not_applicable';
+
+export interface SloMetricSummary {
+  target: number;
+  actual?: number;
+  status: SloMetricStatus;
+  samples: number;
+}
+
+export type ReleaseGateStatus = 'clear' | 'blocked';
+
+export interface SloGateSummary {
+  windowSize: number;
+  totalRuns: number;
+  evaluatedAt: IsoDateTimeString;
+  parcelResolution: SloMetricSummary;
+  evidenceRecovery: SloMetricSummary;
+  medianLatencyMs: SloMetricSummary;
+  gateStatus: ReleaseGateStatus;
+  gateReasons?: string[];
+}
+
 export interface FinalReport {
   title: string;
   summary: string;
@@ -161,6 +183,7 @@ export interface FinalReport {
     datasetCompliance?: DatasetComplianceEntry[];
     compliance?: ComplianceSummary;
     runMetrics?: RunMetrics;
+    sloGate?: SloGateSummary;
   };
   schemaVersion?: number;
   propertyDossier?: PropertyDossier;
