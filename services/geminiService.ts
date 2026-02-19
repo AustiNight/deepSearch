@@ -675,7 +675,8 @@ export const synthesizeGrandReport = async (
     - Resolve parcel/address identifiers first (parcel/account, legal description if present).
     - Include official records: appraisal district / assessor, tax collector, county clerk deed chain, zoning, permits/inspections, code violations, GIS parcel map, flood/insurance risk.
     - Add a "Property Dossier" section with subsections: Parcel & Legal, Ownership/Transfers, Tax & Appraisal, Zoning/Land Use, Permits & Code, Hazards/Environmental, Neighborhood Context, Data Gaps & Next Steps.
-    - If a data item is not found, write "Source not found" and list the exact portal/record system that should contain it.
+    - If a data item is not found, write the exact label "Source not found" (no synonyms) and list the exact portal/record system or endpoint that should contain it.
+    - The "Data Gaps & Next Steps" subsection is REQUIRED and must enumerate every missing record/field with an exact portal/endpoint pointer (URL if known, otherwise portal name + endpoint path + query entry point).
     - Evidence thresholds: minimum total sources ${MIN_EVIDENCE_TOTAL_SOURCES}, minimum authoritative sources ${MIN_EVIDENCE_AUTHORITATIVE_SOURCES}, and at least one source with authorityScore >= ${MIN_EVIDENCE_AUTHORITY_SCORE}. If unmet, explicitly note the shortfall in "Data Gaps & Next Steps".
     `
     : '';
@@ -693,7 +694,7 @@ export const synthesizeGrandReport = async (
 
     RULES:
     1. **NO FLUFF**. Every sentence must convey a fact or analysis.
-    2. **CITATIONS REQUIRED**. Include inline citations as URLs from allowed sources for factual claims.
+    2. **CLAIM-LEVEL CITATIONS REQUIRED**. Every sentence with a factual claim must end with one or more inline URL citations from allowed sources. Do not rely on section-level citations or the bibliography alone.
     3. **BIBLIOGRAPHY IS MANDATORY**. Use ONLY allowed sources. If you cannot support a claim from allowed sources, explicitly say "Source not found" and avoid numeric claims.
     4. **COMPARE & CONTRAST**. Do not just list facts. Compare Option A vs Option B with numbers.
     5. **SOURCE PRIORITY**: Prefer higher-authority sources (government/official > quasi-official > aggregator > social) and the most recent evidence. When sources conflict, prioritize authority first, then recency.

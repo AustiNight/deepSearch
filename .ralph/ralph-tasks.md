@@ -23,7 +23,7 @@
   - [x] Enforce the primary-records checklist using the availability matrix and block “complete” unless coverage is met or explicitly unavailable
   - [x] Apply source-type scoring (government > quasi-official > aggregator > social) and weight synthesis to prioritize higher-authority sources and recency
   - [x] Map findings into the `PropertyDossier` before rendering and display per-section confidence scores derived from the scoring model
-  - [ ] Tighten synthesis prompts to require claim-level citations, explicit “Source not found” labels, and a “Data Gaps & Next Steps” section with exact portal/endpoint pointers
+  - [x] Tighten synthesis prompts to require claim-level citations, explicit “Source not found” labels, and a “Data Gaps & Next Steps” section with exact portal/endpoint pointers
   - [ ] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)
   - [ ] Add compliance/provenance capture for dataset license/ToS and access constraints and surface them in report metadata
   - [ ] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
