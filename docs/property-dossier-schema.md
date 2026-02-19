@@ -190,6 +190,7 @@ EnvironmentalSite
 | `recordType` | string | free text | no | Record type (assessor, tax, deed, zoning). |
 | `description` | string | free text | yes | Human readable description of the gap. |
 | `reason` | string | free text | yes | Why the gap exists. |
+| `reasonCode` | string | `DataGapReasonCode` | no | Failure taxonomy code (see `docs/failure-taxonomy.md`). |
 | `expectedSources` | array | `SourcePointer[]` | no | Where the data should be found. |
 | `severity` | string | `critical` `major` `minor` `info` | no | Gap severity. |
 | `status` | string | `missing` `unavailable` `restricted` `stale` `ambiguous` `conflict` | no | Gap status. |
@@ -497,6 +498,7 @@ If `dataCurrency.ageDays > maxAgeDays`, add a `DataGap` with `status=stale` for 
 | `/dataGaps[].recordType` | Internal pipeline | Derived from expected record type | Not applicable. |
 | `/dataGaps[].description` | Internal pipeline | Generated from validation | Not applicable. |
 | `/dataGaps[].reason` | Internal pipeline | Generated from failure taxonomy | Not applicable. |
+| `/dataGaps[].reasonCode` | Internal pipeline | Failure taxonomy code (see `docs/failure-taxonomy.md`) | Not applicable. |
 | `/dataGaps[].expectedSources` | Internal pipeline | Populated from known portals | Not applicable. |
 | `/dataGaps[].severity` | Internal policy | Derived from impact rules | Not applicable. |
 | `/dataGaps[].status` | Internal policy | Set from failure state | Not applicable. |

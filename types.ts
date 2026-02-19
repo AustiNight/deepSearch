@@ -160,6 +160,10 @@ export type DataGapStatus =
   | 'stale'
   | 'ambiguous'
   | 'conflict';
+export type DataGapReasonCode =
+  | 'geocode_failed'
+  | 'parcel_not_found'
+  | 'data_unavailable';
 
 export interface DataGap {
   id: string;
@@ -167,6 +171,7 @@ export interface DataGap {
   recordType?: string;
   description: string;
   reason: string;
+  reasonCode?: DataGapReasonCode;
   expectedSources?: SourcePointer[];
   severity?: DataGapSeverity;
   status?: DataGapStatus;

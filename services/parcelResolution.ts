@@ -1,6 +1,8 @@
-import type { DataGap, GeoPoint, Jurisdiction, ParcelInfo, PropertySubject, SourcePointer } from "../types";
+import type { DataGap, DataGapReasonCode, GeoPoint, Jurisdiction, ParcelInfo, PropertySubject, SourcePointer } from "../types";
 import { normalizeAddressVariants } from "./addressNormalization";
 import { DATA_SOURCE_CONTRACTS } from "../data/dataSourceContracts";
+import { FAILURE_TAXONOMY } from "../data/failureTaxonomy";
+import { JURISDICTION_AVAILABILITY_MATRIX, type PrimaryRecordType, type RecordAvailability } from "../data/jurisdictionAvailability";
 
 export type GeoJsonPosition = [number, number];
 
@@ -120,6 +122,75 @@ const expectedSourcesForRecord = (recordType: string, jurisdiction?: Jurisdictio
 const isoDateToday = () => new Date().toISOString().slice(0, 10);
 
 const createGapId = () => `gap-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const countJurisdictionSpecificity = (jurisdiction?: Partial<Jurisdiction>) =>
+  Object.values(jurisdiction || {}).filter(Boolean).length;
+
+const matchesJurisdiction = (expected?: Partial<Jurisdiction>, actual?: Jurisdiction) => {
+  if (!expected) return true;
+  if (!actual) return false;
+  if (expected.country && normalizeJurisdictionToken(expected.country) !== normalizeJurisdictionToken(actual.country)) return false;
+  if (expected.state && normalizeJurisdictionToken(expected.state) !== normalizeJurisdictionToken(actual.state)) return false;
+  if (expected.county && normalizeJurisdictionToken(expected.county) !== normalizeJurisdictionToken(actual.county)) return false;
+  if (expected.city && normalizeJurisdictionToken(expected.city) !== normalizeJurisdictionToken(actual.city)) return false;
+  return true;
+};
+
+const findJurisdictionAvailability = (jurisdiction?: Jurisdiction) => {
+  const candidates = JURISDICTION_AVAILABILITY_MATRIX.filter(entry =>
+    matchesJurisdiction(entry.jurisdiction, jurisdiction)
+  );
+  if (candidates.length === 0) {
+    return JURISDICTION_AVAILABILITY_MATRIX.find(entry => entry.id === "US-DEFAULT");
+  }
+  return candidates.sort(
+    (a, b) => countJurisdictionSpecificity(b.jurisdiction) - countJurisdictionSpecificity(a.jurisdiction)
+  )[0];
+};
+
+const getRecordAvailability = (recordType: PrimaryRecordType, jurisdiction?: Jurisdiction) =>
+  findJurisdictionAvailability(jurisdiction)?.records?.[recordType];
+
+const formatAvailabilityDetails = (availability?: RecordAvailability) => {
+  if (!availability) return undefined;
+  const parts: string[] = [];
+  if (availability.unavailableReason) parts.push(`Unavailable reason: ${availability.unavailableReason}.`);
+  if (availability.reason) parts.push(`Notes: ${availability.reason}.`);
+  if (availability.lastChecked) parts.push(`Last checked: ${availability.lastChecked}.`);
+  return parts.length ? parts.join(" ") : undefined;
+};
+
+const buildFailureGap = (
+  code: DataGapReasonCode,
+  context: {
+    fieldPath?: string;
+    recordType?: string;
+    expectedSources?: SourcePointer[];
+    reasonDetails?: string;
+    description?: string;
+    status?: DataGap["status"];
+    severity?: DataGap["severity"];
+    impact?: string;
+  }
+): DataGap => {
+  const definition = FAILURE_TAXONOMY[code];
+  const reason = context.reasonDetails
+    ? `${definition.reason} ${context.reasonDetails}`.trim()
+    : definition.reason;
+  return {
+    id: createGapId(),
+    fieldPath: context.fieldPath ?? definition.fieldPath,
+    recordType: context.recordType ?? definition.recordType,
+    description: context.description ?? definition.userMessage,
+    reason,
+    reasonCode: code,
+    expectedSources: context.expectedSources,
+    severity: context.severity ?? definition.severity,
+    status: context.status ?? definition.status,
+    detectedAt: isoDateToday(),
+    impact: context.impact ?? definition.impact
+  };
+};
 
 const dedupeParcelCandidates = (candidates: ParcelCandidate[]) => {
   const seen = new Set<string>();
@@ -263,8 +334,10 @@ export const resolveParcelWorkflow = async (
     jurisdiction: input.jurisdiction
   };
   const dataGaps: DataGap[] = [];
+  const assessorAvailability = getRecordAvailability("assessor_parcel", input.jurisdiction);
 
   let geocode: GeocodeResult | undefined;
+  let geocodeResolved = false;
   if (providers.geocode) {
     const resolved = await providers.geocode({
       address: normalizedAddress,
@@ -281,11 +354,19 @@ export const resolveParcelWorkflow = async (
         }
       };
       subject.geo = geocode.point;
+      geocodeResolved = true;
     }
+  }
+  if (providers.geocode && !geocodeResolved) {
+    dataGaps.push(buildFailureGap("geocode_failed", {
+      reasonDetails: `Address: ${normalizedAddress}.`
+    }));
   }
 
   let assessorCandidates: ParcelCandidate[] = [];
+  let assessorAttempted = false;
   if (providers.assessorLookup) {
+    assessorAttempted = true;
     assessorCandidates = dedupeParcelCandidates(await providers.assessorLookup({
       address: input.address,
       normalizedAddress,
@@ -303,7 +384,9 @@ export const resolveParcelWorkflow = async (
   }
 
   let gisCandidates: ParcelCandidate[] = [];
+  let gisAttempted = false;
   if (!resolvedCandidate && assessorCandidates.length === 0 && subject.geo && providers.gisParcelLayer) {
+    gisAttempted = true;
     const features = await providers.gisParcelLayer({
       point: subject.geo,
       jurisdiction: input.jurisdiction
@@ -340,6 +423,25 @@ export const resolveParcelWorkflow = async (
       assessorCandidates,
       input.jurisdiction
     ));
+  }
+
+  const hasParcelAmbiguity = dataGaps.some(gap => gap.status === "ambiguous" && gap.fieldPath === "/subject/parcelId");
+  const assessorUnavailable = assessorAvailability?.status === "unavailable";
+  if (!resolvedCandidate && !hasParcelAmbiguity && (assessorAttempted || gisAttempted || assessorUnavailable)) {
+    const expectedSources = expectedSourcesForRecord("assessor_parcel", input.jurisdiction);
+    if (assessorUnavailable) {
+      dataGaps.push(buildFailureGap("data_unavailable", {
+        recordType: "assessor_parcel",
+        expectedSources,
+        reasonDetails: formatAvailabilityDetails(assessorAvailability)
+      }));
+    } else {
+      dataGaps.push(buildFailureGap("parcel_not_found", {
+        recordType: "assessor_parcel",
+        expectedSources,
+        reasonDetails: `Assessor candidates: ${assessorCandidates.length}. GIS candidates: ${gisCandidates.length}.`
+      }));
+    }
   }
 
   if (resolvedCandidate?.parcelId) subject.parcelId = resolvedCandidate.parcelId;
