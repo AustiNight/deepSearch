@@ -4,6 +4,7 @@ import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemin
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
 import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from '../services/propertyDossier';
+import { buildDatasetComplianceSummary } from '../services/openDataDiscovery';
 import {
   INITIAL_OVERSEER_ID,
   METHOD_TEMPLATES_GENERAL,
@@ -3260,6 +3261,16 @@ export const useOverseer = () => {
           kind: 'unknown'
         };
       });
+      const datasetCompliance = buildDatasetComplianceSummary(reportSources);
+      if (datasetCompliance.length > 0) {
+        reportCandidate = {
+          ...reportCandidate,
+          provenance: {
+            ...reportCandidate.provenance,
+            datasetCompliance
+          }
+        };
+      }
       const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike);
       const primaryRecordCoverage = addressLike
         ? evaluatePrimaryRecordCoverage(reportSourceDetails, jurisdiction)

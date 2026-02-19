@@ -38,6 +38,20 @@ const confidenceBadgeClasses = (confidence?: number) => {
   return 'text-red-200 bg-red-500/15 border-red-500/40';
 };
 
+const formatPortalLabel = (portalUrl?: string) => {
+  if (!portalUrl) return null;
+  try {
+    return new URL(portalUrl).hostname.replace(/^www\./, '');
+  } catch (_) {
+    return portalUrl;
+  }
+};
+
+const truncateText = (value: string, max: number) => {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 3)}...`;
+};
+
 const isTableDivider = (line: string) => {
   const trimmed = line.trim();
   if (!trimmed) return false;
@@ -182,6 +196,8 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const missingEntries = primaryRecordCoverage?.entries?.filter(
     (entry) => entry.status !== 'covered' && entry.status !== 'unavailable'
   ) || [];
+  const datasetCompliance = report.provenance?.datasetCompliance || [];
+  const hasDatasetCompliance = datasetCompliance.length > 0;
 
   const downloadReport = () => {
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -271,6 +287,88 @@ export const ReportView: React.FC<Props> = ({ report }) => {
             )}
           </div>
         ))}
+
+        {hasDatasetCompliance && (
+          <div className="mt-10 rounded-lg border border-gray-800 bg-black/20 p-4 text-xs text-gray-300">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">Dataset Compliance</p>
+            <div className="mt-3 space-y-3">
+              {datasetCompliance.map((entry, index) => {
+                const portalLabel = formatPortalLabel(entry.portalUrl);
+                const datasetLink = entry.homepageUrl || entry.dataUrl;
+                const accessConstraints = entry.accessConstraints?.filter(Boolean) || [];
+                const termsText = entry.termsOfService ? truncateText(entry.termsOfService, 160) : null;
+                return (
+                  <div key={`${entry.datasetId || entry.title}-${index}`} className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-white">
+                      {datasetLink ? (
+                        <a
+                          href={datasetLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          {entry.title}
+                        </a>
+                      ) : (
+                        <span>{entry.title}</span>
+                      )}
+                    </div>
+                    <div className="mt-2 space-y-1 text-gray-400">
+                      {portalLabel && (
+                        <div>Portal: <span className="text-gray-300">{portalLabel}</span></div>
+                      )}
+                      {entry.license && (
+                        <div>
+                          License: <span className="text-gray-300">{entry.license}</span>
+                          {entry.licenseUrl && (
+                            <a
+                              href={entry.licenseUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Link
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      {(termsText || entry.termsUrl) && (
+                        <div>
+                          Terms: {termsText && <span className="text-gray-300">{termsText}</span>}
+                          {entry.termsUrl && (
+                            <a
+                              href={entry.termsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Link
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      {accessConstraints.length > 0 && (
+                        <div>
+                          Access: <span className="text-gray-300">{accessConstraints.join(', ')}</span>
+                        </div>
+                      )}
+                      {(entry.lastUpdated || entry.retrievedAt) && (
+                        <div className="text-gray-500">
+                          {entry.lastUpdated && <span>Updated: {entry.lastUpdated}</span>}
+                          {entry.lastUpdated && entry.retrievedAt && <span> • </span>}
+                          {entry.retrievedAt && <span>Retrieved: {entry.retrievedAt}</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="mt-12 pt-6 border-t border-gray-800 text-xs text-gray-500 font-mono">
           <p>METHOD AUDIT: {report.provenance.methodAudit}</p>

@@ -119,6 +119,7 @@ export interface FinalReport {
     totalSources: number;
     methodAudit: string;
     primaryRecordCoverage?: PrimaryRecordCoverage;
+    datasetCompliance?: DatasetComplianceEntry[];
   };
   schemaVersion?: number;
   propertyDossier?: PropertyDossier;
@@ -389,6 +390,14 @@ export interface PropertyDossier {
 
 export type OpenDataPortalType = 'socrata' | 'arcgis' | 'dcat' | 'unknown';
 
+export interface DatasetComplianceFields {
+  license?: string;
+  licenseUrl?: string;
+  termsOfService?: string;
+  termsUrl?: string;
+  accessConstraints?: string[];
+}
+
 export interface OpenDatasetMetadata {
   id: string;
   portalType: OpenDataPortalType;
@@ -399,6 +408,10 @@ export interface OpenDatasetMetadata {
   source?: string;
   lastUpdated?: IsoDateString;
   license?: string;
+  licenseUrl?: string;
+  termsOfService?: string;
+  termsUrl?: string;
+  accessConstraints?: string[];
   dataUrl?: string;
   homepageUrl?: string;
   tags?: string[];
@@ -409,6 +422,18 @@ export interface OpenDatasetIndex {
   schemaVersion: number;
   updatedAt: IsoDateTimeString;
   datasets: OpenDatasetMetadata[];
+}
+
+export interface DatasetComplianceEntry extends DatasetComplianceFields {
+  datasetId?: string;
+  title: string;
+  portalType?: OpenDataPortalType;
+  portalUrl?: string;
+  dataUrl?: string;
+  homepageUrl?: string;
+  source?: string;
+  retrievedAt?: IsoDateTimeString;
+  lastUpdated?: IsoDateString;
 }
 
 export type TaxonomyProvenanceSource = 'seed' | 'agent_proposal' | 'overseer_vet' | 'manual';

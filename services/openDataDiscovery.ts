@@ -1,4 +1,4 @@
-import type { IsoDateString, IsoDateTimeString, OpenDataPortalType, OpenDatasetIndex, OpenDatasetMetadata } from "../types";
+import type { DatasetComplianceEntry, IsoDateString, IsoDateTimeString, OpenDataPortalType, OpenDatasetIndex, OpenDatasetMetadata } from "../types";
 
 const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
 const OPEN_DATA_INDEX_STORAGE_KEY = "overseer_open_data_index";
@@ -64,14 +64,102 @@ const asStringFrom = (...values: unknown[]) => {
   return undefined;
 };
 
-const parseLicense = (value: unknown) => {
-  if (!value) return undefined;
-  if (typeof value === "string") return value.trim() || undefined;
-  if (typeof value === "object") {
-    return asStringFrom((value as { name?: unknown }).name, (value as { title?: unknown }).title, (value as { label?: unknown }).label, (value as { id?: unknown }).id, (value as { url?: unknown }).url);
-  }
-  return undefined;
+const asUrlString = (value: unknown) => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : undefined;
 };
+
+const parseLicenseDetails = (value: unknown) => {
+  if (!value) return { license: undefined, licenseUrl: undefined };
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return { license: undefined, licenseUrl: undefined };
+    return { license: trimmed, licenseUrl: asUrlString(trimmed) };
+  }
+  if (typeof value === "object") {
+    const license = asStringFrom(
+      (value as { name?: unknown }).name,
+      (value as { title?: unknown }).title,
+      (value as { label?: unknown }).label,
+      (value as { id?: unknown }).id
+    );
+    const licenseUrl = asStringFrom(
+      (value as { url?: unknown }).url,
+      (value as { href?: unknown }).href,
+      (value as { link?: unknown }).link,
+      (value as { uri?: unknown }).uri,
+      (value as { "@id"?: unknown })["@id"]
+    );
+    return {
+      license: license || (licenseUrl ? licenseUrl : undefined),
+      licenseUrl: licenseUrl || (license && asUrlString(license) ? license : undefined)
+    };
+  }
+  return { license: undefined, licenseUrl: undefined };
+};
+
+const parseTermsDetails = (value: unknown) => {
+  if (!value) return { termsOfService: undefined, termsUrl: undefined };
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return { termsOfService: undefined, termsUrl: undefined };
+    if (asUrlString(trimmed)) return { termsOfService: undefined, termsUrl: trimmed };
+    return { termsOfService: trimmed, termsUrl: undefined };
+  }
+  if (typeof value === "object") {
+    const termsText = asStringFrom(
+      (value as { name?: unknown }).name,
+      (value as { title?: unknown }).title,
+      (value as { label?: unknown }).label,
+      (value as { description?: unknown }).description
+    );
+    const termsUrl = asStringFrom(
+      (value as { url?: unknown }).url,
+      (value as { href?: unknown }).href,
+      (value as { link?: unknown }).link,
+      (value as { uri?: unknown }).uri,
+      (value as { "@id"?: unknown })["@id"]
+    );
+    return {
+      termsOfService: termsText,
+      termsUrl: termsUrl || (termsText && asUrlString(termsText) ? termsText : undefined)
+    };
+  }
+  return { termsOfService: undefined, termsUrl: undefined };
+};
+
+const collectAccessConstraints = (...values: unknown[]) => {
+  const out: string[] = [];
+  const pushValue = (value: unknown) => {
+    if (!value) return;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) out.push(trimmed);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(pushValue);
+      return;
+    }
+    if (typeof value === "object") {
+      const str = asStringFrom(
+        (value as { label?: unknown }).label,
+        (value as { name?: unknown }).name,
+        (value as { title?: unknown }).title,
+        (value as { id?: unknown }).id,
+        (value as { "@id"?: unknown })["@id"]
+      );
+      if (str) out.push(str);
+    }
+  };
+  values.forEach(pushValue);
+  return Array.from(new Set(out));
+};
+
+const mergeAccessConstraints = (base: string[] = [], next: string[] = []) =>
+  Array.from(new Set([...base, ...next]));
 
 const parsePublisher = (value: unknown) => {
   if (!value) return undefined;
@@ -181,6 +269,10 @@ const normalizeDataset = (input: {
   source?: string;
   lastUpdated?: IsoDateString;
   license?: string;
+  licenseUrl?: string;
+  termsOfService?: string;
+  termsUrl?: string;
+  accessConstraints?: string[];
   dataUrl?: string;
   homepageUrl?: string;
   tags?: string[];
@@ -197,6 +289,10 @@ const normalizeDataset = (input: {
     source: asString(input.source),
     lastUpdated: input.lastUpdated,
     license: asString(input.license),
+    licenseUrl: asString(input.licenseUrl),
+    termsOfService: asString(input.termsOfService),
+    termsUrl: asString(input.termsUrl),
+    accessConstraints: input.accessConstraints && input.accessConstraints.length > 0 ? input.accessConstraints : undefined,
     dataUrl: asString(input.dataUrl),
     homepageUrl: asString(input.homepageUrl),
     tags: input.tags && input.tags.length > 0 ? input.tags : undefined,
@@ -219,7 +315,9 @@ const discoverSocrataDatasets = async (portalUrl: string, query: string, limit: 
     const datasetId = asStringFrom(resource?.id, entry?.id);
     const lastUpdated = toIsoDateString(resource?.updatedAt || resource?.updated_at || entry?.updatedAt || entry?.updated_at);
     const source = asStringFrom(resource?.attribution, metadata?.publisher?.name, metadata?.attribution, entry?.attribution);
-    const license = parseLicense(resource?.license || metadata?.license || entry?.license);
+    const licenseInfo = parseLicenseDetails(resource?.license || metadata?.license || entry?.license);
+    const termsInfo = parseTermsDetails(metadata?.termsOfService || entry?.termsOfService || entry?.terms);
+    const accessConstraints = collectAccessConstraints(metadata?.accessLevel, metadata?.accessLevelComment, metadata?.accessRights, metadata?.rights);
     const dataUrl = asStringFrom(resource?.link, resource?.dataUrl, entry?.permalink);
     const homepageUrl = asStringFrom(entry?.permalink, entry?.link);
     const tags = Array.isArray(entry?.tags) ? entry.tags.filter((tag: unknown) => typeof tag === "string") : undefined;
@@ -232,7 +330,11 @@ const discoverSocrataDatasets = async (portalUrl: string, query: string, limit: 
       description: asStringFrom(resource?.description, entry?.description),
       source: source || getDomain(base),
       lastUpdated,
-      license,
+      license: licenseInfo.license,
+      licenseUrl: licenseInfo.licenseUrl,
+      termsOfService: termsInfo.termsOfService,
+      termsUrl: termsInfo.termsUrl,
+      accessConstraints,
       dataUrl,
       homepageUrl,
       tags
@@ -255,16 +357,47 @@ const discoverArcGisDatasets = async (portalUrl: string, query: string, limit: n
     const title = asStringFrom(entry?.title, entry?.name);
     const lastUpdated = toIsoDateString(entry?.modified || entry?.created);
     const source = asStringFrom(entry?.owner, entry?.orgId, entry?.accessInformation);
-    let license = parseLicense(entry?.licenseInfo || entry?.license);
+    const entryLicenseInfo = parseLicenseDetails(entry?.licenseInfo || entry?.license);
+    const entryTermsInfo = parseTermsDetails(entry?.termsOfUse || entry?.termsOfService || entry?.terms);
+    let accessConstraints = collectAccessConstraints(
+      entry?.access,
+      entry?.accessInformation,
+      entry?.accessLevel,
+      entry?.accessLevelComment,
+      entry?.accessRights,
+      entry?.rights,
+      entry?.constraints
+    );
     let dataUrl = asString(entry?.url);
+    let licenseInfo = { ...entryLicenseInfo };
+    let termsInfo = { ...entryTermsInfo };
 
     if (itemId) {
       const itemUrl = `${base}/sharing/rest/content/items/${itemId}?f=json`;
       const itemResponse = await safeFetchJson(itemUrl);
       if (itemResponse.ok && itemResponse.data) {
-        if (!license) {
-          license = parseLicense(itemResponse.data?.licenseInfo || itemResponse.data?.license);
-        }
+        const itemLicenseInfo = parseLicenseDetails(itemResponse.data?.licenseInfo || itemResponse.data?.license);
+        licenseInfo = {
+          license: licenseInfo.license || itemLicenseInfo.license,
+          licenseUrl: licenseInfo.licenseUrl || itemLicenseInfo.licenseUrl
+        };
+        const itemTermsInfo = parseTermsDetails(itemResponse.data?.termsOfUse || itemResponse.data?.termsOfService || itemResponse.data?.terms);
+        termsInfo = {
+          termsOfService: termsInfo.termsOfService || itemTermsInfo.termsOfService,
+          termsUrl: termsInfo.termsUrl || itemTermsInfo.termsUrl
+        };
+        accessConstraints = mergeAccessConstraints(
+          accessConstraints,
+          collectAccessConstraints(
+            itemResponse.data?.access,
+            itemResponse.data?.accessInformation,
+            itemResponse.data?.accessLevel,
+            itemResponse.data?.accessLevelComment,
+            itemResponse.data?.accessRights,
+            itemResponse.data?.rights,
+            itemResponse.data?.constraints
+          )
+        );
         if (!dataUrl) {
           dataUrl = asString(itemResponse.data?.url);
         }
@@ -279,7 +412,11 @@ const discoverArcGisDatasets = async (portalUrl: string, query: string, limit: n
       description: asStringFrom(entry?.snippet, entry?.description),
       source: source || getDomain(base),
       lastUpdated,
-      license,
+      license: licenseInfo.license,
+      licenseUrl: licenseInfo.licenseUrl,
+      termsOfService: termsInfo.termsOfService,
+      termsUrl: termsInfo.termsUrl,
+      accessConstraints,
       dataUrl,
       homepageUrl: itemId ? `${base}/home/item.html?id=${itemId}` : undefined,
       tags: Array.isArray(entry?.tags) ? entry.tags.filter((tag: unknown) => typeof tag === "string") : undefined
@@ -329,6 +466,15 @@ const discoverDcatDatasets = async (portalUrl: string, query: string, limit: num
     const distribution = Array.isArray(entry?.distribution) ? entry.distribution : [];
     const distributionEntry = distribution.find((item: any) => item?.downloadURL || item?.accessURL) || distribution[0];
     const dataUrl = asStringFrom(distributionEntry?.downloadURL, distributionEntry?.accessURL);
+    const licenseInfo = parseLicenseDetails(entry?.license);
+    const termsInfo = parseTermsDetails(entry?.termsOfUse || entry?.terms || entry?.rights);
+    const accessConstraints = collectAccessConstraints(
+      entry?.accessLevel,
+      entry?.accessLevelComment,
+      entry?.accessRights,
+      entry?.rights,
+      entry?.constraints
+    );
 
     const dataset = normalizeDataset({
       portalType: "dcat",
@@ -338,7 +484,11 @@ const discoverDcatDatasets = async (portalUrl: string, query: string, limit: num
       description,
       source: parsePublisher(entry?.publisher) || getDomain(normalizedPortal),
       lastUpdated: toIsoDateString(entry?.modified || entry?.updated || entry?.issued),
-      license: parseLicense(entry?.license),
+      license: licenseInfo.license,
+      licenseUrl: licenseInfo.licenseUrl,
+      termsOfService: termsInfo.termsOfService,
+      termsUrl: termsInfo.termsUrl,
+      accessConstraints,
       dataUrl,
       homepageUrl: asStringFrom(entry?.landingPage, entry?.homepage, catalogUrl),
       tags
@@ -385,3 +535,89 @@ export const discoverOpenDataDatasets = async (input: OpenDataDiscoveryInput): P
 export const getOpenDatasetIndex = () => loadOpenDatasetIndex();
 
 export const persistOpenDatasetMetadata = (datasets: OpenDatasetMetadata[]) => upsertOpenDatasets(datasets);
+
+const normalizeMatchUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const path = url.pathname.replace(/\/+$/, "");
+    return `${url.protocol.toLowerCase()}//${host}${path}`;
+  } catch (_) {
+    return value.trim().toLowerCase().replace(/\/+$/, "");
+  }
+};
+
+const normalizeMatchDomain = (value: string) => {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host.startsWith("www.") ? host.slice(4) : host;
+  } catch (_) {
+    const trimmed = value.trim().toLowerCase();
+    return trimmed.startsWith("www.") ? trimmed.slice(4) : trimmed;
+  }
+};
+
+const sourceMatchesCandidate = (sourceUrl: string, candidateUrl?: string) => {
+  if (!candidateUrl) return false;
+  const normalizedSource = normalizeMatchUrl(sourceUrl);
+  const normalizedCandidate = normalizeMatchUrl(candidateUrl);
+  if (!normalizedSource || !normalizedCandidate) return false;
+  return normalizedSource === normalizedCandidate || normalizedSource.startsWith(`${normalizedCandidate}/`);
+};
+
+const sourceMatchesDatasetId = (sourceUrl: string, datasetId?: string, portalUrl?: string) => {
+  if (!datasetId) return false;
+  const needle = datasetId.toLowerCase();
+  if (!needle) return false;
+  const sourceLower = sourceUrl.toLowerCase();
+  if (!sourceLower.includes(needle)) return false;
+  if (!portalUrl) return true;
+  const sourceDomain = normalizeMatchDomain(sourceUrl);
+  const portalDomain = normalizeMatchDomain(portalUrl);
+  return sourceDomain === portalDomain;
+};
+
+export const buildDatasetComplianceSummary = (
+  reportSources: string[],
+  index: OpenDatasetIndex = loadOpenDatasetIndex()
+): DatasetComplianceEntry[] => {
+  if (!Array.isArray(reportSources) || reportSources.length === 0) return [];
+  if (!index || !Array.isArray(index.datasets) || index.datasets.length === 0) return [];
+  const sources = reportSources.filter((source) => typeof source === "string" && source.trim().length > 0);
+  if (sources.length === 0) return [];
+
+  const matched = new Map<string, DatasetComplianceEntry>();
+  for (const dataset of index.datasets) {
+    if (!dataset || !dataset.title) continue;
+    let isMatch = false;
+    for (const source of sources) {
+      if (sourceMatchesCandidate(source, dataset.dataUrl) || sourceMatchesCandidate(source, dataset.homepageUrl)) {
+        isMatch = true;
+        break;
+      }
+      if (sourceMatchesDatasetId(source, dataset.datasetId, dataset.portalUrl)) {
+        isMatch = true;
+        break;
+      }
+    }
+    if (!isMatch) continue;
+    matched.set(dataset.id, {
+      datasetId: dataset.datasetId,
+      title: dataset.title,
+      portalType: dataset.portalType,
+      portalUrl: dataset.portalUrl,
+      dataUrl: dataset.dataUrl,
+      homepageUrl: dataset.homepageUrl,
+      source: dataset.source,
+      license: dataset.license,
+      licenseUrl: dataset.licenseUrl,
+      termsOfService: dataset.termsOfService,
+      termsUrl: dataset.termsUrl,
+      accessConstraints: dataset.accessConstraints,
+      retrievedAt: dataset.retrievedAt,
+      lastUpdated: dataset.lastUpdated
+    });
+  }
+
+  return Array.from(matched.values());
+};

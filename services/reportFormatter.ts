@@ -1,5 +1,7 @@
 import type {
+  DatasetComplianceEntry,
   FinalReport,
+  PrimaryRecordCoverage,
   ReportSection,
   Visualization,
   ChartVisualization,
@@ -25,6 +27,43 @@ const IMAGE_HOST_ALLOWLIST: string[] = [];
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return !!value && typeof value === "object" && !Array.isArray(value);
+};
+
+const isPortalType = (value: unknown) =>
+  value === "socrata" || value === "arcgis" || value === "dcat" || value === "unknown";
+
+const normalizePrimaryRecordCoverage = (value: unknown): PrimaryRecordCoverage | undefined => {
+  if (!isPlainObject(value)) return undefined;
+  if (!Array.isArray(value.entries)) return undefined;
+  return value as PrimaryRecordCoverage;
+};
+
+const normalizeDatasetCompliance = (value: unknown): DatasetComplianceEntry[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const out: DatasetComplianceEntry[] = [];
+  for (const entry of value) {
+    if (!isPlainObject(entry)) continue;
+    const title = typeof entry.title === "string" ? entry.title.trim() : "";
+    if (!title) continue;
+    const accessConstraints = normalizeStringList(entry.accessConstraints, 12);
+    out.push({
+      title,
+      datasetId: typeof entry.datasetId === "string" ? entry.datasetId : undefined,
+      portalType: isPortalType(entry.portalType) ? entry.portalType : undefined,
+      portalUrl: typeof entry.portalUrl === "string" ? entry.portalUrl : undefined,
+      dataUrl: typeof entry.dataUrl === "string" ? entry.dataUrl : undefined,
+      homepageUrl: typeof entry.homepageUrl === "string" ? entry.homepageUrl : undefined,
+      source: typeof entry.source === "string" ? entry.source : undefined,
+      license: typeof entry.license === "string" ? entry.license : undefined,
+      licenseUrl: typeof entry.licenseUrl === "string" ? entry.licenseUrl : undefined,
+      termsOfService: typeof entry.termsOfService === "string" ? entry.termsOfService : undefined,
+      termsUrl: typeof entry.termsUrl === "string" ? entry.termsUrl : undefined,
+      accessConstraints: accessConstraints.length > 0 ? accessConstraints : undefined,
+      retrievedAt: typeof entry.retrievedAt === "string" ? entry.retrievedAt : undefined,
+      lastUpdated: typeof entry.lastUpdated === "string" ? entry.lastUpdated : undefined
+    });
+  }
+  return out.length > 0 ? out : undefined;
 };
 
 const toTitleCase = (input: string) => {
@@ -385,6 +424,9 @@ export const coerceReportData = (input: any, topic: string): FinalReport => {
     ];
   }
 
+  const primaryRecordCoverage = normalizePrimaryRecordCoverage(input?.provenance?.primaryRecordCoverage);
+  const datasetCompliance = normalizeDatasetCompliance(input?.provenance?.datasetCompliance);
+
   return {
     title,
     summary,
@@ -396,7 +438,9 @@ export const coerceReportData = (input: any, topic: string): FinalReport => {
       methodAudit:
         typeof input?.provenance?.methodAudit === "string"
           ? input.provenance.methodAudit
-          : DEFAULT_METHOD_AUDIT
+          : DEFAULT_METHOD_AUDIT,
+      primaryRecordCoverage,
+      datasetCompliance
     },
     schemaVersion:
       typeof input?.schemaVersion === "number" && Number.isFinite(input.schemaVersion)
