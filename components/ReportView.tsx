@@ -214,8 +214,14 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const missingEntries = primaryRecordCoverage?.entries?.filter(
     (entry) => entry.status !== 'covered' && entry.status !== 'unavailable'
   ) || [];
+  const unavailableEntries = primaryRecordCoverage?.entries?.filter(
+    (entry) => entry.status === 'unavailable'
+  ) || [];
+  const hasUnavailable = unavailableEntries.length > 0;
   const datasetCompliance = report.provenance?.datasetCompliance || [];
   const hasDatasetCompliance = datasetCompliance.length > 0;
+  const dataGaps = report.propertyDossier?.dataGaps || [];
+  const hasDataGaps = dataGaps.length > 0;
 
   const downloadReport = () => {
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -234,7 +240,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
            <div className={`flex items-center gap-2 text-sm ${isCoverageComplete ? 'text-cyber-green' : 'text-yellow-400'}`}>
              {isCoverageComplete ? <ShieldCheck className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
              <span>
-               Overseer Verified • {isCoverageComplete ? 'Exhaustive Search Complete' : 'Primary Records Incomplete'}
+               Overseer Verified • {isCoverageComplete ? (hasUnavailable ? 'Coverage Complete (Unavailable Records)' : 'Exhaustive Search Complete') : 'Primary Records Incomplete'}
              </span>
            </div>
         </div>
@@ -251,6 +257,18 @@ export const ReportView: React.FC<Props> = ({ report }) => {
           <p className="font-semibold">Primary record coverage is incomplete.</p>
           <p className="mt-1 text-yellow-200/80">
             Missing or restricted records: {missingEntries.map((entry) => {
+              const label = formatRecordTypeLabel(entry.recordType);
+              const status = entry.availabilityStatus || entry.status;
+              return `${label} (${status})`;
+            }).join(', ')}
+          </p>
+        </div>
+      )}
+      {hasUnavailable && (
+        <div className="mb-6 rounded-lg border border-sky-500/40 bg-sky-500/10 p-4 text-sm text-sky-100">
+          <p className="font-semibold">Some primary records are unavailable in this jurisdiction.</p>
+          <p className="mt-1 text-sky-200/80">
+            Unavailable records: {unavailableEntries.map((entry) => {
               const label = formatRecordTypeLabel(entry.recordType);
               const status = entry.availabilityStatus || entry.status;
               return `${label} (${status})`;
@@ -305,6 +323,79 @@ export const ReportView: React.FC<Props> = ({ report }) => {
             )}
           </div>
         ))}
+
+        {hasDataGaps && (
+          <div className="mt-10 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">
+            <p className="text-[11px] uppercase tracking-wide text-gray-500">Data Gaps & Next Steps</p>
+            <div className="mt-3 space-y-3">
+              {dataGaps.map((gap, index) => {
+                const label = gap.recordType
+                  ? formatRecordTypeLabel(gap.recordType)
+                  : (gap.fieldPath || `Gap ${index + 1}`);
+                const expectedSources = gap.expectedSources || [];
+                return (
+                  <div key={`${gap.id}-${index}`} className="rounded border border-gray-800 bg-gray-900/40 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-white">
+                      <span>{label}</span>
+                      {gap.status && (
+                        <span className="text-[10px] uppercase tracking-wide text-amber-200">
+                          {gap.status}
+                        </span>
+                      )}
+                      {gap.severity && (
+                        <span className="text-[10px] uppercase tracking-wide text-gray-500">
+                          {gap.severity}
+                        </span>
+                      )}
+                    </div>
+                    {gap.description && (
+                      <div className="mt-1 text-gray-300">{gap.description}</div>
+                    )}
+                    {gap.reason && (
+                      <div className="mt-1 text-gray-400">Reason: {gap.reason}</div>
+                    )}
+                    {gap.impact && (
+                      <div className="mt-1 text-gray-500">Impact: {gap.impact}</div>
+                    )}
+                    {expectedSources.length > 0 && (
+                      <div className="mt-2 space-y-1 text-[11px] text-gray-400">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Expected Sources</div>
+                        {expectedSources.map((source, sourceIndex) => {
+                          const portalLabel = formatPortalLabel(source.portalUrl);
+                          return (
+                            <div key={`${source.label}-${sourceIndex}`}>
+                              <span className="text-gray-300">{source.label}</span>
+                              {portalLabel && (
+                                <span className="ml-2 text-gray-500">Portal: {portalLabel}</span>
+                              )}
+                              {source.portalUrl && (
+                                <a
+                                  href={source.portalUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-2 inline-flex items-center gap-1 text-cyber-blue hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Link
+                                </a>
+                              )}
+                              {source.endpoint && (
+                                <span className="ml-2 text-gray-500">Endpoint: {source.endpoint}</span>
+                              )}
+                              {source.query && (
+                                <span className="ml-2 text-gray-500">Query: {source.query}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {sloGate && (
           <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300">

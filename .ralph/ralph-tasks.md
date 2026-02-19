@@ -1,6 +1,6 @@
 # Ralph Tasks
 
-- [/] Epic: Improve Report Quality for Address-Like Topics
+- [x] Epic: Improve Report Quality for Address-Like Topics
   - [x] Define schemas for `PropertyDossier`, `DataGap`, and claim-level citations (field names, types, units, optionality, and source linkage rules)
   - [x] Add provenance fields for retrieval timestamp, source update date, and data currency to support recency weighting
   - [x] Define field-level lineage rules for every `PropertyDossier` field (source precedence, derivation steps, and conflict resolution)
@@ -38,7 +38,7 @@
   - [x] Add migration/backfill plan for cached reports and dataset index when schemas change
   - [x] Add security review for key storage, logging, and redaction in telemetry
   - [x] Define performance constraints (max external calls, portal discovery caps, latency budgets) and enforce with guardrails
-  - [ ] Acceptance: evidence threshold constants are defined and enforced (with tests that fail/pass around the thresholds), address reports include a populated `PropertyDossier` with required fields when available, primary-record coverage (or explicit unavailability) is shown, confidence tags render for each section, and Data Gaps include exact source pointers
+  - [x] Acceptance: evidence threshold constants are defined and enforced (with tests that fail/pass around the thresholds), address reports include a populated `PropertyDossier` with required fields when available, primary-record coverage (or explicit unavailability) is shown, confidence tags render for each section, and Data Gaps include exact source pointers
 
 - [ ] Epic: Export Report to PDF
   - [ ] Decide the PDF generation approach and supported browsers before implementation (print-optimized DOM + `window.print` or client-side PDF generator)
