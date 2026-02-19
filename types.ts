@@ -151,12 +151,22 @@ export type ComplianceBlockedSource = {
   datasetId?: string;
 };
 
+export type ComplianceReviewItem = {
+  reason: string;
+  datasetTitle?: string;
+  datasetId?: string;
+  portalUrl?: string;
+};
+
 export type ComplianceSummary = {
   mode: ComplianceMode;
   signoffRequired: boolean;
   signoffProvided: boolean;
   gateStatus: ComplianceGateStatus;
   blockedSources: ComplianceBlockedSource[];
+  zeroCostMode?: boolean;
+  reviewRequired?: boolean;
+  reviewItems?: ComplianceReviewItem[];
   notes?: string[];
 };
 

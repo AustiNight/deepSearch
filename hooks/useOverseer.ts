@@ -3092,6 +3092,15 @@ export const useOverseer = () => {
           'warning'
         );
       }
+      if (complianceResult.summary.reviewRequired) {
+        logOverseer(
+          'PHASE 4: COMPLIANCE',
+          'compliance review required',
+          'zero-cost/ToS/privacy checks flagged',
+          complianceResult.summary.reviewItems?.slice(0, 3).map((entry) => entry.datasetTitle || entry.datasetId || 'dataset').join(', '),
+          'warning'
+        );
+      }
       const rankedSources = rankSourcesByAuthorityAndRecency(complianceResult.allowedSources);
       const allowedSources = rankedSources.map((entry) => entry.source.uri);
       const finalReportData = await runSafely(synthesizeGrandReport(

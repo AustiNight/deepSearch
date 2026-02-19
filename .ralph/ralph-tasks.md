@@ -27,7 +27,7 @@
   - [x] Improve validation output to human-readable messages that cite the specific missing citations and sections (no “[object Object]”)
   - [x] Add compliance/provenance capture for dataset license/ToS and access constraints and surface them in report metadata
   - [x] Add a compliance enforcement layer for ToS/attribution (block disallowed sources, enforce attribution formatting, and require sign-off gates before rollout)
-  - [ ] Add privacy/compliance review checks tied to zero-cost mode and portal ToS/license enforcement
+  - [x] Add privacy/compliance review checks tied to zero-cost mode and portal ToS/license enforcement
   - [ ] Add instrumentation for parcel-resolution success, evidence-recovery success, latency, and a measurable confidence-quality proxy metric
   - [ ] Define SLO targets for parcel resolution, evidence recovery, and median latency; gate releases when below baseline
   - [ ] Add observability for evidence-gating decisions and portal error taxonomy

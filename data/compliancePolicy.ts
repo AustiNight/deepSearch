@@ -2,12 +2,39 @@ export type ComplianceMode = "audit" | "enforce";
 
 export const COMPLIANCE_POLICY = {
   mode: "enforce" as ComplianceMode,
+  zeroCostMode: true,
   signoff: {
     required: true,
     approvedBy: "",
     approvedAt: ""
   },
   blockedDomains: [] as string[],
+  review: {
+    requireLicense: true,
+    requireTerms: true,
+    requireAccessConstraints: false,
+    costPatterns: [
+      /\bfee\b/i,
+      /\bfees\b/i,
+      /\bpaid\b/i,
+      /\bpayment\b/i,
+      /\bpurchase\b/i,
+      /\bsubscription\b/i,
+      /\bpricing\b/i,
+      /\bpremium\b/i,
+      /\bcharge(d|s)?\b/i
+    ],
+    privacyPatterns: [
+      /\bpersonal data\b/i,
+      /\bpersonally identifiable\b/i,
+      /\bpii\b/i,
+      /\bprivacy\b/i,
+      /\bconsent\b/i,
+      /\bopt[-\s]?out\b/i,
+      /\bdo not share\b/i,
+      /\bdata subject\b/i
+    ]
+  },
   blocklist: {
     licensePatterns: [
       /all rights reserved/i,

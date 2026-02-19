@@ -94,6 +94,7 @@ const buildAttribution = (entry: DatasetComplianceEntry) => {
 
 const evaluateDataset = (entry: DatasetComplianceEntry): DatasetEvaluation => {
   const reasons: string[] = [];
+  const reviewReasons: string[] = [];
   const text = collectComplianceText(entry);
   if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.blocklist.licensePatterns)) {
     reasons.push("license restriction");
@@ -105,7 +106,29 @@ const evaluateDataset = (entry: DatasetComplianceEntry): DatasetEvaluation => {
     reasons.push("access restriction");
   }
 
-  const action = reasons.length > 0 ? "block" : "allow";
+  if (COMPLIANCE_POLICY.zeroCostMode) {
+    if (COMPLIANCE_POLICY.review.requireLicense && !isNonEmpty(entry.license) && !isNonEmpty(entry.licenseUrl)) {
+      reviewReasons.push("missing license metadata (zero-cost review)");
+    }
+    if (COMPLIANCE_POLICY.review.requireTerms && !isNonEmpty(entry.termsOfService) && !isNonEmpty(entry.termsUrl)) {
+      reviewReasons.push("missing terms metadata (zero-cost review)");
+    }
+    if (
+      COMPLIANCE_POLICY.review.requireAccessConstraints &&
+      (!Array.isArray(entry.accessConstraints) || entry.accessConstraints.length === 0)
+    ) {
+      reviewReasons.push("missing access constraints (zero-cost review)");
+    }
+    if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.review.costPatterns)) {
+      reviewReasons.push("possible paid access");
+    }
+  }
+
+  if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.review.privacyPatterns)) {
+    reviewReasons.push("privacy constraint present");
+  }
+
+  const action = reasons.length > 0 ? "block" : reviewReasons.length > 0 ? "review" : "allow";
   const attribution = buildAttribution(entry);
   const attributionRequired = COMPLIANCE_POLICY.requireAttributionByDefault;
   const attributionIssues: string[] = [];
@@ -120,10 +143,10 @@ const evaluateDataset = (entry: DatasetComplianceEntry): DatasetEvaluation => {
       attributionRequired,
       attributionStatus: attributionIssues.length > 0 ? "missing" : "ok",
       complianceAction: action,
-      complianceNotes: [...reasons, ...attributionIssues]
+      complianceNotes: [...reasons, ...reviewReasons, ...attributionIssues]
     },
     action,
-    reasons: [...reasons, ...attributionIssues]
+    reasons: [...reasons, ...reviewReasons, ...attributionIssues]
   };
 };
 
@@ -154,6 +177,7 @@ export const enforceCompliance = (sources: NormalizedSource[]): ComplianceEnforc
   const datasetCompliance = buildDatasetComplianceSummary(sourceUris);
   const datasetEvaluations = datasetCompliance.map((entry) => evaluateDataset(entry));
   const evaluatedEntries = datasetEvaluations.map((evaluation) => evaluation.entry);
+  const reviewEntries = datasetEvaluations.filter((evaluation) => evaluation.action === "review");
   const blockedSources: ComplianceEnforcementResult["blockedSources"] = [];
   const allowedSources: NormalizedSource[] = [];
 
@@ -197,6 +221,9 @@ export const enforceCompliance = (sources: NormalizedSource[]): ComplianceEnforc
   if (gateStatus === "signoff_required") {
     notes.push("Compliance sign-off required before rollout.");
   }
+  if (reviewEntries.length > 0) {
+    notes.push("Compliance review required for zero-cost/ToS/privacy checks.");
+  }
 
   const summary: ComplianceSummary = {
     mode: COMPLIANCE_POLICY.mode,
@@ -204,6 +231,16 @@ export const enforceCompliance = (sources: NormalizedSource[]): ComplianceEnforc
     signoffProvided,
     gateStatus,
     blockedSources,
+    zeroCostMode: COMPLIANCE_POLICY.zeroCostMode,
+    reviewRequired: reviewEntries.length > 0,
+    reviewItems: reviewEntries.length > 0
+      ? reviewEntries.slice(0, 12).map((entry) => ({
+          reason: entry.reasons[0] || "review required",
+          datasetTitle: entry.entry.title,
+          datasetId: entry.entry.datasetId,
+          portalUrl: entry.entry.portalUrl
+        }))
+      : undefined,
     notes: notes.length > 0 ? notes : undefined
   };
 

@@ -296,9 +296,20 @@ export const ReportView: React.FC<Props> = ({ report }) => {
               <div>
                 Mode: <span className="text-gray-200">{compliance.mode}</span>
               </div>
+              {typeof compliance.zeroCostMode === "boolean" && (
+                <div>
+                  Zero-cost mode:{" "}
+                  <span className="text-gray-200">{compliance.zeroCostMode ? "enabled" : "disabled"}</span>
+                </div>
+              )}
               {compliance.gateStatus === "signoff_required" && (
                 <div className="text-amber-300">
                   Sign-off required before rollout. Set approver + date in compliance policy.
+                </div>
+              )}
+              {compliance.reviewRequired && (
+                <div className="text-amber-300">
+                  Compliance review required{compliance.reviewItems?.length ? ` (${compliance.reviewItems.length})` : ""}.
                 </div>
               )}
               {compliance.blockedSources.length > 0 && (
@@ -312,6 +323,15 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                 {compliance.blockedSources.slice(0, 6).map((entry, idx) => (
                   <div key={`${entry.uri}-${idx}`} className="text-[11px] text-gray-400">
                     {entry.domain} — {entry.reason}
+                  </div>
+                ))}
+              </div>
+            )}
+            {compliance.reviewItems && compliance.reviewItems.length > 0 && (
+              <div className="mt-3 space-y-1 text-[11px] text-gray-400">
+                {compliance.reviewItems.slice(0, 6).map((entry, idx) => (
+                  <div key={`${entry.datasetTitle || "review"}-${idx}`}>
+                    {(entry.datasetTitle || entry.datasetId || "Dataset")} — {entry.reason}
                   </div>
                 ))}
               </div>

@@ -94,12 +94,25 @@ const normalizeComplianceSummary = (value: unknown): ComplianceSummary | undefin
       datasetId: typeof entry.datasetId === "string" ? entry.datasetId : undefined
     }))
     .filter((entry) => entry.uri && entry.reason);
+  const reviewItems = Array.isArray(value.reviewItems) ? value.reviewItems : [];
+  const normalizedReviewItems = reviewItems
+    .filter(isPlainObject)
+    .map((entry) => ({
+      reason: typeof entry.reason === "string" ? entry.reason : "",
+      datasetTitle: typeof entry.datasetTitle === "string" ? entry.datasetTitle : undefined,
+      datasetId: typeof entry.datasetId === "string" ? entry.datasetId : undefined,
+      portalUrl: typeof entry.portalUrl === "string" ? entry.portalUrl : undefined
+    }))
+    .filter((entry) => entry.reason);
   return {
     mode,
     signoffRequired: Boolean(value.signoffRequired),
     signoffProvided: Boolean(value.signoffProvided),
     gateStatus,
     blockedSources: normalizedBlocked,
+    zeroCostMode: typeof value.zeroCostMode === "boolean" ? value.zeroCostMode : undefined,
+    reviewRequired: typeof value.reviewRequired === "boolean" ? value.reviewRequired : undefined,
+    reviewItems: normalizedReviewItems.length > 0 ? normalizedReviewItems : undefined,
     notes: normalizeStringList(value.notes, 6)
   };
 };
