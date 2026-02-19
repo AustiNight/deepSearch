@@ -14,6 +14,11 @@ import { isSystemTestTopic } from './data/verticalLogic';
 import { getOpenDataConfig, updateOpenDataConfig } from './services/openDataConfig';
 import {
   MODEL_OVERRIDE_STORAGE_KEY,
+  SETTINGS_UPDATED_AT_KEY,
+  SETTINGS_UPDATED_BY_KEY,
+  SETTINGS_VERSION_KEY,
+  SETTINGS_LOCAL_UPDATED_AT_KEY,
+  SETTINGS_UPDATED_EVENT,
   MIN_AGENT_COUNT,
   MAX_AGENT_COUNT,
   MAX_METHOD_AGENTS,
@@ -71,10 +76,6 @@ const isModelNameValid = (value: string) => MODEL_NAME_PATTERN.test(value.trim()
 
 const ACCESS_ALLOWLIST_STORAGE_KEY = 'overseer_access_allowlist';
 const ACCESS_ALLOWLIST_UPDATED_AT_KEY = 'overseer_access_allowlist_updated_at';
-const SETTINGS_UPDATED_AT_KEY = 'overseer_settings_updated_at';
-const SETTINGS_UPDATED_BY_KEY = 'overseer_settings_updated_by';
-const SETTINGS_VERSION_KEY = 'overseer_settings_version';
-const SETTINGS_LOCAL_UPDATED_AT_KEY = 'overseer_settings_local_updated_at';
 const SETTINGS_MIGRATION_KEY = 'overseer_settings_migrated';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -180,6 +181,15 @@ const App: React.FC = () => {
   const [authError, setAuthError] = useState('');
   const [pendingAction, setPendingAction] = useState<'settings' | 'start' | null>(null);
 
+  const dispatchSettingsUpdate = (detail?: Record<string, unknown>) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT, { detail }));
+    } catch (_) {
+      // ignore
+    }
+  };
+
   const persistSettingsMetadata = (meta: { updatedAt?: string | null; updatedBy?: string | null; version?: number | null }) => {
     const updatedAt = meta.updatedAt ?? null;
     const updatedBy = meta.updatedBy ?? null;
@@ -202,6 +212,7 @@ const App: React.FC = () => {
     } else {
       localStorage.removeItem(SETTINGS_VERSION_KEY);
     }
+    dispatchSettingsUpdate({ updatedAt, updatedBy, version, source: 'cloud' });
   };
 
   const applySettingsPayload = (payload: UniversalSettingsPayload, options?: { updateDraft?: boolean }) => {
@@ -224,6 +235,7 @@ const App: React.FC = () => {
   const recordLocalSettingsUpdate = () => {
     const stamp = new Date().toISOString();
     localStorage.setItem(SETTINGS_LOCAL_UPDATED_AT_KEY, stamp);
+    dispatchSettingsUpdate({ localUpdatedAt: stamp, source: 'local' });
   };
 
   const areAllowlistsEqual = (left: string[], right: string[]) => {

@@ -9,6 +9,7 @@ export const TRANSPARENCY_LAYOUT = {
     presentationLineHeight: 1.2
   },
   scale: {
+    default: 0.8,
     targetMin: 0.72,
     hardMin: 0.6
   },

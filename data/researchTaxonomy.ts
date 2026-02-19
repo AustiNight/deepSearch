@@ -1,3 +1,5 @@
+import { TAXONOMY_UPDATED_EVENT } from '../constants';
+
 export type ResearchVerticalId = string;
 
 export type TaxonomyProvenanceSource = 'seed' | 'agent_proposal' | 'overseer_vet' | 'manual';
@@ -969,6 +971,11 @@ export const saveTaxonomyStore = (store: TaxonomyStore) => {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
     window.localStorage.setItem(TAXONOMY_STORAGE_KEY, JSON.stringify(store));
+    try {
+      window.dispatchEvent(new CustomEvent(TAXONOMY_UPDATED_EVENT, { detail: { updatedAt: store.updatedAt, version: store.version } }));
+    } catch (_) {
+      // ignore
+    }
   } catch (_) {
     // ignore
   }

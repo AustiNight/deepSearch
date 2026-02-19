@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from 'lucide-react';
-import { getResearchTaxonomy } from '../data/researchTaxonomy';
-import { buildTransparencyRows, TRANSPARENCY_TABLE_PERF } from '../data/transparencyTable';
+import { TAXONOMY_UPDATED_EVENT, SETTINGS_LOCAL_UPDATED_AT_KEY, SETTINGS_UPDATED_AT_KEY, SETTINGS_UPDATED_EVENT, SETTINGS_VERSION_KEY } from '../constants';
+import { getResearchTaxonomy, TAXONOMY_STORAGE_KEY } from '../data/researchTaxonomy';
+import { TRANSPARENCY_LAYOUT } from '../data/transparencyLayout';
+import { buildTransparencyMapData, TRANSPARENCY_TABLE_PERF, type TransparencySettingsStamp } from '../data/transparencyTable';
+import { readTransparencySettingsStamp } from '../services/settingsSnapshot';
 
 type TransparencyPanelProps = {
   open: boolean;
@@ -27,34 +30,72 @@ const renderList = (items: React.ReactNode[], emptyLabel = '—') => {
 };
 
 export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onClose }) => {
-  const taxonomy = useMemo(() => getResearchTaxonomy(), []);
-  const rows = useMemo(() => buildTransparencyRows(taxonomy), [taxonomy]);
+  const [taxonomy, setTaxonomy] = useState(() => getResearchTaxonomy());
+  const [settingsStamp, setSettingsStamp] = useState<TransparencySettingsStamp | null>(() => readTransparencySettingsStamp());
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [activeRowIndex, setActiveRowIndex] = useState(0);
 
-  const counts = useMemo(() => {
-    let subtopics = 0;
-    let methods = 0;
-    let tactics = 0;
-    let fields = 0;
-    for (const vertical of taxonomy.verticals) {
-      fields += vertical.blueprintFields.length;
-      for (const sub of vertical.subtopics) {
-        subtopics += 1;
-        for (const method of sub.methods) {
-          methods += 1;
-          tactics += method.tactics.length;
-        }
+  const mapData = useMemo(() => buildTransparencyMapData(taxonomy, settingsStamp), [taxonomy, settingsStamp]);
+  const rows = mapData.rows;
+  const counts = mapData.counts;
+
+  useEffect(() => {
+    if (!open) return;
+    setTaxonomy(getResearchTaxonomy());
+    setSettingsStamp(readTransparencySettingsStamp());
+  }, [open]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const refreshTaxonomy = () => setTaxonomy(getResearchTaxonomy());
+    const refreshSettings = () => setSettingsStamp(readTransparencySettingsStamp());
+    const handleTaxonomyEvent = () => refreshTaxonomy();
+    const handleSettingsEvent = () => refreshSettings();
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key) return;
+      if (event.key === TAXONOMY_STORAGE_KEY) {
+        refreshTaxonomy();
+        return;
       }
-    }
-    return { verticals: taxonomy.verticals.length, subtopics, methods, tactics, fields };
-  }, [taxonomy]);
+      if (
+        event.key === SETTINGS_LOCAL_UPDATED_AT_KEY ||
+        event.key === SETTINGS_UPDATED_AT_KEY ||
+        event.key === SETTINGS_VERSION_KEY
+      ) {
+        refreshSettings();
+      }
+    };
+
+    window.addEventListener(TAXONOMY_UPDATED_EVENT, handleTaxonomyEvent as EventListener);
+    window.addEventListener(SETTINGS_UPDATED_EVENT, handleSettingsEvent as EventListener);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(TAXONOMY_UPDATED_EVENT, handleTaxonomyEvent as EventListener);
+      window.removeEventListener(SETTINGS_UPDATED_EVENT, handleSettingsEvent as EventListener);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
 
   useEffect(() => {
     if (activeRowIndex >= rows.length) {
       setActiveRowIndex(0);
     }
   }, [activeRowIndex, rows.length]);
+
+  const scale = TRANSPARENCY_LAYOUT.scale?.default ?? 0.8;
+  const integrityLabel = !mapData.integrity.ok
+    ? `Integrity warning: ${mapData.integrity.missingVerticals.length} vertical(s), ${mapData.integrity.missingSubtopics.length} subtopic(s) missing.`
+    : null;
+  const integrityDetail = !mapData.integrity.ok
+    ? [
+      mapData.integrity.missingVerticals.length > 0
+        ? `Missing verticals: ${mapData.integrity.missingVerticals.join(', ')}`
+        : null,
+      mapData.integrity.missingSubtopics.length > 0
+        ? `Missing subtopics: ${mapData.integrity.missingSubtopics.map((item) => `${item.verticalId}/${item.subtopicId}`).join(', ')}`
+        : null
+    ].filter(Boolean).join(' · ')
+    : '';
 
   if (!open) return null;
 
@@ -115,6 +156,11 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
             <p className="text-[10px] text-gray-500 font-mono print:text-gray-700">
               {counts.verticals} verticals · {counts.fields} blueprint fields · {counts.subtopics} subtopics · {counts.methods} methods · {counts.tactics} tactics
             </p>
+            {integrityLabel && (
+              <p className="text-[10px] text-cyber-amber font-mono mt-1" title={integrityDetail}>
+                {integrityLabel}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {isHighVolume && (
@@ -139,9 +185,10 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
           </p>
           <div className="h-full w-full overflow-auto">
             <table
-              className="min-w-[1200px] w-full border-collapse text-[11px] md:text-[12px] font-mono text-gray-200 print:text-gray-900"
+              className="min-w-[1200px] w-full border-collapse text-[13px] md:text-[14px] font-mono text-gray-200 print:text-gray-900"
               aria-label="Transparency Map"
               aria-describedby={KEYBOARD_HELP_ID}
+              style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}
             >
               <colgroup>
                 <col style={{ width: '16%' }} />
@@ -152,7 +199,7 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                 <col style={{ width: '12%' }} />
               </colgroup>
               <thead>
-                <tr className="text-[10px] uppercase tracking-widest">
+                <tr className="text-[12px] md:text-[13px] uppercase tracking-widest">
                   {['Vertical', 'Blueprint Fields', 'Subtopics', 'Methods/Tactics', 'Seed Query', 'Hint Rules'].map((header) => (
                     <th
                       key={header}
@@ -178,10 +225,10 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
                     style={rowStyle}
                   >
                     <th scope="row" className="align-top px-3 py-3 text-left font-semibold text-cyber-green print:text-black">
-                      <div className="text-[11px] uppercase tracking-widest">{row.label}</div>
-                      <div className="text-[10px] text-gray-500 print:text-gray-700">{row.id}</div>
+                      <div className="text-[13px] uppercase tracking-widest">{row.label}</div>
+                      <div className="text-[11px] text-gray-500 print:text-gray-700">{row.id}</div>
                       {row.description && (
-                        <div className="mt-1 text-[10px] text-gray-400 print:text-gray-700">{row.description}</div>
+                        <div className="mt-1 text-[11px] text-gray-400 print:text-gray-700">{row.description}</div>
                       )}
                     </th>
                     <td className="align-top px-3 py-3">
