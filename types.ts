@@ -357,6 +357,30 @@ export interface PropertyDossier {
   sources: CitationSource[];
 }
 
+export type OpenDataPortalType = 'socrata' | 'arcgis' | 'dcat' | 'unknown';
+
+export interface OpenDatasetMetadata {
+  id: string;
+  portalType: OpenDataPortalType;
+  portalUrl: string;
+  datasetId?: string;
+  title: string;
+  description?: string;
+  source?: string;
+  lastUpdated?: IsoDateString;
+  license?: string;
+  dataUrl?: string;
+  homepageUrl?: string;
+  tags?: string[];
+  retrievedAt: IsoDateTimeString;
+}
+
+export interface OpenDatasetIndex {
+  schemaVersion: number;
+  updatedAt: IsoDateTimeString;
+  datasets: OpenDatasetMetadata[];
+}
+
 export type TaxonomyProvenanceSource = 'seed' | 'agent_proposal' | 'overseer_vet' | 'manual';
 
 export interface TaxonomyProvenance {
