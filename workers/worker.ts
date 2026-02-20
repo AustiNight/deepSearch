@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { buildAllowlistMetadata, hashEntries, hashValue, stripSettingsForKv } from "./kvPolicy";
 import { installLogRedactionGuard, redactSensitiveValue } from "../services/redaction";
-import { querySocrataRag } from "./socrataRagIndex";
+import { getSocrataRagChunksById, querySocrataRag } from "./socrataRagIndex";
 
 export interface Env {
   OPENAI_API_KEY: string;
@@ -35,6 +35,7 @@ const MAX_ALLOWLIST_BODY_BYTES = 50_000;
 const MAX_SETTINGS_BODY_BYTES = 50_000;
 const MAX_OPEN_DATA_PROXY_BODY_BYTES = 20_000;
 const MAX_RAG_QUERY_BODY_BYTES = 12_000;
+const MAX_RAG_CHUNK_IDS = 24;
 const SETTINGS_SCHEMA_VERSION = 1;
 const ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion";
 const ACCESS_EMAIL_HEADER = "Cf-Access-Authenticated-User-Email";
@@ -571,6 +572,24 @@ export default {
       };
       const hits = querySocrataRag(query, { topK, filters });
       return json({ hits }, 200, corsHeaders);
+    }
+
+    if (url.pathname === "/api/rag/chunks") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405, corsHeaders);
+      }
+      const { data, error } = await readJsonBody(request, MAX_RAG_QUERY_BODY_BYTES);
+      if (error) {
+        return json({ error }, 400, corsHeaders);
+      }
+      const rawIds = Array.isArray(data?.ids) ? data.ids : [];
+      const ids = rawIds.filter((value) => typeof value === "string");
+      if (ids.length === 0) {
+        return json({ error: "Chunk ids required." }, 400, corsHeaders);
+      }
+      const limit = clamp(Number(data?.limit ?? MAX_RAG_CHUNK_IDS), 1, MAX_RAG_CHUNK_IDS);
+      const chunks = getSocrataRagChunksById(ids, limit);
+      return json({ chunks }, 200, corsHeaders);
     }
 
     if (url.pathname === "/api/open-data/fetch") {

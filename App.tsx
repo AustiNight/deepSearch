@@ -11,8 +11,9 @@ import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistServi
 import { fetchUniversalSettings, updateUniversalSettings } from './services/universalSettingsService';
 import { buildUniversalSettingsPayload, normalizeUniversalSettingsPayload } from './services/universalSettingsPayload';
 import { isSystemTestTopic } from './data/verticalLogic';
-import { querySocrataRag } from './services/socrataRagClient';
-import type { RagQueryHit } from './services/ragIndex';
+import { fetchSocrataRagChunksById, querySocrataRag } from './services/socrataRagClient';
+import { getRagUsageLog } from './services/ragTelemetry';
+import type { RagChunk } from './services/ragIndex';
 import {
   clearOpenDataPersistentConfig,
   getOpenDataConfig,
@@ -181,9 +182,10 @@ const App: React.FC = () => {
   const [optionalKeysPolicyReady] = useState<boolean>(() => isOptionalKeysPersistenceSupported());
   const [openDataPersistNeedsReconsent, setOpenDataPersistNeedsReconsent] = useState<boolean>(false);
   const [ragQuery, setRagQuery] = useState('catalog/v1 search_context q limit offset');
-  const [ragHits, setRagHits] = useState<RagQueryHit[]>([]);
+  const [ragHits, setRagHits] = useState<RagChunk[]>([]);
   const [ragStatus, setRagStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [ragError, setRagError] = useState('');
+  const [ragContextMeta, setRagContextMeta] = useState<{ context: string; query: string; usedAt: number } | null>(null);
   const [bulkModelValue, setBulkModelValue] = useState('');
   const [accessAllowlist, setAccessAllowlist] = useState<string[]>([]);
   const [draftAllowlistText, setDraftAllowlistText] = useState('');
@@ -228,6 +230,18 @@ const App: React.FC = () => {
     }
   };
 
+  const findLatestRagContext = () => {
+    const log = getRagUsageLog();
+    if (log.length === 0) return null;
+    for (let i = log.length - 1; i >= 0; i -= 1) {
+      const entry = log[i];
+      if (entry.context && !entry.context.startsWith('developer_reference')) {
+        return entry;
+      }
+    }
+    return log[log.length - 1];
+  };
+
   const handleRagLookup = async () => {
     const query = ragQuery.trim();
     if (!query) {
@@ -236,11 +250,43 @@ const App: React.FC = () => {
     }
     setRagStatus('loading');
     setRagError('');
+    setRagContextMeta(null);
     try {
-      const hits = await querySocrataRag(query, { topK: 4 });
+      const hits = await querySocrataRag(query, { topK: 4, context: 'developer_reference_manual' });
       setRagHits(hits);
       if (hits.length === 0) {
         setRagError('No snippets matched.');
+      }
+      setRagContextMeta({ context: 'manual_query', query, usedAt: Date.now() });
+      setRagStatus('idle');
+    } catch (_) {
+      setRagStatus('error');
+      setRagError('RAG lookup failed.');
+    }
+  };
+
+  const handleRagContextLookup = async () => {
+    setRagStatus('loading');
+    setRagError('');
+    const latest = findLatestRagContext();
+    if (!latest) {
+      setRagStatus('idle');
+      setRagError('No recent RAG context available. Run discovery planning first.');
+      return;
+    }
+    try {
+      if (latest.query) {
+        setRagQuery(latest.query);
+      }
+      const chunks = await fetchSocrataRagChunksById(latest.chunkIds, { limit: 6 });
+      setRagHits(chunks);
+      setRagContextMeta({
+        context: latest.context || 'unknown_context',
+        query: latest.query || 'unknown_query',
+        usedAt: latest.usedAt
+      });
+      if (chunks.length === 0) {
+        setRagError('No snippets found for the latest context.');
       }
       setRagStatus('idle');
     } catch (_) {
@@ -1200,13 +1246,13 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-gray-500">
                   Read-only snippets from the local Socrata RAG bundle. No secrets, no external calls.
                 </p>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <input
                     type="text"
                     value={ragQuery}
                     onChange={(e) => setRagQuery(e.target.value)}
                     placeholder="catalog/v1 search_context q limit offset"
-                    className="flex-1 bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    className="flex-1 min-w-[220px] bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <button
                     onClick={handleRagLookup}
@@ -1215,7 +1261,19 @@ const App: React.FC = () => {
                   >
                     {ragStatus === 'loading' ? 'LOOKING…' : 'LOOKUP'}
                   </button>
+                  <button
+                    onClick={handleRagContextLookup}
+                    disabled={ragStatus === 'loading'}
+                    className="px-3 py-2 text-xs font-mono border border-gray-700 rounded text-gray-400 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    LATEST CONTEXT
+                  </button>
                 </div>
+                {ragContextMeta && (
+                  <div className="text-[10px] text-gray-500 font-mono">
+                    Context: {ragContextMeta.context} · {ragContextMeta.query.length > 80 ? `${ragContextMeta.query.slice(0, 80)}…` : ragContextMeta.query} · {new Date(ragContextMeta.usedAt).toLocaleString()}
+                  </div>
+                )}
                 {ragError && (
                   <p className="text-[10px] text-yellow-500 font-mono">{ragError}</p>
                 )}

@@ -1,5 +1,5 @@
 import { apiFetch } from "./apiClient";
-import type { RagQueryFilters, RagQueryHit } from "./ragIndex";
+import type { RagChunk, RagQueryFilters, RagQueryHit } from "./ragIndex";
 import { recordRagUsage } from "./ragTelemetry";
 
 const cache = new Map<string, RagQueryHit[]>();
@@ -59,6 +59,22 @@ export const querySocrataRag = async (query: string, options?: { topK?: number; 
   }
   cache.set(cacheKey, hits);
   return hits;
+};
+
+export const fetchSocrataRagChunksById = async (ids: string[], options?: { limit?: number }) => {
+  const cleaned = Array.from(new Set((ids || []).map((value) => (value || "").trim()).filter(Boolean)));
+  if (cleaned.length === 0) return [];
+  const response = await apiFetch("/api/rag/chunks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ids: cleaned,
+      limit: options?.limit
+    })
+  });
+  if (!response.ok) return [];
+  const data = await response.json();
+  return Array.isArray(data?.chunks) ? data.chunks as RagChunk[] : [];
 };
 
 export const querySocrataRagScoped = async (query: string, options?: {
