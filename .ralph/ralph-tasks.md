@@ -91,7 +91,7 @@
   - [x] Acceptance: for the test address, the system can surface at least one address‑tied police incident or 311 record when present, or explicitly mark those datasets as unavailable with the exact dataset IDs and query attempts logged
 
 - [x] Epic: Report Cleanliness & Validation Output
-  - [ ] Separate “Method Audit” into a collapsible methodology section; keep the main report focused on address‑level findings and data gaps
+  - [x] Separate “Method Audit” into a collapsible methodology section; keep the main report focused on address‑level findings and data gaps
   - [ ] Add UI/UX handling for `DataGap` sections created by enforcement changes, with explicit labels and suppression of “Overseer Verified”
   - [ ] Add a citation-quality check that flags sections with “No verified sources” and prevents them from being labeled “Overseer Verified”
   - [ ] Update golden tests/snapshots for report-cleanliness changes to avoid regressions

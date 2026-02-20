@@ -309,6 +309,16 @@ const renderMarkdownBlocks = (content: string) => {
   });
 };
 
+const isMethodologySectionTitle = (title: string) => {
+  const normalized = title.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('method audit')) return true;
+  if (normalized.includes('methodology')) return true;
+  if (normalized === 'method' || normalized === 'methods') return true;
+  if (normalized === 'audit' || normalized === 'audits') return true;
+  return false;
+};
+
 export const ReportView: React.FC<Props> = ({ report }) => {
   const primaryRecordCoverage = report.provenance?.primaryRecordCoverage;
   const compliance = report.provenance?.compliance;
@@ -334,7 +344,20 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const hasCoverageStatus = (recordTypes: string[], statuses: string[]) =>
     coverageEntries.some((entry) => recordTypes.includes(entry.recordType) && statuses.includes(entry.status));
   const policeSignalPattern = /(police|incident|crime|calls[-_ ]for[-_ ]service|service[-_ ]requests?|311)/i;
-  const hasPoliceSignals = report.sections.some((section) =>
+  const splitSections = report.sections.reduce(
+    (acc, section) => {
+      if (isMethodologySectionTitle(section.title)) {
+        acc.methodologySections.push(section);
+      } else {
+        acc.displaySections.push(section);
+      }
+      return acc;
+    },
+    { displaySections: [] as FinalReport['sections'], methodologySections: [] as FinalReport['sections'] }
+  );
+  const displaySections = splitSections.displaySections;
+  const methodologySections = splitSections.methodologySections;
+  const hasPoliceSignals = displaySections.some((section) =>
     (section.sources || []).some((source) => policeSignalPattern.test(source))
   );
   const addressEvidenceChecklist = report.propertyDossier
@@ -358,9 +381,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
     : [];
   const hasAddressEvidenceChecklist = addressEvidenceChecklist.length > 0;
   const bibliographySources = Array.from(
-    new Set(
-      report.sections.flatMap((section) => section.sources || []).filter(Boolean)
-    )
+    new Set(displaySections.flatMap((section) => section.sources || []).filter(Boolean))
   );
   const hasBibliography = bibliographySources.length > 0;
   const printDate = new Date();
@@ -375,12 +396,12 @@ export const ReportView: React.FC<Props> = ({ report }) => {
     return false;
   };
 
-  const sectionsWithNoSources = report.sections.filter((section) => {
+  const sectionsWithNoSources = displaySections.filter((section) => {
     const sources = Array.isArray(section.sources) ? section.sources.filter(Boolean) : [];
     return sources.length === 0 && !isSectionDataGap(section);
   });
   const hasCitationIssues = sectionsWithNoSources.length > 0;
-  const hasSectionDataGaps = report.sections.some((section) => isSectionDataGap(section));
+  const hasSectionDataGaps = displaySections.some((section) => isSectionDataGap(section));
   const hasEvidenceGaps = hasSectionDataGaps || hasCitationIssues || hasDataGaps;
   const isOverseerVerified = isCoverageComplete && !hasEvidenceGaps;
   const verificationDetail = (() => {
@@ -537,7 +558,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
 
         <ReportVisualizations visualizations={report.visualizations || []} />
 
-        {report.sections.map((section, idx) => {
+        {displaySections.map((section, idx) => {
           const sectionSources = Array.isArray(section.sources) ? section.sources.filter(Boolean) : [];
           const hasSources = sectionSources.length > 0;
           const isDataGapSection = isSectionDataGap(section);
@@ -909,6 +930,25 @@ export const ReportView: React.FC<Props> = ({ report }) => {
               Total sources indexed: <span className="text-gray-200 print:text-gray-800">{report.provenance.totalSources}</span>
             </div>
           </div>
+          {methodologySections.length > 0 && (
+            <div className="mt-4 space-y-4 text-gray-400 print:text-gray-700">
+              {methodologySections.map((section, index) => {
+                const content = coerceText(section.content, '');
+                return (
+                  <div key={`${section.title}-${index}`} className="rounded border border-gray-800/60 bg-black/30 p-3 print:bg-white print:border-gray-300">
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">
+                      {section.title}
+                    </div>
+                    {content ? (
+                      <div className="mt-2 space-y-3">{renderMarkdownBlocks(content)}</div>
+                    ) : (
+                      <div className="mt-2 text-gray-500 print:text-gray-600">No methodology notes provided.</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </details>
         <div className="hidden print:block mt-6 pt-4 border-t border-gray-300 text-[10px] text-gray-600">
           <div className="flex items-center justify-between">
