@@ -11,6 +11,7 @@ const plan = planSocrataDiscoveryQuery({
     categories: "public safety",
     domains: "data.example.gov",
     tags: "311",
+    order: "updated_at desc",
     foo: "bar"
   }
 });
@@ -20,8 +21,19 @@ assert.ok(plan.endpoint.includes("search_context=data.example.gov"), "Expected s
 assert.ok(plan.endpoint.includes("q=parcel"), "Expected q param.");
 assert.ok(plan.endpoint.includes("limit=5"), "Expected limit param.");
 assert.ok(plan.endpoint.includes("offset=10"), "Expected offset param.");
+assert.equal(plan.params.order, "updated_at desc");
 assert.ok(plan.unknownParams.includes("foo"), "Expected unknown param to be reported.");
 assert.ok(!plan.endpoint.includes("foo="), "Expected unknown param to be rejected.");
+assert.ok(!plan.unknownParams.includes("categories"));
+assert.ok(!plan.unknownParams.includes("domains"));
+assert.ok(!plan.unknownParams.includes("tags"));
+
+const planClamped = planSocrataDiscoveryQuery({
+  portalUrl: "https://data.example.gov",
+  query: "parcel",
+  limit: 5000
+});
+assert.equal(planClamped.params.limit, "1000", "Expected limit to clamp to 1000.");
 
 const planWithCustom = planSocrataDiscoveryQuery({
   portalUrl: "https://data.example.gov",

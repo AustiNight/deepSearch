@@ -111,7 +111,7 @@
   - [x] Add a validation step: if a dataset is non-tabular or requires auth/token, record a `DataGap` and select fallback datasets or skip with explanation
   - [x] Add usage telemetry (local only, no external send) to track which RAG chunks are used and whether they improved discovery success
   - [x] Route RAG telemetry through the shared redaction utility and add tests ensuring no address/keys/tokens appear in telemetry
-  - [ ] Add unit tests for RAG ingestion (parsing, indexing, retrieval) and for query planning using the RAG (e.g., `categories`, `domains`, `tags`, `limit`, `order`)
+  - [x] Add unit tests for RAG ingestion (parsing, indexing, retrieval) and for query planning using the RAG (e.g., `categories`, `domains`, `tags`, `limit`, `order`)
   - [ ] Add a small “Developer Reference” panel (read-only) that can surface the relevant RAG snippet for the current query context without exposing secrets
   - [ ] Ensure Developer Reference panel fetches data via `/api/*` only (no direct file fetches)
   - [ ] Acceptance: when running discovery planning, the system demonstrates it can retrieve the relevant RAG chunk for a parameter/endpoint, uses it to build valid queries, and avoids unsupported parameters; SODA endpoint construction follows RAG-defined formats; all calls remain same-origin and zero-cost by default
