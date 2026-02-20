@@ -9,10 +9,11 @@ const redaction = await import("../services/redaction.ts");
 const {
   redactSensitiveText,
   redactSensitiveValue,
+  installLogRedactionGuard,
   __redactionInternals
 } = redaction;
 
-const sample = "Report for 123 Main St with api_key=sk-test-123 and token=abcd";
+const sample = "Report for 123 Main St with ?api_key=sk-test-123 and token=abcd";
 const redactedSample = redactSensitiveText(sample);
 assert.ok(!redactedSample.includes("123 Main St"));
 assert.ok(!redactedSample.includes("sk-test-123"));
@@ -31,6 +32,48 @@ assert.equal(redactedPayload.token, __redactionInternals.REDACTED_VALUE);
 assert.ok(!JSON.stringify(redactedPayload).includes("Oak St"));
 assert.ok(!JSON.stringify(redactedPayload).includes("sk-test-999"));
 
+const originalConsole = {
+  log: console.log,
+  info: console.info,
+  warn: console.warn,
+  error: console.error,
+  debug: console.debug,
+};
+const captured = {
+  log: null,
+  info: null,
+  warn: null,
+  error: null,
+  debug: null,
+};
+const capture = (method) => (...args) => {
+  captured[method] = args;
+};
+
+console.log = capture("log");
+console.info = capture("info");
+console.warn = capture("warn");
+console.error = capture("error");
+console.debug = capture("debug");
+
+installLogRedactionGuard();
+console.warn("Worker log test", {
+  address: "123 Main St",
+  token: "sk-test-123",
+  endpoint: "https://example.com/search?q=456 Pine St&api_key=sk-test-999",
+});
+
+const workerLogText = JSON.stringify(captured.warn || []);
+assert.ok(!workerLogText.includes("Main St"));
+assert.ok(!workerLogText.includes("sk-test-123"));
+assert.ok(workerLogText.includes(__redactionInternals.REDACTED_ADDRESS));
+
+console.log = originalConsole.log;
+console.info = originalConsole.info;
+console.warn = originalConsole.warn;
+console.error = originalConsole.error;
+console.debug = originalConsole.debug;
+
 const telemetry = await import("../services/portalErrorTelemetry.ts");
 telemetry.resetPortalErrorMetrics();
 telemetry.recordPortalError({
@@ -45,6 +88,7 @@ assert.ok(!metricsText.includes("sk-test-123"));
 
 const workerSource = readText("workers/worker.ts");
 assert.ok(workerSource.includes("installLogRedactionGuard"));
+assert.ok(workerSource.includes("redactSensitiveValue"));
 
 const indexSource = readText("index.tsx");
 assert.ok(indexSource.includes("installLogRedactionGuard"));
