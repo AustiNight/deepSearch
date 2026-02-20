@@ -1,4 +1,8 @@
-import { MODEL_OVERRIDE_STORAGE_KEY, OPEN_DATA_INDEX_TTL_DAYS } from "../constants";
+import {
+  MODEL_OVERRIDE_STORAGE_KEY,
+  OPEN_DATA_GEOCODE_CACHE_TTL_MS,
+  OPEN_DATA_INDEX_TTL_DAYS
+} from "../constants";
 import type {
   OpenDataAuthConfig,
   OpenDataFeatureFlags,
@@ -99,6 +103,7 @@ type StorageWriteResult = {
 };
 
 const DAY_MS = 1000 * 60 * 60 * 24;
+const OPEN_DATA_INDEX_TTL_MS = OPEN_DATA_INDEX_TTL_DAYS * DAY_MS;
 
 const SETTINGS_METADATA_SCHEMA_VERSION = 1;
 const OPTIONAL_KEYS_SCHEMA_VERSION = 1;
@@ -110,8 +115,10 @@ export const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
 export const EVIDENCE_RECOVERY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 export const EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES = 200;
 export const GEOCODE_CACHE_MAX_ENTRIES = 200;
+const GEOCODE_CACHE_MAX_BYTES = 500_000;
 const OPEN_DATA_INDEX_MAX_ENTRIES = 500;
 const OPEN_DATA_INDEX_MAX_BYTES = 1_500_000;
+const EVIDENCE_RECOVERY_CACHE_MAX_BYTES = 1_000_000;
 const DALLAS_SCHEMA_CACHE_MAX_ENTRIES = 30;
 const RAW_SYNTHESIS_MAX_CHARS = 200000;
 
@@ -227,6 +234,19 @@ const measureBytes = (value: string) => {
     return Buffer.byteLength(value, "utf8");
   }
   return value.length;
+};
+
+const serializeCacheEntries = <T>(entries: Array<[string, T]>, maxBytes?: number) => {
+  let trimmed = entries;
+  let payload = JSON.stringify(Object.fromEntries(trimmed));
+  if (!maxBytes || maxBytes <= 0) {
+    return { entries: trimmed, payload };
+  }
+  while (trimmed.length > 0 && measureBytes(payload) > maxBytes) {
+    trimmed = trimmed.slice(0, trimmed.length - 1);
+    payload = JSON.stringify(Object.fromEntries(trimmed));
+  }
+  return { entries: trimmed, payload };
 };
 
 const isNonEmptyAuth = (auth: OpenDataAuthConfig | undefined | null) => {
@@ -354,6 +374,7 @@ export const STORAGE_DATA_CLASS_POLICIES: Record<StorageDataClassId, StorageData
     defaultTier: "local",
     keys: [OPEN_DATA_INDEX_STORAGE_KEY],
     cache: {
+      ttlMs: OPEN_DATA_INDEX_TTL_MS,
       maxEntries: OPEN_DATA_INDEX_MAX_ENTRIES,
       maxBytes: OPEN_DATA_INDEX_MAX_BYTES
     },
@@ -365,7 +386,9 @@ export const STORAGE_DATA_CLASS_POLICIES: Record<StorageDataClassId, StorageData
     defaultTier: "local",
     keys: [GEOCODE_CACHE_STORAGE_KEY],
     cache: {
-      maxEntries: GEOCODE_CACHE_MAX_ENTRIES
+      ttlMs: OPEN_DATA_GEOCODE_CACHE_TTL_MS,
+      maxEntries: GEOCODE_CACHE_MAX_ENTRIES,
+      maxBytes: GEOCODE_CACHE_MAX_BYTES
     },
     notes: "Entries include per-item expiration timestamps."
   },
@@ -376,7 +399,8 @@ export const STORAGE_DATA_CLASS_POLICIES: Record<StorageDataClassId, StorageData
     keys: [EVIDENCE_RECOVERY_CACHE_STORAGE_KEY],
     cache: {
       ttlMs: EVIDENCE_RECOVERY_CACHE_TTL_MS,
-      maxEntries: EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES
+      maxEntries: EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES,
+      maxBytes: EVIDENCE_RECOVERY_CACHE_MAX_BYTES
     },
     notes: "Time-bounded cache with entry limit."
   },
@@ -688,8 +712,8 @@ export const readOpenDataIndex = (): OpenDatasetIndex => {
   }
   const updatedMs = Date.parse(parsed.updatedAt);
   if (Number.isFinite(updatedMs)) {
-    const ageDays = (Date.now() - updatedMs) / DAY_MS;
-    if (ageDays > OPEN_DATA_INDEX_TTL_DAYS) {
+    const ageMs = Date.now() - updatedMs;
+    if (ageMs > OPEN_DATA_INDEX_TTL_MS) {
       removeRaw("local", OPEN_DATA_INDEX_STORAGE_KEY);
       return fallback;
     }
@@ -731,7 +755,7 @@ export const writeGeocodeCache = (cache: GeocodeCacheRecord) => {
     .filter(([_, entry]) => entry && typeof entry.expiresAt === "number" && entry.expiresAt > now)
     .sort((a, b) => (b[1].expiresAt - a[1].expiresAt))
     .slice(0, GEOCODE_CACHE_MAX_ENTRIES);
-  const payload = JSON.stringify(Object.fromEntries(entries));
+  const { payload } = serializeCacheEntries(entries, GEOCODE_CACHE_MAX_BYTES);
   writeRaw("local", GEOCODE_CACHE_STORAGE_KEY, payload);
 };
 
@@ -753,7 +777,7 @@ export const writeEvidenceRecoveryCache = (cache: EvidenceRecoveryCacheRecord) =
     .filter(([_, entry]) => entry && typeof entry.timestamp === "number" && now - entry.timestamp <= EVIDENCE_RECOVERY_CACHE_TTL_MS)
     .sort((a, b) => b[1].timestamp - a[1].timestamp)
     .slice(0, EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES);
-  const payload = JSON.stringify(Object.fromEntries(entries));
+  const { payload } = serializeCacheEntries(entries, EVIDENCE_RECOVERY_CACHE_MAX_BYTES);
   writeRaw("local", EVIDENCE_RECOVERY_CACHE_STORAGE_KEY, payload);
 };
 
