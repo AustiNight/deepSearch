@@ -76,7 +76,7 @@
   - [x] Enforce address/parcel-first sourcing order in method discovery: address/parcel datasets → jurisdictional records → neighborhood/tract → city/metro context (context must be labeled as non-local)
   - [x] Add a report-level “Scale Compatibility” check that downgrades confidence if any section relies on citywide data without a parcel/neighborhood bridge dataset
   - [x] Update golden tests/snapshots and UI messaging to reflect new `DataGap` outcomes from enforcement changes
-  - [ ] Gate Dallas-specific enforcement tests to run only after the Dallas Evidence Pack is implemented
+  - [x] Gate Dallas-specific enforcement tests to run only after the Dallas Evidence Pack is implemented
   - [ ] Add tests with a known address that fail if the report uses only macro sources without parcel-level evidence
   - [ ] Acceptance: for an address input, the report either (a) includes parcel/address evidence for governance/economy sections, or (b) explicitly marks those sections as `DataGap` and excludes macro-only claims from the verdict
 
