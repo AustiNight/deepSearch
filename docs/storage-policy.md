@@ -18,15 +18,36 @@ This project centralizes client storage behavior in `services/storagePolicy.ts` 
 - Optional open-data keys are moved from legacy localStorage into sessionStorage on first load.
 - Settings metadata migrates from legacy per-key storage into a versioned record.
 
+**Schema Versions (Current)**
+- `overseer_settings_metadata_v1` schema `1`.
+- `overseer_open_data_auth_v1` schema `1`.
+- `overseer_open_data_persist_v2` schema `1` with consent version `1`.
+- `overseer_open_data_settings_v2` schema `1`.
+- `overseer_open_data_index` schema `1`.
+- `overseer_geocode_cache_v1` (entry timestamps + TTL enforced; not versioned).
+- `overseer_evidence_recovery_cache_v2` (entry timestamps + TTL enforced; not versioned).
+- `overseer_dallas_schema_cache_v1` (entry timestamps + TTL enforced; not versioned).
+
+**Migration Procedure**
+1. Bump the schema version constant in `services/storagePolicy.ts` for the affected record.
+2. Add a migration entry in the corresponding `*_MIGRATIONS` array to transform from the previous version to the new version.
+3. Update `docs/storage-policy.md` with the new schema version and a summary of the transformation.
+4. If a safe transform is not possible, return `null` from the migration and let the loader invalidate the record (it will be removed and re-created on next write).
+5. Add or update tests in `scripts/storage-policy.test.mjs` to cover the old-schema fixture and the expected output.
+
+**Downgrade and Cleanup**
+- Downgrades intentionally invalidate unknown schema versions. If a record's `schemaVersion` is higher than the current version, it is removed and re-created on the next write.
+- To downgrade to a build before `storagePolicy.ts`, remove these keys to avoid stale reads: `overseer_open_data_auth_v1`, `overseer_open_data_settings_v2`, `overseer_open_data_persist_v2`, `overseer_open_data_index`, `overseer_geocode_cache_v1`, `overseer_evidence_recovery_cache_v2`, `overseer_dallas_schema_cache_v1`.
+- If a downgrade targets a specific schema rollback, remove only the affected key(s) and keep unrelated caches intact.
+
 **Legacy Keys and Migration Behavior**
 - `overseer_open_data_config` (localStorage): legacy combined open-data config. On migration, split into `overseer_open_data_auth_v1` (sessionStorage, auth only when present) and `overseer_open_data_settings_v2` (localStorage), then remove this key.
 - `overseer_open_data_config_session` (sessionStorage): same as above, then remove this key.
 - `overseer_open_data_persist` (localStorage): legacy boolean persistence flag. Replaced by `overseer_open_data_persist_v2` consent record; remove legacy key without data carryover.
 - `overseer_settings_updated_at`, `overseer_settings_updated_by`, `overseer_settings_version`, `overseer_settings_local_updated_at` (localStorage): legacy settings metadata. Migrated into `overseer_settings_metadata_v1` and legacy keys are removed.
 
-**Downgrade and Cleanup**
-- If downgrading to a build before `storagePolicy.ts`, remove `overseer_open_data_auth_v1` and `overseer_open_data_settings_v2` to avoid stale reads.
-- Legacy keys that can be safely cleared when troubleshooting: `overseer_open_data_config`, `overseer_open_data_config_session`, `overseer_open_data_persist`.
+**Legacy Cleanup Checklist**
+- Safe to remove when troubleshooting legacy carryover: `overseer_open_data_config`, `overseer_open_data_config_session`, `overseer_open_data_persist`, `overseer_settings_updated_at`, `overseer_settings_updated_by`, `overseer_settings_version`, `overseer_settings_local_updated_at`.
 
 **Test Strategy**
 - Unit-level tests with storage mocks live in `scripts/storage-policy.test.mjs`.
