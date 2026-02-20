@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision, DataGap } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision, DataGap, OpenDatasetMetadata } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -68,14 +68,89 @@ const normalizeDomain = (url: string) => {
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
 const ADDRESS_METHOD_DISCOVERY_PRIORITY = [
-  { id: 'parcel', pattern: /parcel|assessor|appraiser|cad\b|tax roll|tax collector|property card|apn|pin/ },
-  { id: 'jurisdiction', pattern: /permit|code enforcement|zoning|land use|planning|deed|recorder|clerk|treasurer|tax/ },
-  { id: 'neighborhood', pattern: /neighborhood|tract|block group|census/ },
-  { id: 'macro', pattern: /citywide|city of|metro|metropolitan|countywide|regional|region|statewide|state of|national|county/ }
+  {
+    id: 'parcel',
+    pattern: /parcel|assessor|appraiser|cad\b|tax roll|tax assessor|tax collector|property card|property record|property appraiser|property tax|apn|pin|parcel map|cadastral|cadastre|situs|gis parcel|appraisal district/
+  },
+  {
+    id: 'jurisdiction',
+    pattern: /permit|code enforcement|code violation|zoning|land use|planning|deed|recorder|clerk|treasurer|inspection|case log|casefile|citation|311|911|police|incident|service request|complaint|violation/
+  },
+  { id: 'neighborhood', pattern: /neighborhood|tract|block group|census|district/ },
+  { id: 'macro', pattern: /citywide|city of|cityof|metro|metropolitan|countywide|regional|region|statewide|state of|national|county/ }
+];
+
+const OPEN_DATA_DISCOVERY_KEYWORDS = [
+  'parcel',
+  'assessor',
+  'appraiser',
+  'tax roll',
+  'tax assessor',
+  'tax collector',
+  'property card',
+  'property record',
+  'property appraiser',
+  'property tax',
+  'apn',
+  'pin',
+  'parcel map',
+  'cad',
+  'cadastral',
+  'cadastre',
+  'situs',
+  'gis',
+  'permit',
+  'code enforcement',
+  'code violation',
+  'zoning',
+  'land use',
+  'planning',
+  'deed',
+  'recorder',
+  'clerk',
+  'treasurer',
+  'inspection',
+  'case log',
+  'casefile',
+  'citation',
+  '311',
+  '911',
+  'police',
+  'incident',
+  'service request',
+  'complaint',
+  'violation',
+  'neighborhood',
+  'tract',
+  'block group',
+  'census',
+  'citywide',
+  'metro',
+  'metropolitan',
+  'countywide',
+  'regional',
+  'region',
+  'statewide',
+  'state of',
+  'national',
+  'county'
 ];
 
 const labelNonLocalContext = (query: string) =>
   query.toLowerCase().includes('non-local') ? query : `${query} (non-local context)`;
+
+const extractOpenDataHintKeywords = (dataset: OpenDatasetMetadata) => {
+  const tags = Array.isArray(dataset.tags) ? dataset.tags : [];
+  const text = `${dataset.title || ''} ${tags.join(' ')}`.toLowerCase();
+  const matches = OPEN_DATA_DISCOVERY_KEYWORDS.filter((keyword) => text.includes(keyword));
+  return uniqueList(matches).slice(0, 4);
+};
+
+const buildOpenDataDiscoveryQuery = (dataset: OpenDatasetMetadata) => {
+  const keywords = extractOpenDataHintKeywords(dataset);
+  const keywordText = keywords.length > 0 ? ` ${keywords.join(' ')}` : '';
+  return `${dataset.portalUrl} "${dataset.title}"${keywordText}`;
+};
 
 const categorizeMethodDiscoveryQuery = (query: string) => {
   const text = query.toLowerCase();
@@ -2277,7 +2352,7 @@ export const useOverseer = () => {
       const openDataDiscoveryHints = addressLike && !enforceUsOnlyPolicy
         ? getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"]).slice(0, 4)
         : [];
-      const openDataDiscoveryQueries = openDataDiscoveryHints.map((dataset) => `${dataset.portalUrl} "${dataset.title}"`);
+      const openDataDiscoveryQueries = openDataDiscoveryHints.map(buildOpenDataDiscoveryQuery);
       const discoveryQueriesWithOpenData = uniqueList([
         ...openDataDiscoveryQueries,
         ...discoveryQueries
