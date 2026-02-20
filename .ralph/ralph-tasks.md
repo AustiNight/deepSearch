@@ -13,7 +13,7 @@
   - [x] Explain zero-cost mode defaults and what improves with keys (rate limits, reliability, throughput) without changing core functionality
   - [x] Link to public setup instructions for each optional key and summarize required fields/format
   - [x] Add validation messaging that treats missing keys as “OK” and only warns about rate limiting
-  - [ ] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
+  - [x] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
   - [ ] Review UI copy to explicitly disclose keys remain client-only and are never sent to Worker/KV
   - [ ] Gate Settings UI persistence toggle on Storage Policy module wiring (no toggle exposure before policy enforcement)
   - [ ] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, keys never leave client storage or sync to Worker/KV, the persistence toggle is default-off and requires explicit consent, and adding keys improves scalability only

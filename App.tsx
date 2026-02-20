@@ -1065,6 +1065,9 @@ const App: React.FC = () => {
                   Validation: leaving any field blank is OK. Any warning below only reflects potential rate limiting.
                 </p>
                 <p className="text-[10px] text-gray-500">
+                  Local-only and telemetry-free: keys are stored securely in your browser storage (sessionStorage by default) and never transmitted off-device.
+                </p>
+                <p className="text-[10px] text-gray-500">
                   Keys stay client-only in this browser. Never synced to cloud settings, never sent to Worker/KV, and never included in telemetry.
                 </p>
                 <p className="text-[10px] text-gray-500">
