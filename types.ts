@@ -191,6 +191,7 @@ export interface ConfidenceQualityMetrics {
   minSectionConfidence: number;
   sectionsMeasured: number;
   coveragePenalty?: number;
+  scaleCompatibilityPenalty?: number;
   proxyScore: number;
 }
 

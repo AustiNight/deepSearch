@@ -5,7 +5,7 @@ import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenA
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
 import { buildEvidenceGateReasons, classifySourceType, evaluateEvidence, scoreAuthority } from '../services/evidenceGating';
 import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from '../services/propertyDossier';
-import { applyScaleCompatibility, enforceAddressEvidencePolicy } from '../services/addressEvidencePolicy';
+import { applyScaleCompatibility, enforceAddressEvidencePolicy, ScaleCompatibilityIssue } from '../services/addressEvidencePolicy';
 import { enforceCompliance } from '../services/complianceEnforcement';
 import { evaluateSloGate } from '../services/sloGate';
 import { getPortalErrorMetrics, resetPortalErrorMetrics } from '../services/portalErrorTelemetry';
@@ -437,9 +437,12 @@ const roundMetric = (value: number, digits = 3) => {
   return Math.round(value * factor) / factor;
 };
 
+const SCALE_COMPATIBILITY_REPORT_PENALTY = 0.85;
+
 const computeConfidenceQualityProxy = (
   sections: ReportSection[],
-  primaryRecordCoverage?: PrimaryRecordCoverage
+  primaryRecordCoverage?: PrimaryRecordCoverage,
+  scaleCompatibilityIssues: ScaleCompatibilityIssue[] = []
 ): ConfidenceQualityMetrics => {
   const confidences = sections
     .map(section => (typeof section.confidence === 'number' ? section.confidence : null))
@@ -455,12 +458,14 @@ const computeConfidenceQualityProxy = (
   const average = confidences.reduce((sum, value) => sum + value, 0) / confidences.length;
   const min = Math.min(...confidences);
   const coveragePenalty = primaryRecordCoverage && !primaryRecordCoverage.complete ? 0.85 : 1;
-  const proxyScore = clamp(average * coveragePenalty, 0, 1);
+  const scaleCompatibilityPenalty = scaleCompatibilityIssues.length > 0 ? SCALE_COMPATIBILITY_REPORT_PENALTY : 1;
+  const proxyScore = clamp(average * coveragePenalty * scaleCompatibilityPenalty, 0, 1);
   return {
     averageSectionConfidence: roundMetric(average),
     minSectionConfidence: roundMetric(min),
     sectionsMeasured: confidences.length,
     coveragePenalty,
+    scaleCompatibilityPenalty,
     proxyScore: roundMetric(proxyScore)
   };
 };
@@ -3779,7 +3784,11 @@ export const useOverseer = () => {
       if (evidenceGateDecisions.length > 0) {
         runMetrics.evidenceGates = evidenceGateDecisions;
       }
-      runMetrics.confidenceQuality = computeConfidenceQualityProxy(reportWithConfidence.sections, primaryRecordCoverage);
+      runMetrics.confidenceQuality = computeConfidenceQualityProxy(
+        reportWithConfidence.sections,
+        primaryRecordCoverage,
+        addressEvidencePolicy.scaleCompatibility
+      );
       runMetrics.runLatencyMs = Date.now() - runStartedAt;
       runMetrics.performance = {
         maxExternalCalls: performanceBudget.maxExternalCalls,

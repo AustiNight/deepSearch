@@ -74,7 +74,7 @@
 - [x] Implement a section-level evidence gate that blocks “Governance” and “Economy” sections from using macro-scale sources when address/parcel evidence is missing; instead, render a `DataGap` with specific portal/endpoint pointers
   - [x] Add an “address evidence minimum” checklist for property reports: CAD/assessor OR tax roll, permits/BOA/case logs, police incident/311 signals if available, zoning/land-use layer, and parcel geometry
   - [x] Enforce address/parcel-first sourcing order in method discovery: address/parcel datasets → jurisdictional records → neighborhood/tract → city/metro context (context must be labeled as non-local)
-  - [ ] Add a report-level “Scale Compatibility” check that downgrades confidence if any section relies on citywide data without a parcel/neighborhood bridge dataset
+  - [x] Add a report-level “Scale Compatibility” check that downgrades confidence if any section relies on citywide data without a parcel/neighborhood bridge dataset
   - [ ] Update golden tests/snapshots and UI messaging to reflect new `DataGap` outcomes from enforcement changes
   - [ ] Gate Dallas-specific enforcement tests to run only after the Dallas Evidence Pack is implemented
   - [ ] Add tests with a known address that fail if the report uses only macro sources without parcel-level evidence
