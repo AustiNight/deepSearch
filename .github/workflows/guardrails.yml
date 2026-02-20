@@ -30,6 +30,9 @@ jobs:
       - name: KV policy check
         run: npm run test:kv-policy
 
+      - name: Telemetry redaction check
+        run: npm run test:redaction
+
       - name: Same-origin fetch check
         run: npm run test:same-origin
 

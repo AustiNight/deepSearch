@@ -61,7 +61,7 @@
   - [x] Define concrete routing validation steps (smoke test or config check) without requiring approvals
   - [x] Define test strategy for same-origin and telemetry safeguards (lint, unit, and integration coverage)
   - [x] Add CI gating for same-origin and storage policy tests (minimum unit coverage)
-  - [ ] Acceptance: all client fetches are same-origin, and telemetry/logs are free of keys, addresses, or tokens
+  - [x] Acceptance: all client fetches are same-origin, and telemetry/logs are free of keys, addresses, or tokens
 
 - [x] Epic: Secret Scanning + History Scrub
   - [ ] Verify CI already runs secret scanning; if missing, add CI secret scan with clear allowlist policy
