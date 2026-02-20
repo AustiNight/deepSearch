@@ -32,6 +32,17 @@ const renderList = (items: React.ReactNode[], emptyLabel = '—') => {
 
 export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onClose }) => {
   const [mapData, setMapData] = useState(() => buildTransparencyMapSnapshot());
+  const resolveScale = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return TRANSPARENCY_LAYOUT.scale?.default ?? 0.8;
+    }
+    const width = window.innerWidth;
+    const { mobile = 1, tablet = 0.9, default: desktop = 0.8 } = TRANSPARENCY_LAYOUT.scale ?? {};
+    if (width <= 640) return mobile;
+    if (width <= 1024) return tablet;
+    return desktop;
+  }, []);
+  const [responsiveScale, setResponsiveScale] = useState(() => resolveScale());
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [activeRowIndex, setActiveRowIndex] = useState(0);
   const pendingRefreshRef = useRef<number | null>(null);
@@ -77,6 +88,18 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
       changes: ['taxonomy', 'settings']
     });
   }, [open, recomputeMap]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !open) return;
+    const handleResize = () => {
+      setResponsiveScale(resolveScale());
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [open, resolveScale]);
 
   useEffect(() => {
     return () => {
@@ -135,8 +158,8 @@ export const TransparencyPanel: React.FC<TransparencyPanelProps> = ({ open, onCl
     }
   }, [activeRowIndex, rows.length]);
 
-  const scale = TRANSPARENCY_LAYOUT.scale?.default ?? 0.8;
-  const normalizedScale = Math.max(TRANSPARENCY_LAYOUT.scale?.hardMin ?? 0.6, scale);
+  const scale = responsiveScale;
+  const normalizedScale = Math.min(1, Math.max(TRANSPARENCY_LAYOUT.scale?.hardMin ?? 0.6, scale));
   const tableScaleStyle: React.CSSProperties = {
     transform: `scale(${normalizedScale})`,
     transformOrigin: 'top left',

@@ -10,6 +10,8 @@ export const TRANSPARENCY_LAYOUT = {
   },
   scale: {
     default: 0.8,
+    tablet: 0.9,
+    mobile: 1,
     targetMin: 0.72,
     hardMin: 0.6
   },
