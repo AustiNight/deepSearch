@@ -78,7 +78,7 @@
   - [x] Update golden tests/snapshots and UI messaging to reflect new `DataGap` outcomes from enforcement changes
   - [x] Gate Dallas-specific enforcement tests to run only after the Dallas Evidence Pack is implemented
   - [x] Add tests with a known address that fail if the report uses only macro sources without parcel-level evidence
-  - [ ] Acceptance: for an address input, the report either (a) includes parcel/address evidence for governance/economy sections, or (b) explicitly marks those sections as `DataGap` and excludes macro-only claims from the verdict
+  - [x] Acceptance: for an address input, the report either (a) includes parcel/address evidence for governance/economy sections, or (b) explicitly marks those sections as `DataGap` and excludes macro-only claims from the verdict
 
 - [x] Epic: Dallas Address Evidence Pack (Socrata + CAD)
   - [x] Add a Dallas-specific evidence pack that uses Socrata Discovery + SODA to locate and query “Police Incidents” and tabular “311 Service Requests” datasets using address variants and pre‑2023 date filters
