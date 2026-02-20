@@ -57,7 +57,7 @@
   - [x] Add shared redaction utility used by both frontend and Worker logging/telemetry paths
   - [x] Add tests that ensure Worker logs and telemetry never contain secrets or address PII
   - [x] Add tests that ensure telemetry/logging never contains secrets or address PII
-  - [ ] Add production routing validation for GitHub Pages → Worker API path mapping (CORS, path routing, and local dev parity)
+  - [x] Add production routing validation for GitHub Pages → Worker API path mapping (CORS, path routing, and local dev parity)
   - [ ] Define concrete routing validation steps (smoke test or config check) without requiring approvals
   - [ ] Define test strategy for same-origin and telemetry safeguards (lint, unit, and integration coverage)
   - [ ] Add CI gating for same-origin and storage policy tests (minimum unit coverage)
