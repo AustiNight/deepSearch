@@ -282,6 +282,8 @@ export const clearOptionalKeysPersistencePreference = () => {
   storage.removeItem(OPTIONAL_KEYS_PERSISTENCE_KEY);
 };
 
+export const isOptionalKeysPersistenceSupported = (): boolean => Boolean(getLocalStorage());
+
 const allowOptionalKeysInLocal = () => getOptionalKeysPersistencePreference();
 
 const migrateLegacyOpenDataConfig = () => {

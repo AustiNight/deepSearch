@@ -31,6 +31,7 @@ import {
   readSettingsMetadata,
   readSettingsMigrationComplete,
   readUnlocked,
+  isOptionalKeysPersistenceSupported,
   updateSettingsMetadata,
   writeAllowlist,
   writeAllowlistUpdatedAt,
@@ -175,6 +176,7 @@ const App: React.FC = () => {
   const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
   const [draftOpenDataAuth, setDraftOpenDataAuth] = useState<OpenDataAuthConfig>(() => ({ ...getOpenDataConfig().auth }));
   const [openDataPersist, setOpenDataPersist] = useState<boolean>(() => getOpenDataPersistencePreference());
+  const [optionalKeysPolicyReady] = useState<boolean>(() => isOptionalKeysPersistenceSupported());
   const [ragQuery, setRagQuery] = useState('catalog/v1 search_context q limit offset');
   const [ragHits, setRagHits] = useState<RagQueryHit[]>([]);
   const [ragStatus, setRagStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -712,6 +714,7 @@ const App: React.FC = () => {
   };
 
   const handleOpenDataPersistToggle = (next: boolean) => {
+    if (!optionalKeysPolicyReady) return;
     if (next) {
       const confirmed = window.confirm(
         'Persist optional open-data keys in localStorage across browser restarts? This is optional and stores keys only on this device.'
@@ -1070,20 +1073,28 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-gray-500">
                   Keys stay client-only in this browser. Never synced to cloud settings, never sent to Worker/KV, and never included in telemetry.
                 </p>
-                <p className="text-[10px] text-gray-500">
-                  Default storage is sessionStorage (clears on tab close). Enable persistence to keep keys across browser restarts.
-                </p>
-                <label className="flex items-center gap-2 text-[10px] font-mono text-gray-400">
-                  <input
-                    type="checkbox"
-                    checked={openDataPersist}
-                    onChange={(e) => handleOpenDataPersistToggle(e.target.checked)}
-                  />
-                  PERSIST OPTIONAL KEYS (LOCALSTORAGE, OFF BY DEFAULT)
-                </label>
-                <p className="text-[10px] text-gray-500">
-                  Requires explicit consent. Turn off to keep keys session-only and clear any persistent copy.
-                </p>
+                {optionalKeysPolicyReady ? (
+                  <>
+                    <p className="text-[10px] text-gray-500">
+                      Default storage is sessionStorage (clears on tab close). Enable persistence to keep keys across browser restarts.
+                    </p>
+                    <label className="flex items-center gap-2 text-[10px] font-mono text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={openDataPersist}
+                        onChange={(e) => handleOpenDataPersistToggle(e.target.checked)}
+                      />
+                      PERSIST OPTIONAL KEYS (LOCALSTORAGE, OFF BY DEFAULT)
+                    </label>
+                    <p className="text-[10px] text-gray-500">
+                      Requires explicit consent. Turn off to keep keys session-only and clear any persistent copy.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[10px] text-gray-500">
+                    Persistence controls are unavailable in this environment. Optional keys will remain session-only.
+                  </p>
+                )}
                 <p className="text-[10px] text-gray-500">
                   US-only address policy is enabled by default. Non-US addresses are flagged as out-of-scope and skip US record gates + portal queries. Toggle via
                   <span className="font-mono"> featureFlags.usOnlyAddressPolicy</span>.
