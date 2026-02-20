@@ -353,6 +353,8 @@ export type DataGapReasonCode =
   | 'parcel_ambiguous'
   | 'authoritative_sources_missing'
   | 'confidence_below_minimum'
+  | 'address_evidence_minimum_missing'
+  | 'macro_only_section'
   | 'unsupported_jurisdiction';
 
 export interface DataGap {

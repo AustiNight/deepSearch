@@ -66,7 +66,7 @@
   - [ ] Add tests or CI checks to ensure secret scanning is enforced on PRs
   - [ ] Acceptance: secret scanning runs in CI and pre-commit, and a documented history-scrub procedure exists and is validated
 
-- [ ] Epic: Address-First Evidence Enforcement (Property Reports)
+- [x] Epic: Address-First Evidence Enforcement (Property Reports)
   - [ ] Implement a section-level evidence gate that blocks “Governance” and “Economy” sections from using macro-scale sources when address/parcel evidence is missing; instead, render a `DataGap` with specific portal/endpoint pointers
   - [ ] Add an “address evidence minimum” checklist for property reports: CAD/assessor OR tax roll, permits/BOA/case logs, police incident/311 signals if available, zoning/land-use layer, and parcel geometry
   - [ ] Enforce address/parcel-first sourcing order in method discovery: address/parcel datasets → jurisdictional records → neighborhood/tract → city/metro context (context must be labeled as non-local)

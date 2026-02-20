@@ -2,7 +2,8 @@ import type { DatasetComplianceEntry, IsoDateString, IsoDateTimeString, OpenData
 import {
   OPEN_DATA_DISCOVERY_MAX_DATASETS,
   OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES,
-  OPEN_DATA_PORTAL_RECRAWL_DAYS
+  OPEN_DATA_PORTAL_RECRAWL_DAYS,
+  OPEN_DATA_INDEX_TTL_DAYS
 } from "../constants";
 import { applyDatasetUsageGates } from "./openDataUsage";
 import { fetchJsonWithRetry } from "./openDataHttp";

@@ -137,6 +137,16 @@ export const extractResearchMethods = async (
   _modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
+  const addressOrderDirective = isAddressLike(topic)
+    ? `
+    Address-first order required:
+    1) Parcel/address datasets (assessor/CAD, tax roll, parcel map)
+    2) Jurisdictional records (permits, code enforcement, zoning/land use, recorder)
+    3) Neighborhood/tract context
+    4) City/metro context labeled as "non-local context"
+    If you include city/metro queries, append "(non-local context)" to the query.
+    `
+    : '';
   const prompt = `
     Topic: "${topic}"
     Research Context (taxonomy + blueprint):
@@ -147,6 +157,7 @@ export const extractResearchMethods = async (
 
     Extract multiple distinct research methods and concrete search queries that would help research the topic.
     Use the context to avoid duplicating existing tactic templates and to cover blueprint fields.
+    ${addressOrderDirective}
     Return JSON.
   `;
 
@@ -693,6 +704,8 @@ export const synthesizeGrandReport = async (
     ADDRESS DOSSIER REQUIREMENTS (address-like topic detected):
     - Resolve parcel/address identifiers first (parcel/account, legal description if present).
     - Include official records: appraisal district / assessor, tax collector, county clerk deed chain, zoning, permits/inspections, code violations, GIS parcel map, flood/insurance risk.
+    - Address-first order: parcel/address datasets → jurisdictional records → neighborhood/tract context → city/metro context (label city/metro as non-local).
+    - Governance/Economy sections must be Data Gaps if parcel/address evidence is missing; do not use macro-only claims.
     - Add a "Property Dossier" section with subsections: Parcel & Legal, Ownership/Transfers, Tax & Appraisal, Zoning/Land Use, Permits & Code, Hazards/Environmental, Neighborhood Context, Data Gaps & Next Steps.
     - If a data item is not found, write the exact label "Source not found" (no synonyms) and list the exact portal/record system or endpoint that should contain it.
     - The "Data Gaps & Next Steps" subsection is REQUIRED and must enumerate every missing record/field with an exact portal/endpoint pointer (URL if known, otherwise portal name + endpoint path + query entry point).

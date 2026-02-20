@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { coerceReportData } from "../services/reportFormatter.ts";
 import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from "../services/propertyDossier.ts";
+import { applyScaleCompatibility, enforceAddressEvidencePolicy } from "../services/addressEvidencePolicy.ts";
 import { enforceCompliance } from "../services/complianceEnforcement.ts";
 import { buildEvidenceGateReasons, evaluateEvidence } from "../services/evidenceGating.ts";
 import { persistOpenDatasetMetadata } from "../services/openDataDiscovery.ts";
@@ -69,14 +70,14 @@ if (Array.isArray(fixture.datasets) && fixture.datasets.length > 0) {
   persistOpenDatasetMetadata(fixture.datasets);
 }
 
-const reportCandidate = coerceReportData(fixture.report, fixture.topic);
-const reportSources = Array.from(
+let reportCandidate = coerceReportData(fixture.report, fixture.topic);
+const sourceMap = new Map(fixture.sources.map((source) => [source.uri, source]));
+let reportSources = Array.from(
   new Set(
     reportCandidate.sections.flatMap((section) => (Array.isArray(section.sources) ? section.sources : []))
   )
 );
-const sourceMap = new Map(fixture.sources.map((source) => [source.uri, source]));
-const reportSourceDetails = reportSources.map((uri) => {
+let reportSourceDetails = reportSources.map((uri) => {
   const mapped = sourceMap.get(uri);
   if (mapped) return mapped;
   return {
@@ -88,6 +89,36 @@ const reportSourceDetails = reportSources.map((uri) => {
   };
 });
 
+const primaryRecordCoverage = evaluatePrimaryRecordCoverage(reportSourceDetails, fixture.jurisdiction);
+const addressEvidencePolicy = enforceAddressEvidencePolicy({
+  sections: reportCandidate.sections,
+  sources: reportSourceDetails,
+  jurisdiction: fixture.jurisdiction,
+  primaryRecordCoverage
+});
+if (addressEvidencePolicy.sections !== reportCandidate.sections) {
+  reportCandidate = {
+    ...reportCandidate,
+    sections: addressEvidencePolicy.sections
+  };
+  reportSources = Array.from(
+    new Set(
+      reportCandidate.sections.flatMap((section) => (Array.isArray(section.sources) ? section.sources : []))
+    )
+  );
+  reportSourceDetails = reportSources.map((uri) => {
+    const mapped = sourceMap.get(uri);
+    if (mapped) return mapped;
+    return {
+      uri,
+      title: "",
+      domain: "",
+      provider: "unknown",
+      kind: "unknown"
+    };
+  });
+}
+
 const complianceResult = enforceCompliance(reportSourceDetails);
 const provenance = {
   ...reportCandidate.provenance,
@@ -97,7 +128,6 @@ if (complianceResult.datasetCompliance.length > 0) {
   provenance.datasetCompliance = complianceResult.datasetCompliance;
 }
 
-const primaryRecordCoverage = evaluatePrimaryRecordCoverage(reportSourceDetails, fixture.jurisdiction);
 provenance.primaryRecordCoverage = primaryRecordCoverage;
 
 const citationRegistry = buildCitationRegistry(reportSourceDetails);
@@ -107,12 +137,16 @@ const propertyDossier = buildPropertyDossier({
   jurisdiction: fixture.jurisdiction,
   sections: reportCandidate.sections,
   registry: citationRegistry,
-  primaryRecordCoverage
+  primaryRecordCoverage,
+  dataGaps: addressEvidencePolicy.dataGaps
 });
 
 const reportWithConfidence = {
   ...reportCandidate,
-  sections: applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier.dataGaps),
+  sections: applyScaleCompatibility(
+    applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier.dataGaps),
+    addressEvidencePolicy.scaleCompatibility
+  ),
   provenance,
   propertyDossier
 };

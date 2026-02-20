@@ -5,6 +5,7 @@ import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenA
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
 import { buildEvidenceGateReasons, classifySourceType, evaluateEvidence, scoreAuthority } from '../services/evidenceGating';
 import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } from '../services/propertyDossier';
+import { applyScaleCompatibility, enforceAddressEvidencePolicy } from '../services/addressEvidencePolicy';
 import { enforceCompliance } from '../services/complianceEnforcement';
 import { evaluateSloGate } from '../services/sloGate';
 import { getPortalErrorMetrics, resetPortalErrorMetrics } from '../services/portalErrorTelemetry';
@@ -63,6 +64,40 @@ const normalizeDomain = (url: string) => {
 };
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const ADDRESS_METHOD_DISCOVERY_PRIORITY = [
+  { id: 'parcel', pattern: /parcel|assessor|appraiser|cad\b|tax roll|tax collector|property card|apn|pin/ },
+  { id: 'jurisdiction', pattern: /permit|code enforcement|zoning|land use|planning|deed|recorder|clerk|treasurer|tax/ },
+  { id: 'neighborhood', pattern: /neighborhood|tract|block group|census/ },
+  { id: 'macro', pattern: /citywide|city of|metro|metropolitan|countywide|regional|region|statewide|state of|national|county/ }
+];
+
+const labelNonLocalContext = (query: string) =>
+  query.toLowerCase().includes('non-local') ? query : `${query} (non-local context)`;
+
+const categorizeMethodDiscoveryQuery = (query: string) => {
+  const text = query.toLowerCase();
+  for (let i = 0; i < ADDRESS_METHOD_DISCOVERY_PRIORITY.length; i += 1) {
+    if (ADDRESS_METHOD_DISCOVERY_PRIORITY[i].pattern.test(text)) {
+      return { priority: i, labelNonLocal: ADDRESS_METHOD_DISCOVERY_PRIORITY[i].id === 'macro' };
+    }
+  }
+  return { priority: ADDRESS_METHOD_DISCOVERY_PRIORITY.length, labelNonLocal: false };
+};
+
+const orderAddressMethodDiscoveryQueries = (queries: string[]) => {
+  const uniqueQueries = uniqueList(queries);
+  const scored = uniqueQueries.map((query, index) => {
+    const category = categorizeMethodDiscoveryQuery(query);
+    const labeledQuery = category.labelNonLocal ? labelNonLocalContext(query) : query;
+    return { query: labeledQuery, priority: category.priority, index };
+  });
+  scored.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.index - b.index;
+  });
+  return uniqueList(scored.map(item => item.query));
+};
 
 const ADDRESS_REDACTION_TOKEN = '[REDACTED_ADDRESS]';
 const SECRET_REDACTION_TOKEN = '[REDACTED_SECRET]';
@@ -2269,16 +2304,19 @@ export const useOverseer = () => {
         ...openDataDiscoveryQueries,
         ...discoveryQueries
       ]).slice(0, Math.min(6, maxMethodAgents));
+      const orderedDiscoveryQueries = addressLike
+        ? orderAddressMethodDiscoveryQueries(discoveryQueriesWithOpenData)
+        : discoveryQueriesWithOpenData;
       discoveryTemplateQueries.forEach(q => registerMethodQuery(q, { source: 'method_discovery_template' }));
-      if (discoveryQueriesWithOpenData.length > 0) {
+      if (orderedDiscoveryQueries.length > 0) {
         logOverseer(
           'PHASE 0.5: METHOD DISCOVERY',
           'collect method candidates',
-          `spawn ${discoveryQueriesWithOpenData.length} scouts`,
-          `queries ${discoveryQueriesWithOpenData.join(' | ')}`,
+          `spawn ${orderedDiscoveryQueries.length} scouts`,
+          `queries ${orderedDiscoveryQueries.join(' | ')}`,
           'action'
         );
-          const discoveryPromises = discoveryQueriesWithOpenData.map(async (query: string, index: number) => {
+          const discoveryPromises = orderedDiscoveryQueries.map(async (query: string, index: number) => {
           await wait(index * 600, signal);
           ensureActive();
           const agentId = generateId();
@@ -3472,9 +3510,9 @@ export const useOverseer = () => {
         };
       }
 
-      const reportSources = uniqueList(sections.flatMap((s: any) => Array.isArray(s?.sources) ? s.sources : []));
       const sourceMap = new Map((allRawSources as NormalizedSource[]).map(source => [source.uri, source]));
-      const reportSourceDetails: NormalizedSource[] = reportSources.map((uri) => {
+      let reportSources = uniqueList(sections.flatMap((s: any) => Array.isArray(s?.sources) ? s.sources : []));
+      let reportSourceDetails: NormalizedSource[] = reportSources.map((uri) => {
         const mapped = sourceMap.get(uri);
         if (mapped) return mapped;
         return {
@@ -3485,6 +3523,37 @@ export const useOverseer = () => {
           kind: 'unknown'
         };
       });
+      const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike, addressScope);
+      const primaryRecordCoverage = addressLike && !enforceUsOnlyPolicy
+        ? evaluatePrimaryRecordCoverage(reportSourceDetails, jurisdiction)
+        : undefined;
+      const addressEvidencePolicy = addressLike && !enforceUsOnlyPolicy
+        ? enforceAddressEvidencePolicy({
+            sections: reportCandidate.sections,
+            sources: reportSourceDetails,
+            jurisdiction,
+            primaryRecordCoverage
+          })
+        : { sections: reportCandidate.sections, dataGaps: [], scaleCompatibility: [] };
+      if (addressEvidencePolicy.sections !== reportCandidate.sections) {
+        sections = addressEvidencePolicy.sections;
+        reportCandidate = {
+          ...reportCandidate,
+          sections
+        };
+        reportSources = uniqueList(sections.flatMap((s: any) => Array.isArray(s?.sources) ? s.sources : []));
+        reportSourceDetails = reportSources.map((uri) => {
+          const mapped = sourceMap.get(uri);
+          if (mapped) return mapped;
+          return {
+            uri,
+            title: '',
+            domain: normalizeDomain(uri),
+            provider: 'unknown',
+            kind: 'unknown'
+          };
+        });
+      }
       const postCompliance = enforceCompliance(reportSourceDetails);
       const datasetCompliance = postCompliance.datasetCompliance;
       if (datasetCompliance.length > 0) {
@@ -3505,10 +3574,6 @@ export const useOverseer = () => {
           }
         };
       }
-      const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike, addressScope);
-      const primaryRecordCoverage = addressLike && !enforceUsOnlyPolicy
-        ? evaluatePrimaryRecordCoverage(reportSourceDetails, jurisdiction)
-        : undefined;
       if (primaryRecordCoverage) {
         reportCandidate = {
           ...reportCandidate,
@@ -3554,6 +3619,10 @@ export const useOverseer = () => {
       }
 
       const citationRegistry = buildCitationRegistry(reportSourceDetails);
+      const policyDataGaps = [
+        ...(unsupportedJurisdictionGap ? [unsupportedJurisdictionGap] : []),
+        ...addressEvidencePolicy.dataGaps
+      ];
       const propertyDossier = addressLike
         ? buildPropertyDossier({
             topic,
@@ -3562,12 +3631,15 @@ export const useOverseer = () => {
             sections: reportCandidate.sections,
             registry: citationRegistry,
             primaryRecordCoverage,
-            dataGaps: unsupportedJurisdictionGap ? [unsupportedJurisdictionGap] : []
+            dataGaps: policyDataGaps
           })
         : undefined;
       const reportWithConfidence = {
         ...reportCandidate,
-        sections: applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier?.dataGaps || [])
+        sections: applyScaleCompatibility(
+          applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier?.dataGaps || []),
+          addressEvidencePolicy.scaleCompatibility
+        )
       };
       if (addressLike && !enforceUsOnlyPolicy) {
         const preRenderPassed = (preSynthesisGatePassed ?? true) && (postSynthesisGatePassed ?? true);

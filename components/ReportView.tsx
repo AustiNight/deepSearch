@@ -18,7 +18,14 @@ const PRIMARY_RECORD_LABELS: Record<string, string> = {
   deed_recorder: 'Deed Recorder',
   zoning_gis: 'Zoning / GIS',
   permits: 'Permits',
-  code_enforcement: 'Code Enforcement'
+  code_enforcement: 'Code Enforcement',
+  assessor_or_tax: 'Assessor / Tax Roll',
+  permits_or_cases: 'Permits / Case Logs',
+  zoning_land_use: 'Zoning / Land Use',
+  parcel_geometry: 'Parcel Geometry',
+  police_311_signals: 'Police / 311 Signals',
+  governance_section: 'Governance Section',
+  economy_section: 'Economy Section'
 };
 
 const formatRecordTypeLabel = (recordType: string) =>

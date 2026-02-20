@@ -96,10 +96,14 @@ export const METHOD_DISCOVERY_TEMPLATES_PERSON = [
 ];
 
 export const METHOD_DISCOVERY_TEMPLATES_ADDRESS = [
-  'how to research a property at {topic}',
-  'where to find property records for {topic}',
-  'how to find building permits for {topic}',
-  'how to find sale history for {topic}',
+  '{topic} assessor parcel record',
+  '{topic} tax roll',
+  '{topic} parcel map',
+  '{topic} building permits',
+  '{topic} code enforcement case log',
+  '{topic} zoning map',
+  '{topic} neighborhood census tract',
+  '{topic} citywide context (non-local context)',
 ];
 
 export const MOCK_REPORT_DELAY = 1500;
