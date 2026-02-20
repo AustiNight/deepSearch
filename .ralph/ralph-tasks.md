@@ -33,7 +33,7 @@
 - [x] Define a centralized storage policy module (e.g., `services/storagePolicy.ts`) that governs where each data class may be stored (memory, sessionStorage, localStorage)
   - [x] Codify data classes and policies: settings metadata, run config, model overrides, allowlist, optional keys, open-data index, geocode cache, evidence recovery cache, KB, SLO history, raw synthesis debug
   - [x] Enumerate legacy storage keys and expected migration/purge behavior per key
-  - [ ] Enforce default storage tiers: optional keys -> sessionStorage (default), non-secrets -> localStorage, sensitive run data -> memory only
+  - [x] Enforce default storage tiers: optional keys -> sessionStorage (default), non-secrets -> localStorage, sensitive run data -> memory only
   - [ ] Add TTL and size limits in the storage policy for caches (open-data index, geocode cache, evidence recovery cache)
   - [ ] Add schema versioning + migration hooks for storage entries (especially open-data index and settings metadata)
   - [ ] Add one-time migration: move existing optional keys from localStorage to sessionStorage on first load under new policy

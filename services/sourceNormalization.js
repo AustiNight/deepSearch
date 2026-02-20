@@ -296,26 +296,18 @@ export const formatSourceDiagnosticsMessage = (input) => {
   return `${base}${querySnippet}${errorSnippet}`;
 };
 
+const EMPTY_SOURCE_MAX_ENTRIES = 100;
+const emptySourceEntries = [];
+
 export const recordEmptySources = ({ provider, model, query }) => {
-  if (typeof window === "undefined" || !window.sessionStorage) return;
-  try {
-    const key = "overseer_empty_sources";
-    const raw = window.sessionStorage.getItem(key);
-    let parsed = [];
-    if (raw) {
-      parsed = JSON.parse(raw);
-    }
-    const entries = Array.isArray(parsed) ? parsed : [];
-    const entry = {
-      provider,
-      model,
-      query: query ? query.slice(0, 160) : "",
-      timestamp: Date.now()
-    };
-    entries.push(entry);
-    const capped = entries.slice(-100);
-    window.sessionStorage.setItem(key, JSON.stringify(capped));
-  } catch (_) {
-    return;
+  const entry = {
+    provider,
+    model,
+    query: query ? query.slice(0, 160) : "",
+    timestamp: Date.now()
+  };
+  emptySourceEntries.push(entry);
+  if (emptySourceEntries.length > EMPTY_SOURCE_MAX_ENTRIES) {
+    emptySourceEntries.splice(0, emptySourceEntries.length - EMPTY_SOURCE_MAX_ENTRIES);
   }
 };
