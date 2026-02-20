@@ -3,6 +3,7 @@
 ## Zero-Cost Mode
 - Default behavior uses public, anonymous endpoints.
 - Socrata SODA defaults to v2 `/resource/{id}.json` unless a token is available and v3 is explicitly requested.
+- SODA endpoint construction is RAG-backed; v3 endpoints are only chosen when opt-in + app token are present.
 - Providers that require paid access are skipped and surfaced as `DataGap` entries.
 - Compliance gates block datasets with restrictive licenses/terms or stale updates.
 

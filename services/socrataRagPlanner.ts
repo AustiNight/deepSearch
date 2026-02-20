@@ -19,6 +19,11 @@ export type SocrataSodaPlan = {
   ragUsageId?: string;
 };
 
+export type SocrataSodaEndpoint = SocrataSodaPlan & {
+  portalUrl: string;
+  url: string;
+};
+
 type RagSpec = typeof ragSpec;
 
 type ParamPattern = {
@@ -34,6 +39,13 @@ const normalizeDomain = (portalUrl: string) => {
   } catch (_) {
     return portalUrl.replace(/^https?:\/\//i, "").replace(/\/$/, "");
   }
+};
+
+const normalizePortalUrl = (portalUrl: string) => {
+  const trimmed = portalUrl.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, "");
+  return `https://${trimmed}`.replace(/\/$/, "");
 };
 
 const resolveCatalogBase = (portalUrl: string, spec: RagSpec) => {
@@ -206,4 +218,26 @@ export const planSocrataSodaEndpoint = (input: {
     requiresAppToken: false,
     ragUsageId
   };
+};
+
+// Zero-cost default: anonymous v2 endpoints. v3 requires explicit opt-in + app token.
+// Endpoint paths are sourced from the RAG spec derived from the Socrata docs.
+export const buildSocrataSodaEndpoint = (input: {
+  portalUrl: string;
+  datasetId: string;
+  preferV3?: boolean;
+  hasAppToken?: boolean;
+  mode?: "query" | "export";
+  params?: URLSearchParams | string;
+}): SocrataSodaEndpoint => {
+  const plan = planSocrataSodaEndpoint({
+    datasetId: input.datasetId,
+    preferV3: input.preferV3,
+    hasAppToken: input.hasAppToken,
+    mode: input.mode
+  });
+  const portalUrl = normalizePortalUrl(input.portalUrl);
+  const params = typeof input.params === "string" ? input.params : input.params?.toString();
+  const url = params ? `${portalUrl}${plan.path}?${params}` : `${portalUrl}${plan.path}`;
+  return { ...plan, portalUrl, url };
 };

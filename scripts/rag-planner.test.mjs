@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-const { planSocrataDiscoveryQuery, planSocrataSodaEndpoint } = await import("../services/socrataRagPlanner.ts");
+const { buildSocrataSodaEndpoint, planSocrataDiscoveryQuery, planSocrataSodaEndpoint } = await import("../services/socrataRagPlanner.ts");
 
 const plan = planSocrataDiscoveryQuery({
   portalUrl: "https://data.example.gov",
@@ -44,5 +44,20 @@ assert.ok(sodaDefault.path.includes("/resource/abcd.json"));
 const sodaV3 = planSocrataSodaEndpoint({ datasetId: "abcd", preferV3: true, hasAppToken: true });
 assert.equal(sodaV3.version, "3.0");
 assert.ok(sodaV3.path.includes("/api/v3/views/abcd/query.json"));
+
+const sodaUrlDefault = buildSocrataSodaEndpoint({
+  portalUrl: "https://data.example.gov",
+  datasetId: "abcd",
+  params: new URLSearchParams({ "$limit": "1" })
+});
+assert.ok(sodaUrlDefault.url.startsWith("https://data.example.gov/resource/abcd.json?"));
+
+const sodaUrlV3 = buildSocrataSodaEndpoint({
+  portalUrl: "data.example.gov",
+  datasetId: "abcd",
+  preferV3: true,
+  hasAppToken: true
+});
+assert.ok(sodaUrlV3.url.startsWith("https://data.example.gov/api/v3/views/abcd/query.json"));
 
 console.log("rag-planner.test.mjs: ok");

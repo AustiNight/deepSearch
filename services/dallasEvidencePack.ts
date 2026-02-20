@@ -3,7 +3,7 @@ import { fetchJsonWithRetry } from "./openDataHttp";
 import { getOpenDataConfig } from "./openDataConfig";
 import { normalizeAddressVariants } from "./addressNormalization";
 import { addressToGeometry } from "./openDataGeocoding";
-import { planSocrataDiscoveryQuery, planSocrataSodaEndpoint } from "./socrataRagPlanner";
+import { buildSocrataSodaEndpoint, planSocrataDiscoveryQuery } from "./socrataRagPlanner";
 import { recordRagOutcome } from "./ragTelemetry";
 import {
   readDallasSchemaCache,
@@ -424,8 +424,13 @@ const fetchSocrataMetadata = async (portalUrl: string, datasetId: string) => {
 
 const fetchSocrataRows = async (portalUrl: string, datasetId: string, params: URLSearchParams) => {
   const headers = buildSocrataHeaders();
-  const sodaPlan = planSocrataSodaEndpoint({ datasetId, hasAppToken: Boolean(getOpenDataConfig().auth.socrataAppToken) });
-  const url = `${portalUrl}${sodaPlan.path}?${params.toString()}`;
+  const sodaPlan = buildSocrataSodaEndpoint({
+    portalUrl,
+    datasetId,
+    hasAppToken: Boolean(getOpenDataConfig().auth.socrataAppToken),
+    params
+  });
+  const url = sodaPlan.url;
   return fetchJsonWithRetry<any[]>(url, { headers, retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
 };
 

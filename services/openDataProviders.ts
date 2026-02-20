@@ -14,7 +14,7 @@ import {
 } from "../constants";
 import { fetchJsonWithRetry, fetchTextWithRetry, enforceRateLimit } from "./openDataHttp";
 import { getOpenDataConfig } from "./openDataConfig";
-import { planSocrataDiscoveryQuery, planSocrataSodaEndpoint } from "./socrataRagPlanner";
+import { buildSocrataSodaEndpoint, planSocrataDiscoveryQuery } from "./socrataRagPlanner";
 import { recordRagOutcome } from "./ragTelemetry";
 import { MAX_LOCAL_SPATIAL_JOIN_FEATURES, pointInGeometry } from "./spatialJoin";
 import type { GeoJsonGeometry } from "./parcelResolution";
@@ -478,8 +478,13 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       "$offset": String(offset)
     });
     if (input.searchText) params.set("$q", input.searchText);
-    const sodaPlan = planSocrataSodaEndpoint({ datasetId: input.datasetId, hasAppToken: Boolean(config.auth.socrataAppToken) });
-    const url = `${portalUrl}${sodaPlan.path}?${params.toString()}`;
+    const sodaPlan = buildSocrataSodaEndpoint({
+      portalUrl,
+      datasetId: input.datasetId,
+      hasAppToken: Boolean(config.auth.socrataAppToken),
+      params
+    });
+    const url = sodaPlan.url;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
     const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {
@@ -521,8 +526,13 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       const wkt = wktFromPolygon(input.geometry);
       params.set("$where", `within_polygon(${geometryField}, '${wkt}')`);
     }
-    const sodaPlan = planSocrataSodaEndpoint({ datasetId: input.datasetId, hasAppToken: Boolean(config.auth.socrataAppToken) });
-    const url = `${portalUrl}${sodaPlan.path}?${params.toString()}`;
+    const sodaPlan = buildSocrataSodaEndpoint({
+      portalUrl,
+      datasetId: input.datasetId,
+      hasAppToken: Boolean(config.auth.socrataAppToken),
+      params
+    });
+    const url = sodaPlan.url;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
     const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {
