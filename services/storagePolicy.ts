@@ -413,17 +413,15 @@ export const getOptionalKeysPersistencePreference = (): boolean => {
 
 export const setOptionalKeysPersistencePreference = (persist: boolean) => {
   const storage = getLocalStorage();
-  if (!storage) return;
   if (!persist) {
-    const wasPersisting = getOptionalKeysPersistencePreference();
-    storage.removeItem(OPTIONAL_KEYS_PERSISTENCE_KEY);
-    // purge any lingering local copy when persistence is disabled
-    removeRaw("local", OPTIONAL_KEYS_STORAGE_KEY);
-    if (wasPersisting) {
-      clearOptionalKeys("all");
+    if (storage) {
+      storage.removeItem(OPTIONAL_KEYS_PERSISTENCE_KEY);
     }
+    // purge any lingering copies when persistence is disabled
+    clearOptionalKeys("all");
     return;
   }
+  if (!storage) return;
   const record: OptionalKeyPersistRecord = {
     schemaVersion: OPTIONAL_KEYS_PERSIST_SCHEMA_VERSION,
     consentVersion: OPTIONAL_KEYS_CONSENT_VERSION,

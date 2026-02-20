@@ -38,7 +38,7 @@
   - [x] Add schema versioning + migration hooks for storage entries (especially open-data index and settings metadata)
   - [x] Add one-time migration: move existing optional keys from localStorage to sessionStorage on first load under new policy
   - [x] Delete legacy localStorage key entries after migration to prevent lingering sensitive data
-  - [ ] Add opt-out behavior: purge optional keys from all storage when persistence is disabled
+  - [x] Add opt-out behavior: purge optional keys from all storage when persistence is disabled
   - [ ] Version and document migration steps, including downgrade/cleanup paths for legacy entries
   - [ ] Add a client-side guard that prevents keys from being persisted to localStorage unless explicitly opted in
   - [ ] Add tests/asserts that block optional key writes to localStorage unless opt-in is explicitly set

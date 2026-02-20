@@ -70,6 +70,12 @@ assert.ok(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY));
 assert.equal(window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
 
 resetStorage();
+writeOptionalKeys(authPayload);
+setOptionalKeysPersistencePreference(false);
+assert.equal(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
+assert.equal(window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
+
+resetStorage();
 const now = Date.now();
 writeEvidenceRecoveryCache({
   stale: { text: "old", sources: [], timestamp: now - EVIDENCE_RECOVERY_CACHE_TTL_MS - 1000 },
