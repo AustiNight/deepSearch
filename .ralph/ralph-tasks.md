@@ -94,7 +94,7 @@
   - [x] Separate “Method Audit” into a collapsible methodology section; keep the main report focused on address‑level findings and data gaps
   - [x] Add UI/UX handling for `DataGap` sections created by enforcement changes, with explicit labels and suppression of “Overseer Verified”
   - [x] Add a citation-quality check that flags sections with “No verified sources” and prevents them from being labeled “Overseer Verified”
-  - [ ] Update golden tests/snapshots for report-cleanliness changes to avoid regressions
+  - [x] Update golden tests/snapshots for report-cleanliness changes to avoid regressions
   - [ ] Acceptance: report renders without `[object Object]`, the main narrative is address‑focused, method details are separated, and all sections either carry verified citations or are marked as data gaps
 
 - [x] Epic: Discovery + SODA RAG Integration for Agent Guidance
