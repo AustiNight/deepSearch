@@ -102,7 +102,7 @@
   - [x] Add a RAG loader/indexer that can read `docs/Socrata.rag.bundle.jsonl` locally (no external vector DB), build a lightweight in-memory index (BM25/TF-IDF by default; embeddings only if pre-existing, local, offline, and free), and expose query APIs to agents via the same-origin API
   - [x] Add a build/refresh command (script + `package.json` entry) to regenerate RAG artifacts from source docs using `scripts/parse_discovery_api.py`, and ensure it never pulls remote data or requires secrets
   - [x] Add a retrieval utility that filters by `doc_id` and `source_file` to enable targeted lookup (e.g., discovery-only vs SODA-only)
-  - [ ] Update method-discovery / search-planning prompts to explicitly consult the Socrata RAG before composing discovery queries or SODA requests; require citing the exact parameter rules and endpoint format from RAG
+  - [x] Update method-discovery / search-planning prompts to explicitly consult the Socrata RAG before composing discovery queries or SODA requests; require citing the exact parameter rules and endpoint format from RAG
   - [ ] Add a query-planning helper that uses RAG to fill in required Discovery API parameters, valid filters, and pagination semantics; reject unknown params unless explicitly supported in RAG
   - [ ] Add a SODA endpoint constructor helper that uses RAG to choose correct endpoint paths (v2 vs v3), and document zero-cost default behavior (anonymous mode + optional app token)
   - [ ] Add an explicit guardrail: forbid external embedding APIs or paid vector DBs; retrieval must remain zero-cost and local

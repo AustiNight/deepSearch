@@ -293,8 +293,10 @@ export const extractResearchMethods = async (
 
     Extract multiple distinct research methods and concrete search queries that would help research the topic.
     Use the context to avoid duplicating existing tactic templates and to cover blueprint fields.
+    Before composing any Socrata discovery or SODA request, consult the RAG reference above.
     If you propose Socrata discovery or SODA requests, you MUST cite the exact parameter rules and endpoint format from the RAG reference above.
     Include a field `ragEvidence` on any Socrata-related method with the chunk ids you used (e.g., ["section-purpose-1"]).
+    If the RAG reference is "none", do NOT propose Socrata discovery or SODA requests.
     ${addressOrderDirective}
     Return JSON.
   `;
@@ -422,6 +424,16 @@ export const generateSectorAnalysis = async (
   ensureOpenAIReady();
   const model = resolveRoleModel('sector_analysis', modelOverrides);
   const currentDate = new Date().toDateString();
+  const formatRagHits = (hits: Array<{ id: string; text: string; doc_id?: string }>) => {
+    if (!hits || hits.length === 0) return "none";
+    return hits
+      .map((hit) => `- [${hit.id}${hit.doc_id ? `|${hit.doc_id}` : ""}] ${hit.text.substring(0, 600)}`)
+      .join("\n");
+  };
+  const [discoveryRag, sodaRag] = await Promise.all([
+    fetchSocrataDiscoveryRag().catch(() => []),
+    fetchSocrataSodaRag().catch(() => [])
+  ]);
 
   const prompt = `
     Topic: "${topic}"
@@ -429,12 +441,22 @@ export const generateSectorAnalysis = async (
     Research Context (taxonomy + blueprint):
     ${contextText || "none"}
 
+    Socrata RAG Reference (use ONLY if you propose Socrata discovery or SODA requests):
+    Discovery API:
+    ${formatRagHits(discoveryRag)}
+
+    SODA API:
+    ${formatRagHits(sodaRag)}
+
     You are the Research Director. We need a 360-degree view of this topic.
     Break this topic down into 8-12 DISTINCT SECTORS or DIMENSIONS that require separate investigation.
     Examples: "Economic Impact", "Technical Architecture", "Competitor Landscape", "Historical Context", "Future Risks".
 
     Do NOT just give generic names. Make the tasks specific and include a concrete initialQuery for each sector.
     Ensure sectors collectively cover blueprint fields and key taxonomy subtopics.
+    If you include any Socrata discovery or SODA requests in an initialQuery, you MUST first consult the RAG reference above.
+    Cite the exact parameter rules and endpoint format from the RAG in the sector output and include \`ragEvidence\` with the chunk ids you used (e.g., ["section-purpose-1"]).
+    If the RAG reference is "none", do NOT propose Socrata discovery or SODA requests.
 
     Return JSON.
   `;
