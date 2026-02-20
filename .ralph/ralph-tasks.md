@@ -9,12 +9,13 @@
 - Changes must not require user approvals to proceed
 
 - [x] Epic: Settings UI for Optional Open-Data Keys
-  - [ ] Add a Settings UI section that lists optional keys (Socrata app token, ArcGIS API key, optional geocoding key if supported) with clear “not required” language
+  - [x] Add a Settings UI section that lists optional keys (Socrata app token, ArcGIS API key, optional geocoding key if supported) with clear “not required” language
   - [ ] Explain zero-cost mode defaults and what improves with keys (rate limits, reliability, throughput) without changing core functionality
   - [ ] Link to public setup instructions for each optional key and summarize required fields/format
   - [ ] Add validation messaging that treats missing keys as “OK” and only warns about rate limiting
   - [ ] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
   - [ ] Review UI copy to explicitly disclose keys remain client-only and are never sent to Worker/KV
+  - [ ] Gate Settings UI persistence toggle on Storage Policy module wiring (no toggle exposure before policy enforcement)
   - [ ] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, keys never leave client storage or sync to Worker/KV, the persistence toggle is default-off and requires explicit consent, and adding keys improves scalability only
 
 - [x] Epic: Transparency Map Scaling + Auto-Updates
@@ -31,6 +32,7 @@
 - [x] Epic: Storage Policy Layer + Migration
   - [ ] Define a centralized storage policy module (e.g., `services/storagePolicy.ts`) that governs where each data class may be stored (memory, sessionStorage, localStorage)
   - [ ] Codify data classes and policies: settings metadata, run config, model overrides, allowlist, optional keys, open-data index, geocode cache, evidence recovery cache, KB, SLO history, raw synthesis debug
+  - [ ] Enumerate legacy storage keys and expected migration/purge behavior per key
   - [ ] Enforce default storage tiers: optional keys -> sessionStorage (default), non-secrets -> localStorage, sensitive run data -> memory only
   - [ ] Add TTL and size limits in the storage policy for caches (open-data index, geocode cache, evidence recovery cache)
   - [ ] Add schema versioning + migration hooks for storage entries (especially open-data index and settings metadata)
@@ -56,7 +58,9 @@
   - [ ] Add tests that ensure Worker logs and telemetry never contain secrets or address PII
   - [ ] Add tests that ensure telemetry/logging never contains secrets or address PII
   - [ ] Add production routing validation for GitHub Pages → Worker API path mapping (CORS, path routing, and local dev parity)
+  - [ ] Define concrete routing validation steps (smoke test or config check) without requiring approvals
   - [ ] Define test strategy for same-origin and telemetry safeguards (lint, unit, and integration coverage)
+  - [ ] Add CI gating for same-origin and storage policy tests (minimum unit coverage)
   - [ ] Acceptance: all client fetches are same-origin, and telemetry/logs are free of keys, addresses, or tokens
 
 - [x] Epic: Secret Scanning + History Scrub
@@ -90,6 +94,7 @@
   - [ ] Separate “Method Audit” into a collapsible methodology section; keep the main report focused on address‑level findings and data gaps
   - [ ] Add UI/UX handling for `DataGap` sections created by enforcement changes, with explicit labels and suppression of “Overseer Verified”
   - [ ] Add a citation-quality check that flags sections with “No verified sources” and prevents them from being labeled “Overseer Verified”
+  - [ ] Update golden tests/snapshots for report-cleanliness changes to avoid regressions
   - [ ] Acceptance: report renders without `[object Object]`, the main narrative is address‑focused, method details are separated, and all sections either carry verified citations or are marked as data gaps
 
 - [x] Epic: Discovery + SODA RAG Integration for Agent Guidance
@@ -105,8 +110,10 @@
   - [ ] Decide RAG index storage strategy (in-memory vs KV cache), set size limits/eviction, and align with zero-cost constraints
   - [ ] Add a validation step: if a dataset is non-tabular or requires auth/token, record a `DataGap` and select fallback datasets or skip with explanation
   - [ ] Add usage telemetry (local only, no external send) to track which RAG chunks are used and whether they improved discovery success
+  - [ ] Route RAG telemetry through the shared redaction utility and add tests ensuring no address/keys/tokens appear in telemetry
   - [ ] Add unit tests for RAG ingestion (parsing, indexing, retrieval) and for query planning using the RAG (e.g., `categories`, `domains`, `tags`, `limit`, `order`)
   - [ ] Add a small “Developer Reference” panel (read-only) that can surface the relevant RAG snippet for the current query context without exposing secrets
+  - [ ] Ensure Developer Reference panel fetches data via `/api/*` only (no direct file fetches)
   - [ ] Acceptance: when running discovery planning, the system demonstrates it can retrieve the relevant RAG chunk for a parameter/endpoint, uses it to build valid queries, and avoids unsupported parameters; SODA endpoint construction follows RAG-defined formats; all calls remain same-origin and zero-cost by default
 
 ## Dependency Order
@@ -117,5 +124,5 @@
 - Add UI updates (Settings optional keys after storage policy, Transparency Map scaling)
 - Report Cleanliness & Validation Output
 - Add Discovery + SODA RAG Integration for Agent Guidance
-- Implement Dallas Address Evidence Pack (Socrata + CAD)
 - Implement Address-First Evidence Enforcement (Property Reports)
+- Implement Dallas Address Evidence Pack (Socrata + CAD)
