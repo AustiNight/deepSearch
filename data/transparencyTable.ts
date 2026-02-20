@@ -68,6 +68,7 @@ export const TRANSPARENCY_TABLE_PERF = {
   containIntrinsicRowSize: 140
 };
 
+// Update triggers + performance budget for transparency map recomputes.
 export const TRANSPARENCY_MAP_UPDATE_POLICY = {
   eventSources: [
     'panel-open',

@@ -11,7 +11,8 @@ This table is generated from the live taxonomy, seed map, and hint logic.
 - Cells with multiple values render as bullet lists to keep scanning consistent across verticals.
 - Keyboard navigation: focus a row, then use ↑/↓ to move, Home/End to jump, and Page Up/Page Down to move in larger steps.
 - Performance: expected ≤ 24 rows; content-visibility optimization activates at 48+ rows. The table supports horizontal scrolling on narrow viewports, uses sticky headers for readability, and remains print-friendly.
-- Auto-updates: the panel recomputes on taxonomy updates and settings saves, with integrity warnings if any verticals or subtopics are missing.
+- Auto-updates: the panel recomputes on panel open, settings save/storage, taxonomy update/storage, and blueprint updates, with integrity warnings if any verticals or subtopics are missing.
+- Update policy: debounce 80ms, throttle 240ms, recompute budget 16ms (logs a warning if exceeded).
 
 Run `node scripts/vertical-logic-table.mjs` to regenerate.
 <!-- VERTICAL_LOGIC_TABLE:START -->
