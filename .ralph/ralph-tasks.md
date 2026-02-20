@@ -10,7 +10,7 @@
 
 - [x] Epic: Settings UI for Optional Open-Data Keys
   - [x] Add a Settings UI section that lists optional keys (Socrata app token, ArcGIS API key, optional geocoding key if supported) with clear “not required” language
-  - [ ] Explain zero-cost mode defaults and what improves with keys (rate limits, reliability, throughput) without changing core functionality
+  - [x] Explain zero-cost mode defaults and what improves with keys (rate limits, reliability, throughput) without changing core functionality
   - [ ] Link to public setup instructions for each optional key and summarize required fields/format
   - [ ] Add validation messaging that treats missing keys as “OK” and only warns about rate limiting
   - [ ] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
