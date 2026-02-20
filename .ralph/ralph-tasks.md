@@ -108,7 +108,7 @@
   - [x] Add an explicit guardrail: forbid external embedding APIs or paid vector DBs; retrieval must remain zero-cost and local
   - [x] Add a build-time or test-time guard that fails on any non-local embedding or vector client dependency
   - [x] Decide RAG index storage strategy (in-memory vs KV cache), set size limits/eviction, and align with zero-cost constraints
-  - [ ] Add a validation step: if a dataset is non-tabular or requires auth/token, record a `DataGap` and select fallback datasets or skip with explanation
+  - [x] Add a validation step: if a dataset is non-tabular or requires auth/token, record a `DataGap` and select fallback datasets or skip with explanation
   - [ ] Add usage telemetry (local only, no external send) to track which RAG chunks are used and whether they improved discovery success
   - [ ] Route RAG telemetry through the shared redaction utility and add tests ensuring no address/keys/tokens appear in telemetry
   - [ ] Add unit tests for RAG ingestion (parsing, indexing, retrieval) and for query planning using the RAG (e.g., `categories`, `domains`, `tags`, `limit`, `order`)

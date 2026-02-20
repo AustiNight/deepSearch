@@ -76,6 +76,56 @@ const runSocrataTests = async () => {
   assert.equal(searchCall.body.headers["X-App-Token"], "token-123");
 };
 
+const runSocrataValidationTests = async () => {
+  updateOpenDataConfig({ auth: { socrataAppToken: "token-123" } });
+  global.fetch = buildProxyFetch((target) => {
+    if (String(target).includes("nominatim.openstreetmap.org/search")) {
+      return buildResponse([
+        { lat: "0.5", lon: "0.5", display_name: "123 Main St" }
+      ]);
+    }
+    if (String(target).includes("/api/catalog/v1")) {
+      return buildResponse({
+        results: [
+          { resource: { id: "map-1", name: "Parcel Map", updatedAt: "2024-01-01", description: "Map layer" } },
+          { resource: { id: "good-1", name: "Parcel Table", updatedAt: "2024-01-01", description: "Tabular parcel data" } }
+        ]
+      });
+    }
+    if (String(target).includes("/api/views/map-1.json")) {
+      return buildResponse({
+        name: "Parcel Map",
+        displayType: "map",
+        viewType: "map"
+      });
+    }
+    if (String(target).includes("/api/views/good-1.json")) {
+      return buildResponse({
+        name: "Parcel Table",
+        columns: [{ fieldName: "location", dataTypeName: "location" }]
+      });
+    }
+    if (String(target).includes("/resource/good-1.json")) {
+      return buildResponse([
+        { parcel_id: "P-999", location: { type: "Point", coordinates: [-97.1, 32.9] } }
+      ]);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const result = await resolveParcelFromOpenDataPortal({
+    address: "123 Main St",
+    portalUrl: "https://data.example.gov",
+    portalType: "socrata"
+  });
+  assert.equal(result.parcel?.parcelId, "P-999");
+  const hasNonTabularGap = result.dataGaps.some((gap) => {
+    return (gap.description || "").toLowerCase().includes("not a tabular dataset")
+      || (gap.reason || "").toLowerCase().includes("not tabular");
+  });
+  assert.ok(hasNonTabularGap, "Expected non-tabular dataset gap.");
+};
+
 const runArcGisTests = async () => {
   const calls = [];
   global.fetch = buildProxyFetch((target, body) => {
@@ -238,6 +288,7 @@ const runDallasVariantTest = () => {
 };
 
 await runSocrataTests();
+await runSocrataValidationTests();
 await runArcGisTests();
 await runDcatTests();
 await runSpatialJoinParcelTest();

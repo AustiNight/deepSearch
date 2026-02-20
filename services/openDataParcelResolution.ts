@@ -1,4 +1,4 @@
-import type { ClaimCitation, CitationSource, DataGap, GeoPoint, Jurisdiction, SourcePointer } from "../types";
+import type { ClaimCitation, CitationSource, DataGap, GeoPoint, Jurisdiction, OpenDatasetMetadata, SourcePointer } from "../types";
 import type { ParcelCandidate, ParcelGeometryFeature } from "./parcelResolution";
 import { resolveParcelWorkflow } from "./parcelResolution";
 import { addressToGeometry } from "./openDataGeocoding";
@@ -9,6 +9,7 @@ import { normalizeAddressVariants } from "./addressNormalization";
 import { validateDataSourceContracts } from "../data/dataSourceContracts";
 import { getOpenDataConfig } from "./openDataConfig";
 import { isNonUsJurisdiction } from "./addressScope";
+import { enforceRateLimit, fetchJsonWithRetry } from "./openDataHttp";
 
 const isoDateToday = () => new Date().toISOString().slice(0, 10);
 
@@ -22,6 +23,13 @@ const buildDataGap = (description: string, reason: string, status: DataGap["stat
   detectedAt: isoDateToday(),
   expectedSources
 });
+
+const normalizePortalUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, "");
+  return `https://${trimmed}`.replace(/\/$/, "");
+};
 
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -64,6 +72,85 @@ const buildExpectedSources = (portalUrl: string, datasetId?: string): SourcePoin
   portalUrl,
   endpoint: datasetId ? `${portalUrl}/resource/${datasetId}` : portalUrl
 }];
+
+const isTabularSocrataMeta = (meta: any) => {
+  const viewType = String(meta?.viewType || meta?.view_type || "").toLowerCase();
+  const displayType = String(meta?.displayType || meta?.display_type || "").toLowerCase();
+  if (displayType.includes("map")) return false;
+  if (viewType.includes("map")) return false;
+  return true;
+};
+
+const requiresAuthSocrataMeta = (meta: any) => {
+  if (!meta) return false;
+  const access = String(meta?.accessLevel || meta?.access_level || meta?.access || "").toLowerCase();
+  if (access.includes("private") || access.includes("restricted") || access.includes("non-public")) return true;
+  if (meta?.private === true) return true;
+  const publicationStage = String(meta?.publicationStage || meta?.publication_stage || "").toLowerCase();
+  if (publicationStage && publicationStage !== "published") return true;
+  const approval = String(meta?.approvalStatus || meta?.approval_status || meta?.state || "").toLowerCase();
+  if (approval && approval !== "approved") return true;
+  return false;
+};
+
+const accessConstraintsIndicateRestricted = (dataset: OpenDatasetMetadata) => {
+  const constraintText = (dataset.accessConstraints || []).join(" ").toLowerCase();
+  if (!constraintText) return false;
+  return /private|restricted|non-public|internal|confidential/.test(constraintText);
+};
+
+type SocrataValidationResult =
+  | { ok: true }
+  | { ok: false; reason: "restricted" | "non_tabular" | "metadata" };
+
+const validateSocrataDataset = async (
+  dataset: OpenDatasetMetadata,
+  portalUrl: string,
+  dataGaps: DataGap[]
+): Promise<SocrataValidationResult> => {
+  if (!dataset.datasetId) return { ok: false, reason: "metadata" };
+  const config = getOpenDataConfig();
+  const headers: Record<string, string> = {};
+  if (config.auth.socrataAppToken) {
+    headers["X-App-Token"] = config.auth.socrataAppToken;
+  }
+  const normalizedPortal = normalizePortalUrl(portalUrl);
+  await enforceRateLimit(`socrata:${normalizedPortal}`, config.auth.socrataAppToken ? 100 : 500);
+  const metaUrl = `${normalizedPortal}/api/views/${dataset.datasetId}.json`;
+  const response = await fetchJsonWithRetry<any>(metaUrl, { headers, retries: 0 }, {
+    portalType: "socrata",
+    portalUrl: normalizedPortal
+  });
+
+  if (!response.ok || !response.data) {
+    dataGaps.push(buildDataGap(
+      `${dataset.title} (${dataset.datasetId}) metadata unavailable.`,
+      response.error ? `${response.error}` : "Metadata fetch failed.",
+      "unavailable",
+      buildExpectedSources(normalizedPortal, dataset.datasetId)
+    ));
+    return { ok: false, reason: "metadata" };
+  }
+  if (requiresAuthSocrataMeta(response.data)) {
+    dataGaps.push(buildDataGap(
+      `${dataset.title} (${dataset.datasetId}) requires authentication or elevated access.`,
+      "Dataset requires authentication or restricted access.",
+      "restricted",
+      buildExpectedSources(normalizedPortal, dataset.datasetId)
+    ));
+    return { ok: false, reason: "restricted" };
+  }
+  if (!isTabularSocrataMeta(response.data)) {
+    dataGaps.push(buildDataGap(
+      `${dataset.title} (${dataset.datasetId}) is not a tabular dataset (map or visualization).`,
+      "Dataset is not tabular; cannot query via SODA.",
+      "unavailable",
+      buildExpectedSources(normalizedPortal, dataset.datasetId)
+    ));
+    return { ok: false, reason: "non_tabular" };
+  }
+  return { ok: true };
+};
 
 const buildCitationSources = (portalUrl: string, datasetId?: string, datasetTitle?: string, updatedAt?: string) => {
   const now = new Date().toISOString();
@@ -158,6 +245,39 @@ export const resolveParcelFromOpenDataPortal = async (input: {
 
   const evaluatedDatasets = datasets.map((dataset) => evaluateDatasetUsage(dataset));
   const usableDatasets = evaluatedDatasets.filter((dataset) => !dataset.doNotUse);
+  const validationStats = {
+    restricted: 0,
+    nonTabular: 0,
+    metadata: 0
+  };
+  let queryableDatasets = usableDatasets;
+
+  if (usableDatasets.length > 0) {
+    const validated: OpenDatasetMetadata[] = [];
+    for (const dataset of usableDatasets) {
+      if (accessConstraintsIndicateRestricted(dataset)) {
+        validationStats.restricted += 1;
+        dataGaps.push(buildDataGap(
+          `${dataset.title}${dataset.datasetId ? ` (${dataset.datasetId})` : ""} requires authentication or restricted access.`,
+          "Dataset access constraints indicate restricted or private access.",
+          "restricted",
+          buildExpectedSources(input.portalUrl, dataset.datasetId)
+        ));
+        continue;
+      }
+      if (provider.type === "socrata") {
+        const validation = await validateSocrataDataset(dataset, input.portalUrl, dataGaps);
+        if (!validation.ok) {
+          if (validation.reason === "restricted") validationStats.restricted += 1;
+          if (validation.reason === "non_tabular") validationStats.nonTabular += 1;
+          if (validation.reason === "metadata") validationStats.metadata += 1;
+          continue;
+        }
+      }
+      validated.push(dataset);
+    }
+    queryableDatasets = validated;
+  }
 
   if (usableDatasets.length === 0) {
     const complianceNotes = evaluatedDatasets.flatMap((dataset) => dataset.complianceNotes || []);
@@ -170,11 +290,25 @@ export const resolveParcelFromOpenDataPortal = async (input: {
       "restricted",
       buildExpectedSources(input.portalUrl)
     ));
+  } else if (queryableDatasets.length === 0) {
+    const reasons: string[] = [];
+    if (validationStats.restricted > 0) reasons.push("restricted access");
+    if (validationStats.nonTabular > 0) reasons.push("non-tabular datasets");
+    if (validationStats.metadata > 0) reasons.push("metadata unavailable");
+    const reasonText = reasons.length > 0
+      ? `Only ${reasons.join(" / ")} datasets were found.`
+      : "No queryable datasets available after validation.";
+    dataGaps.push(buildDataGap(
+      "No queryable parcel datasets available from portal.",
+      reasonText,
+      validationStats.restricted > 0 ? "restricted" : "unavailable",
+      buildExpectedSources(input.portalUrl)
+    ));
   }
 
   const assessorLookup = async () => {
     const candidates: ParcelCandidate[] = [];
-    for (const dataset of usableDatasets) {
+    for (const dataset of queryableDatasets) {
       if (!dataset.datasetId) continue;
       const result = await provider.queryByText({
         datasetId: dataset.datasetId,
@@ -203,7 +337,7 @@ export const resolveParcelFromOpenDataPortal = async (input: {
 
   const gisParcelLayer = async (params: { point: GeoPoint }) => {
     const features: ParcelGeometryFeature[] = [];
-    for (const dataset of usableDatasets) {
+    for (const dataset of queryableDatasets) {
       if (!dataset.datasetId) continue;
       const result = await provider.queryByGeometry({
         datasetId: dataset.datasetId,
@@ -253,7 +387,7 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     }
   );
 
-  const datasetForCitations = usableDatasets[0];
+  const datasetForCitations = queryableDatasets[0];
   const sources = datasetForCitations
     ? buildCitationSources(input.portalUrl, datasetForCitations.datasetId, datasetForCitations.title, datasetForCitations.lastUpdated)
     : [];
@@ -262,7 +396,7 @@ export const resolveParcelFromOpenDataPortal = async (input: {
   return {
     ...result,
     dataGaps: [...result.dataGaps, ...dataGaps],
-    datasetsUsed: usableDatasets,
+    datasetsUsed: queryableDatasets,
     sources,
     claims
   };
