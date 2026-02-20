@@ -295,7 +295,7 @@ export const extractResearchMethods = async (
     Use the context to avoid duplicating existing tactic templates and to cover blueprint fields.
     Before composing any Socrata discovery or SODA request, consult the RAG reference above.
     If you propose Socrata discovery or SODA requests, you MUST cite the exact parameter rules and endpoint format from the RAG reference above.
-    Include a field `ragEvidence` on any Socrata-related method with the chunk ids you used (e.g., ["section-purpose-1"]).
+    Include a field "ragEvidence" on any Socrata-related method with the chunk ids you used (e.g., ["section-purpose-1"]).
     If the RAG reference is "none", do NOT propose Socrata discovery or SODA requests.
     ${addressOrderDirective}
     Return JSON.
