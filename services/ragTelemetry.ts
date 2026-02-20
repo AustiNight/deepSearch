@@ -42,7 +42,7 @@ export const recordRagUsageById = (input: {
     id: buildId(),
     query: input.query,
     chunkIds: input.chunkIds,
-    docIds: input.docIds && input.docIds.length > 0 ? input.docIds : input.chunkIds.map(() => \"unknown\"),
+    docIds: input.docIds && input.docIds.length > 0 ? input.docIds : input.chunkIds.map(() => "unknown"),
     context: input.context,
     usedAt: Date.now()
   };

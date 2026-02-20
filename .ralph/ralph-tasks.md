@@ -51,7 +51,7 @@
 
 - [x] Epic: Same-Origin + Telemetry Safeguards
   - [x] Add runtime/assert or lint rule that fails on any non-`/api/*` fetch in frontend code, including RAG endpoints
-  - [ ] Add tests that verify same-origin enforcement for client API calls and RAG endpoints
+  - [x] Add tests that verify same-origin enforcement for client API calls and RAG endpoints
   - [ ] Add Worker-side outbound allowlist that blocks external fetches beyond approved public APIs (or none) and logs violations safely
   - [ ] Add telemetry/logging redaction guard that blocks or strips keys, addresses, and token-like query fragments from any payloads
   - [ ] Add shared redaction utility used by both frontend and Worker logging/telemetry paths

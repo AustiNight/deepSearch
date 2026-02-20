@@ -21,7 +21,7 @@
     "test:failure-modes": "node --loader ./scripts/ts-loader.mjs scripts/failure-modes.test.mjs",
     "test:open-data": "node --loader ./scripts/ts-loader.mjs scripts/open-data-providers.test.mjs",
     "test:storage-policy": "node --loader ./scripts/ts-loader.mjs scripts/storage-policy.test.mjs",
-    "test:same-origin": "node scripts/same-origin-fetch.test.mjs && node --loader ./scripts/ts-loader.mjs scripts/same-origin-runtime.test.mjs",
+    "test:same-origin": "node scripts/same-origin-fetch.test.mjs && node --loader ./scripts/ts-loader.mjs scripts/same-origin-client.test.mjs && node --loader ./scripts/ts-loader.mjs scripts/same-origin-runtime.test.mjs",
     "test:redaction": "node --loader ./scripts/ts-loader.mjs scripts/telemetry-redaction.test.mjs",
     "test:rag": "node --loader ./scripts/ts-loader.mjs scripts/rag-index.test.mjs && node --loader ./scripts/ts-loader.mjs scripts/rag-planner.test.mjs",
     "test:routing": "node scripts/routing-parity.test.mjs",
