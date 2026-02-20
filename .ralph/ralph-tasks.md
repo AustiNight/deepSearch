@@ -47,7 +47,7 @@
   - [x] Ensure storage policy enforces same-origin API + no secret exfiltration (keys never leave client, no KV writes)
   - [x] Add tests for storage policy enforcement (keys default to sessionStorage, caches respect TTL, and disallowed writes are blocked)
   - [x] Define test strategy for storage policy (unit vs integration, storage mocks, and Worker constraints)
-  - [ ] Acceptance: all storage reads/writes route through the policy module; keys are never persisted server-side; defaults align to zero-cost guardrails
+  - [x] Acceptance: all storage reads/writes route through the policy module; keys are never persisted server-side; defaults align to zero-cost guardrails
 
 - [x] Epic: Same-Origin + Telemetry Safeguards
   - [ ] Add runtime/assert or lint rule that fails on any non-`/api/*` fetch in frontend code, including RAG endpoints
