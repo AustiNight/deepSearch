@@ -319,6 +319,23 @@ const isMethodologySectionTitle = (title: string) => {
   return false;
 };
 
+const isVerifiedSource = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+};
+
+const getVerifiedSources = (sources: unknown) => {
+  if (!Array.isArray(sources)) return [];
+  return sources.filter(isVerifiedSource);
+};
+
 export const ReportView: React.FC<Props> = ({ report }) => {
   const primaryRecordCoverage = report.provenance?.primaryRecordCoverage;
   const compliance = report.provenance?.compliance;
@@ -358,7 +375,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const displaySections = splitSections.displaySections;
   const methodologySections = splitSections.methodologySections;
   const hasPoliceSignals = displaySections.some((section) =>
-    (section.sources || []).some((source) => policeSignalPattern.test(source))
+    getVerifiedSources(section.sources).some((source) => policeSignalPattern.test(source))
   );
   const addressEvidenceChecklist = report.propertyDossier
     ? ADDRESS_EVIDENCE_MINIMUM.map((item) => {
@@ -381,7 +398,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
     : [];
   const hasAddressEvidenceChecklist = addressEvidenceChecklist.length > 0;
   const bibliographySources = Array.from(
-    new Set(displaySections.flatMap((section) => section.sources || []).filter(Boolean))
+    new Set(displaySections.flatMap((section) => getVerifiedSources(section.sources)))
   );
   const hasBibliography = bibliographySources.length > 0;
   const printDate = new Date();
@@ -397,7 +414,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   };
 
   const sectionsWithNoSources = displaySections.filter((section) => {
-    const sources = Array.isArray(section.sources) ? section.sources.filter(Boolean) : [];
+    const sources = getVerifiedSources(section.sources);
     return sources.length === 0 && !isSectionDataGap(section);
   });
   const hasCitationIssues = sectionsWithNoSources.length > 0;
@@ -559,7 +576,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
         <ReportVisualizations visualizations={report.visualizations || []} />
 
         {displaySections.map((section, idx) => {
-          const sectionSources = Array.isArray(section.sources) ? section.sources.filter(Boolean) : [];
+          const sectionSources = getVerifiedSources(section.sources);
           const hasSources = sectionSources.length > 0;
           const isDataGapSection = isSectionDataGap(section);
           const dataGapMessage = extractDataGapMessage(coerceText(section.content, ''));
