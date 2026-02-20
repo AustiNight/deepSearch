@@ -614,12 +614,33 @@ const migrateOptionalKeysToSession = () => {
   local.setItem(OPTIONAL_KEYS_LOCAL_MIGRATION_KEY, "true");
 };
 
+const cleanupLegacyOpenDataKeys = () => {
+  const local = getLocalStorage();
+  const session = getSessionStorage();
+  if (!local && !session) return;
+
+  local?.removeItem(LEGACY_OPEN_DATA_STORAGE_KEY);
+  session?.removeItem(LEGACY_OPEN_DATA_SESSION_KEY);
+  local?.removeItem(LEGACY_OPEN_DATA_PERSIST_KEY);
+
+  const allowLocal = allowOptionalKeysInLocal();
+  const localRecord = local ? safeJsonParse<OptionalKeysRecord>(local.getItem(OPTIONAL_KEYS_STORAGE_KEY)) : null;
+  if (localRecord && (!allowLocal || localRecord.schemaVersion !== OPTIONAL_KEYS_SCHEMA_VERSION)) {
+    local?.removeItem(OPTIONAL_KEYS_STORAGE_KEY);
+  }
+  const sessionRecord = session ? safeJsonParse<OptionalKeysRecord>(session.getItem(OPTIONAL_KEYS_STORAGE_KEY)) : null;
+  if (sessionRecord && sessionRecord.schemaVersion !== OPTIONAL_KEYS_SCHEMA_VERSION) {
+    session?.removeItem(OPTIONAL_KEYS_STORAGE_KEY);
+  }
+};
+
 const ensureOpenDataMigration = (() => {
   let done = false;
   return () => {
     if (done) return;
     migrateLegacyOpenDataConfig();
     migrateOptionalKeysToSession();
+    cleanupLegacyOpenDataKeys();
     done = true;
   };
 })();
