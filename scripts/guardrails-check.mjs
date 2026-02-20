@@ -78,6 +78,27 @@ if (!exists("CNAME")) {
   errors.push("CNAME file missing at repo root (GitHub Pages guardrail).");
 }
 
+if (!exists(".githooks/pre-commit")) {
+  errors.push("Pre-commit hook missing at .githooks/pre-commit.");
+} else {
+  const precommitHook = readText(".githooks/pre-commit");
+  if (!/precommit-secret-scan\.mjs/.test(precommitHook)) {
+    errors.push("Pre-commit hook must run the secret scan script.");
+  }
+}
+
+if (!exists("docs/incident-response.md")) {
+  errors.push("Incident response guide missing at docs/incident-response.md.");
+} else {
+  const incidentResponse = readText("docs/incident-response.md");
+  if (!/History Scrub Procedure/.test(incidentResponse)) {
+    errors.push("Incident response guide must document a history scrub procedure.");
+  }
+  if (!/git filter-repo/.test(incidentResponse)) {
+    errors.push("History scrub procedure must reference git filter-repo usage.");
+  }
+}
+
 const pagesWorkflow = readText(".github/workflows/pages.yml");
 if (!/actions\/deploy-pages/.test(pagesWorkflow) || !/upload-pages-artifact/.test(pagesWorkflow)) {
   errors.push("GitHub Pages workflow must upload and deploy Pages artifacts.");
