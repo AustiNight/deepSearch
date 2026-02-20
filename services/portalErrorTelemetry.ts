@@ -1,5 +1,6 @@
 import type { OpenDataPortalType, PortalErrorCode, PortalErrorMetrics, PortalErrorSample } from '../types';
 import { resolvePortalErrorCode } from '../data/portalErrorTaxonomy';
+import { redactSensitiveText } from './redaction';
 
 export type PortalErrorEvent = {
   code?: PortalErrorCode;
@@ -12,15 +13,6 @@ export type PortalErrorEvent = {
 
 const MAX_SAMPLES = 6;
 const REDACTED_QUERY_VALUE = '[REDACTED]';
-const SENSITIVE_QUERY_KEYS = new Set([
-  'api_key',
-  'apikey',
-  'access_token',
-  'token',
-  'client_secret',
-  'client_id',
-  'key'
-]);
 
 const buildEmptyMetrics = (): PortalErrorMetrics => ({
   total: 0,
@@ -38,29 +30,10 @@ const cloneMetrics = (metrics: PortalErrorMetrics): PortalErrorMetrics => ({
 
 const isoTimestamp = () => new Date().toISOString();
 
-const isSensitiveQueryKey = (key: string) => {
-  const normalized = key.toLowerCase();
-  return SENSITIVE_QUERY_KEYS.has(normalized);
-};
-
 const sanitizeUrl = (raw?: string) => {
   if (!raw) return raw;
-  try {
-    const url = new URL(raw);
-    let updated = false;
-    url.searchParams.forEach((value, key) => {
-      if (isSensitiveQueryKey(key)) {
-        url.searchParams.set(key, REDACTED_QUERY_VALUE);
-        updated = true;
-      }
-    });
-    return updated ? url.toString() : url.toString();
-  } catch (_) {
-    return raw.replace(
-      /([?&](?:api_key|apikey|access_token|token|client_secret|client_id|key)=)([^&\s]+)/gi,
-      `$1${REDACTED_QUERY_VALUE}`
-    );
-  }
+  const sanitized = redactSensitiveText(raw);
+  return sanitized.replace(/\[REDACTED_TOKEN\]/g, REDACTED_QUERY_VALUE);
 };
 
 export const resetPortalErrorMetrics = () => {

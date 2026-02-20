@@ -3,6 +3,7 @@ import path from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const CHECK_DIRS = ["services", "hooks", "components", "data"];
+const ROOT_FILES = ["App.tsx", "index.tsx", "constants.ts", "types.ts"];
 const ALLOWED_FILES = new Set([
   "services/apiClient.ts"
 ]);
@@ -38,6 +39,15 @@ for (const dir of CHECK_DIRS) {
     if (content.includes("fetch(")) {
       violations.push(relative);
     }
+  }
+}
+
+for (const file of ROOT_FILES) {
+  const absolute = path.join(ROOT, file);
+  if (!fs.existsSync(absolute)) continue;
+  const content = readText(absolute);
+  if (content.includes("fetch(")) {
+    violations.push(file);
   }
 }
 

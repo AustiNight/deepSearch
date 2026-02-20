@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { buildAllowlistMetadata, hashEntries, hashValue, stripSettingsForKv } from "./kvPolicy";
+import { installLogRedactionGuard, redactSensitiveValue } from "../services/redaction";
 
 export interface Env {
   OPENAI_API_KEY: string;
@@ -40,6 +41,8 @@ const OPEN_DATA_PROXY_ALLOWED_HEADERS = new Set([
   "accept",
   "x-app-token"
 ]);
+
+installLogRedactionGuard();
 
 const getCorsHeaders = (origin: string | null, env: Env) => {
   const allowed = (env.ALLOWED_ORIGINS || "")
@@ -199,6 +202,57 @@ const isPrivateHostname = (hostname: string) => {
   return false;
 };
 
+type OutboundContext = "open-data" | "openai" | "gemini" | "cloudflare";
+
+const OUTBOUND_ALLOWED_HOSTS: Record<Exclude<OutboundContext, "open-data">, Set<string>> = {
+  openai: new Set(["api.openai.com"]),
+  gemini: new Set(["generativelanguage.googleapis.com"]),
+  cloudflare: new Set(["api.cloudflare.com"])
+};
+
+const isAllowedOutbound = (url: URL, context: OutboundContext) => {
+  if (context === "open-data") {
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    if (isPrivateHostname(url.hostname)) return false;
+    return true;
+  }
+  const allowed = OUTBOUND_ALLOWED_HOSTS[context];
+  if (!allowed || !allowed.has(url.hostname.toLowerCase())) return false;
+  return url.protocol === "https:";
+};
+
+const logOutboundViolation = (detail: { context: OutboundContext; url: string; reason: string }) => {
+  console.warn("Outbound fetch blocked.", redactSensitiveValue(detail));
+};
+
+const assertOutboundAllowed = (url: URL, context: OutboundContext) => {
+  if (isAllowedOutbound(url, context)) return;
+  logOutboundViolation({
+    context,
+    url: url.toString(),
+    reason: context === "open-data" ? "disallowed open-data target" : "host not in allowlist"
+  });
+  throw new Error("Outbound fetch blocked by allowlist.");
+};
+
+const outboundFetch = async (target: string, options: RequestInit, context: OutboundContext) => {
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch (_) {
+    throw new Error("Invalid outbound URL.");
+  }
+  assertOutboundAllowed(url, context);
+  return fetch(url.toString(), options);
+};
+
+const createScopedFetch = (context: OutboundContext) => {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    return outboundFetch(url, init || {}, context);
+  };
+};
+
 const sanitizeProxyHeaders = (raw: unknown) => {
   if (!raw || typeof raw !== "object") return {};
   const headers: Record<string, string> = {};
@@ -317,10 +371,10 @@ const summarizeDomains = (entries: string[], max = 5) => {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const fetchWithRetry = async (url: string, options: RequestInit, attempts = 3) => {
+const fetchWithRetry = async (url: string, options: RequestInit, attempts = 3, context: OutboundContext) => {
   let lastResponse: Response | null = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await fetch(url, options);
+    const response = await outboundFetch(url, options, context);
     lastResponse = response;
     if (!response.ok && (response.status >= 500 || response.status === 429)) {
       if (attempt < attempts - 1) {
@@ -376,7 +430,7 @@ const fetchAccessPolicy = async (env: Env) => {
     "Authorization": `Bearer ${CF_API_TOKEN}`,
   };
 
-  const currentResponse = await fetchWithRetry(url, { method: "GET", headers }, 3);
+  const currentResponse = await fetchWithRetry(url, { method: "GET", headers }, 3, "cloudflare");
   const currentText = await currentResponse.text();
   let currentJson: any;
   try {
@@ -455,7 +509,8 @@ const updateAccessPolicy = async (env: Env, entries: string[]) => {
       headers,
       body: JSON.stringify(payload),
     },
-    3
+    3,
+    "cloudflare"
   );
   const updateText = await updateResponse.text();
   let updateJson: any;
@@ -519,7 +574,7 @@ export default {
       const headers = sanitizeProxyHeaders(data?.headers);
       let upstream: Response;
       try {
-        upstream = await fetch(targetUrl.toString(), { method: "GET", headers });
+        upstream = await outboundFetch(targetUrl.toString(), { method: "GET", headers }, "open-data");
       } catch (_) {
         return json({ error: "Upstream fetch failed." }, 502, corsHeaders);
       }
@@ -829,14 +884,14 @@ export default {
         return json({ error: "OPENAI_API_KEY not configured" }, 500, corsHeaders);
       }
       const body = await request.json();
-      const upstream = await fetch("https://api.openai.com/v1/responses", {
+      const upstream = await outboundFetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
         },
         body: JSON.stringify(body),
-      });
+      }, "openai");
       const text = await upstream.text();
       return new Response(text, {
         status: upstream.status,
@@ -852,7 +907,7 @@ export default {
         return json({ error: "GEMINI_API_KEY not configured" }, 500, corsHeaders);
       }
       const payload = await request.json();
-      const genAI = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+      const genAI = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, fetch: createScopedFetch("gemini") });
       const response = await genAI.models.generateContent(payload);
       const out = {
         text: response.text,

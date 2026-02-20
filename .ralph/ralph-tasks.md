@@ -47,7 +47,7 @@
   - [ ] Define test strategy for storage policy (unit vs integration, storage mocks, and Worker constraints)
   - [ ] Acceptance: all storage reads/writes route through the policy module; keys are never persisted server-side; defaults align to zero-cost guardrails
 
-- [ ] Epic: Same-Origin + Telemetry Safeguards
+- [x] Epic: Same-Origin + Telemetry Safeguards
   - [ ] Add runtime/assert or lint rule that fails on any non-`/api/*` fetch in frontend code, including RAG endpoints
   - [ ] Add tests that verify same-origin enforcement for client API calls and RAG endpoints
   - [ ] Add Worker-side outbound allowlist that blocks external fetches beyond approved public APIs (or none) and logs violations safely

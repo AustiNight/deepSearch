@@ -50,3 +50,9 @@ Status
 
 ## Open Questions
 - None identified for the current implementation.
+
+## Safeguard Test Strategy
+- Lint: `scripts/same-origin-fetch.test.mjs` fails CI on direct `fetch(` usage outside the API client.
+- Unit: `scripts/same-origin-runtime.test.mjs` asserts `/api/*` enforcement for client calls (including `/api/rag/*`).
+- Unit: `scripts/telemetry-redaction.test.mjs` verifies redaction of keys and address-like strings in logs and telemetry.
+- Integration: `tests/system-test.spec.ts` exercises same-origin routing via the normal UI flow.
