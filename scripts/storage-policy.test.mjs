@@ -64,6 +64,26 @@ assert.equal(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
 assert.ok(window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY));
 
 resetStorage();
+writeOptionalKeys(authPayload);
+const sessionRecord = window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY);
+assert.ok(sessionRecord);
+window.localStorage.setItem(OPTIONAL_KEYS_STORAGE_KEY, sessionRecord);
+window.sessionStorage.removeItem(OPTIONAL_KEYS_STORAGE_KEY);
+readOptionalKeys();
+assert.equal(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
+
+resetStorage();
+writeOptionalKeys(authPayload);
+const seedRecord = window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY);
+assert.ok(seedRecord);
+window.localStorage.setItem(OPTIONAL_KEYS_STORAGE_KEY, seedRecord);
+window.sessionStorage.clear();
+const blockedWithSeed = writeOptionalKeys(authPayload, { persist: true });
+assert.equal(blockedWithSeed.blockedLocal, true);
+assert.equal(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
+assert.ok(window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY));
+
+resetStorage();
 setOptionalKeysPersistencePreference(true);
 writeOptionalKeys(authPayload, { persist: true });
 assert.ok(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY));
