@@ -27,7 +27,7 @@
   - [x] Define and implement a map invalidation event contract (settings save, taxonomy fetch completion, blueprint updates)
   - [x] Add tests or assertions for each update trigger to prevent silent drift
   - [x] Add a lightweight integrity check to verify the map includes all known verticals/subtopics and flags missing items
-  - [ ] Acceptance: Transparency Map renders at 80% scale by default and stays current when new verticals/methods/tactics are added without manual edits
+  - [x] Acceptance: Transparency Map renders at 80% scale by default and stays current when new verticals/methods/tactics are added without manual edits
 
 - [x] Epic: Storage Policy Layer + Migration
   - [ ] Define a centralized storage policy module (e.g., `services/storagePolicy.ts`) that governs where each data class may be stored (memory, sessionStorage, localStorage)
