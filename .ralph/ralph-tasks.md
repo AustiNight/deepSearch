@@ -64,7 +64,7 @@
   - [x] Acceptance: all client fetches are same-origin, and telemetry/logs are free of keys, addresses, or tokens
 
 - [x] Epic: Secret Scanning + History Scrub
-  - [ ] Verify CI already runs secret scanning; if missing, add CI secret scan with clear allowlist policy
+  - [x] Verify CI already runs secret scanning; if missing, add CI secret scan with clear allowlist policy
   - [ ] Add pre-commit secret scan hook to block known key patterns and large sensitive blobs
   - [ ] Add a documented history-scrub procedure for accidental secret commits (local-only, no secrets in repo), and wire it into incident response steps
   - [ ] Add tests or CI checks to ensure secret scanning is enforced on PRs
