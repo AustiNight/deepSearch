@@ -328,6 +328,8 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const dataGapRecordTypes = new Set(
     dataGaps.map((gap) => gap.recordType).filter((recordType): recordType is string => Boolean(recordType))
   );
+  const hasGovernanceEconomyGaps =
+    dataGapRecordTypes.has('governance_section') || dataGapRecordTypes.has('economy_section');
   const coverageEntries = primaryRecordCoverage?.entries || [];
   const hasCoverageStatus = (recordTypes: string[], statuses: string[]) =>
     coverageEntries.some((entry) => recordTypes.includes(entry.recordType) && statuses.includes(entry.status));
@@ -512,7 +514,9 @@ export const ReportView: React.FC<Props> = ({ report }) => {
         <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
           <p className="font-semibold">Data gaps were detected in the report narrative.</p>
           <p className="mt-1 text-amber-200/80">
-            Any section marked as a Data Gap is withheld until parcel/address evidence is available.
+            {hasGovernanceEconomyGaps
+              ? 'Governance/Economy sections are withheld until parcel/address evidence is available.'
+              : 'Any section marked as a Data Gap is withheld until parcel/address evidence is available.'}
           </p>
         </div>
       )}
@@ -600,7 +604,9 @@ export const ReportView: React.FC<Props> = ({ report }) => {
               </div>
             ) : (
               <div className="text-xs text-yellow-500 font-mono print:text-gray-600">
-                No verified sources for this section.
+                {isDataGapSection
+                  ? 'Sources withheld until parcel/address evidence is available.'
+                  : 'No verified sources for this section.'}
               </div>
             )}
           </div>
