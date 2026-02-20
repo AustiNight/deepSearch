@@ -11,6 +11,7 @@
     "vertical-logic:check": "node scripts/vertical-logic-table.mjs --check",
     "transparency:check": "node scripts/transparency-layout-check.mjs",
     "rag:build": "node scripts/build-socrata-rag.mjs",
+    "rag:refresh": "node scripts/build-socrata-rag.mjs",
     "allowlist:smoke": "node scripts/allowlist-smoke.mjs",
     "test:sources": "node scripts/source-normalization.test.mjs",
     "test:settings": "node scripts/settings-serialization.test.mjs",

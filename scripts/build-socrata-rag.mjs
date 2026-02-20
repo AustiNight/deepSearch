@@ -8,6 +8,17 @@ const run = (cmd) => {
   execSync(cmd, { stdio: "inherit" });
 };
 
+const assertLocalFile = (relativePath) => {
+  if (/^https?:\/\//i.test(relativePath)) {
+    throw new Error(`Remote inputs are not allowed: ${relativePath}`);
+  }
+  const fullPath = path.join(ROOT, relativePath);
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Missing required input file: ${relativePath}`);
+  }
+  return fullPath;
+};
+
 const parseJsonl = (text) => {
   return text
     .split(/\r?\n/)
@@ -156,9 +167,15 @@ const buildWorkerBundle = (bundleText) => {
 };
 
 const main = () => {
-  const parseScript = path.join(ROOT, "scripts", "parse_discovery_api.py");
-  run(`python3 ${parseScript} --input docs/Discovery_API.md --out-json docs/Discovery_API.rag.json --out-jsonl docs/Discovery_API.rag.chunks.jsonl --out-endpoints-jsonl docs/Discovery_API.rag.endpoints.jsonl --mode discovery --doc-id socrata_discovery`);
-  run(`python3 ${parseScript} --input docs/Discovery_API_2.txt --out-json docs/Discovery_API_2.rag.json --out-jsonl docs/Discovery_API_2.rag.chunks.jsonl --mode generic --doc-id socrata_soda_api`);
+  const parseScript = assertLocalFile("scripts/parse_discovery_api.py");
+  const discoveryInput = assertLocalFile("docs/Discovery_API.md");
+  const sodaInput = assertLocalFile("docs/Discovery_API_2.txt");
+  run(
+    `python3 ${parseScript} --input ${discoveryInput} --out-json docs/Discovery_API.rag.json --out-jsonl docs/Discovery_API.rag.chunks.jsonl --out-endpoints-jsonl docs/Discovery_API.rag.endpoints.jsonl --mode discovery --doc-id socrata_discovery`
+  );
+  run(
+    `python3 ${parseScript} --input ${sodaInput} --out-json docs/Discovery_API_2.rag.json --out-jsonl docs/Discovery_API_2.rag.chunks.jsonl --mode generic --doc-id socrata_soda_api`
+  );
 
   const bundleText = buildBundle();
   buildIndexManifest();
