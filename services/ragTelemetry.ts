@@ -1,4 +1,5 @@
 import type { RagQueryHit } from "./ragIndex";
+import { redactSensitiveText } from "./redaction";
 
 export type RagUsageRecord = {
   id: string;
@@ -19,12 +20,14 @@ export const recordRagUsage = (input: {
   hits: RagQueryHit[];
   context?: string;
 }): RagUsageRecord => {
+  const sanitizedQuery = redactSensitiveText(input.query);
+  const sanitizedContext = input.context ? redactSensitiveText(input.context) : undefined;
   const record: RagUsageRecord = {
     id: buildId(),
-    query: input.query,
+    query: sanitizedQuery,
     chunkIds: input.hits.map((hit) => hit.id),
     docIds: input.hits.map((hit) => hit.doc_id || "unknown"),
-    context: input.context,
+    context: sanitizedContext,
     usedAt: Date.now()
   };
   usageLog.push(record);
@@ -38,12 +41,14 @@ export const recordRagUsageById = (input: {
   docIds?: string[];
   context?: string;
 }): RagUsageRecord => {
+  const sanitizedQuery = redactSensitiveText(input.query);
+  const sanitizedContext = input.context ? redactSensitiveText(input.context) : undefined;
   const record: RagUsageRecord = {
     id: buildId(),
-    query: input.query,
+    query: sanitizedQuery,
     chunkIds: input.chunkIds,
     docIds: input.docIds && input.docIds.length > 0 ? input.docIds : input.chunkIds.map(() => "unknown"),
-    context: input.context,
+    context: sanitizedContext,
     usedAt: Date.now()
   };
   usageLog.push(record);

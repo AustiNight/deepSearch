@@ -110,7 +110,7 @@
   - [x] Decide RAG index storage strategy (in-memory vs KV cache), set size limits/eviction, and align with zero-cost constraints
   - [x] Add a validation step: if a dataset is non-tabular or requires auth/token, record a `DataGap` and select fallback datasets or skip with explanation
   - [x] Add usage telemetry (local only, no external send) to track which RAG chunks are used and whether they improved discovery success
-  - [ ] Route RAG telemetry through the shared redaction utility and add tests ensuring no address/keys/tokens appear in telemetry
+  - [x] Route RAG telemetry through the shared redaction utility and add tests ensuring no address/keys/tokens appear in telemetry
   - [ ] Add unit tests for RAG ingestion (parsing, indexing, retrieval) and for query planning using the RAG (e.g., `categories`, `domains`, `tags`, `limit`, `order`)
   - [ ] Add a small “Developer Reference” panel (read-only) that can surface the relevant RAG snippet for the current query context without exposing secrets
   - [ ] Ensure Developer Reference panel fetches data via `/api/*` only (no direct file fetches)

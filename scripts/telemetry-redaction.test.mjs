@@ -87,6 +87,39 @@ const metricsText = JSON.stringify(metrics);
 assert.ok(!metricsText.includes("Main St"));
 assert.ok(!metricsText.includes("sk-test-123"));
 
+const ragTelemetry = await import("../services/ragTelemetry.ts");
+const ragRecord = ragTelemetry.recordRagUsage({
+  query: "Find permits near 789 Oak St?api_key=sk-test-123",
+  hits: [
+    {
+      id: "chunk-1",
+      doc_id: "socrata_discovery",
+      text: "Placeholder",
+      score: 1
+    }
+  ],
+  context: "Context for 789 Oak St with ?token=abcd"
+});
+const ragLog = ragTelemetry.getRagUsageLog();
+const ragEntry = ragLog[ragLog.length - 1];
+assert.equal(ragEntry.id, ragRecord.id);
+assert.ok(!ragEntry.query.includes("Oak St"));
+assert.ok(!ragEntry.query.includes("sk-test-123"));
+assert.ok(!ragEntry.context.includes("Oak St"));
+assert.ok(!ragEntry.context.includes("token=abcd"));
+
+const ragRecordById = ragTelemetry.recordRagUsageById({
+  query: "Lookup 123 Main St?token=abcd",
+  chunkIds: ["chunk-2"],
+  context: "Uses key=sk-test-999 for 123 Main St"
+});
+const ragEntryById = ragTelemetry.getRagUsageLog().find((entry) => entry.id === ragRecordById.id);
+assert.ok(ragEntryById);
+assert.ok(!ragEntryById.query.includes("Main St"));
+assert.ok(!ragEntryById.query.includes("token=abcd"));
+assert.ok(!ragEntryById.context.includes("Main St"));
+assert.ok(!ragEntryById.context.includes("sk-test-999"));
+
 const zipPattern = /Dallas\s+TX\s+75202/gi;
 const zipLog = redactSensitiveTextWithPatterns("Investigating Dallas TX 75202 for permits.", [zipPattern]);
 assert.ok(!zipLog.includes("75202"));
