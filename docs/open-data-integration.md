@@ -35,3 +35,8 @@
 ## Budgets + Caching
 - Cache TTLs are tuned to reduce external calls within run-level budgets (`MAX_EXTERNAL_CALLS_PER_RUN` / `RUN_TOTAL_TIME_BUDGET_MS`).
 - Index TTL and portal recrawl cadence are enforced in `services/openDataDiscovery.ts`.
+
+## RAG Index Storage
+- Storage strategy: in-memory only (no KV cache) to preserve zero-cost constraints.
+- Size limits: index caps at 2,500 chunks with a 1.5M total character budget and 8,000 chars per chunk.
+- Eviction behavior: extra chunks are dropped once limits are hit; the index rebuilds on worker restart.

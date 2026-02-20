@@ -107,7 +107,7 @@
   - [x] Add a SODA endpoint constructor helper that uses RAG to choose correct endpoint paths (v2 vs v3), and document zero-cost default behavior (anonymous mode + optional app token)
   - [x] Add an explicit guardrail: forbid external embedding APIs or paid vector DBs; retrieval must remain zero-cost and local
   - [x] Add a build-time or test-time guard that fails on any non-local embedding or vector client dependency
-  - [ ] Decide RAG index storage strategy (in-memory vs KV cache), set size limits/eviction, and align with zero-cost constraints
+  - [x] Decide RAG index storage strategy (in-memory vs KV cache), set size limits/eviction, and align with zero-cost constraints
   - [ ] Add a validation step: if a dataset is non-tabular or requires auth/token, record a `DataGap` and select fallback datasets or skip with explanation
   - [ ] Add usage telemetry (local only, no external send) to track which RAG chunks are used and whether they improved discovery success
   - [ ] Route RAG telemetry through the shared redaction utility and add tests ensuring no address/keys/tokens appear in telemetry

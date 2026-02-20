@@ -27,6 +27,8 @@ export type RagQueryHit = RagChunk & {
 
 export type RagIndexOptions = {
   maxChunks?: number;
+  maxChunkChars?: number;
+  maxTotalChars?: number;
   minTokenLength?: number;
   stopWords?: Set<string>;
   allowEmbeddings?: boolean;
@@ -92,6 +94,15 @@ const DEFAULT_STOP_WORDS = new Set([
 
 const DEFAULT_MIN_TOKEN_LENGTH = 2;
 const DEFAULT_MAX_CHUNKS = 2500;
+const DEFAULT_MAX_CHUNK_CHARS = 8000;
+const DEFAULT_MAX_TOTAL_CHARS = 1_500_000;
+
+export const RAG_INDEX_STORAGE_STRATEGY = "memory";
+export const RAG_INDEX_LIMITS = {
+  maxChunks: DEFAULT_MAX_CHUNKS,
+  maxChunkChars: DEFAULT_MAX_CHUNK_CHARS,
+  maxTotalChars: DEFAULT_MAX_TOTAL_CHARS
+} as const;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -129,6 +140,26 @@ type IndexDoc = {
   termFreq: Map<string, number>;
 };
 
+const normalizeChunks = (chunks: RagChunk[], options: RagIndexOptions) => {
+  const maxChunks = options.maxChunks ?? DEFAULT_MAX_CHUNKS;
+  const maxChunkChars = options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS;
+  const maxTotalChars = options.maxTotalChars ?? DEFAULT_MAX_TOTAL_CHARS;
+  const normalized: RagChunk[] = [];
+  let totalChars = 0;
+
+  for (const chunk of chunks) {
+    if (normalized.length >= maxChunks) break;
+    const text = (chunk.text || "").slice(0, maxChunkChars);
+    if (!text) continue;
+    const nextTotal = totalChars + text.length;
+    if (nextTotal > maxTotalChars) break;
+    normalized.push({ ...chunk, text });
+    totalChars = nextTotal;
+  }
+
+  return normalized;
+};
+
 export class RagIndex {
   private readonly docs: IndexDoc[];
   private readonly docFreq: Map<string, number>;
@@ -138,8 +169,7 @@ export class RagIndex {
   constructor(chunks: RagChunk[], options: RagIndexOptions = {}) {
     assertRagGuardrails({ allowEmbeddings: options.allowEmbeddings });
     this.options = options;
-    const maxChunks = options.maxChunks ?? DEFAULT_MAX_CHUNKS;
-    const trimmed = chunks.slice(0, maxChunks);
+    const trimmed = normalizeChunks(chunks, options);
     const docs: IndexDoc[] = [];
     const docFreq = new Map<string, number>();
     let totalLength = 0;
