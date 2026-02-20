@@ -431,7 +431,12 @@ const fetchSocrataRows = async (portalUrl: string, datasetId: string, params: UR
     params
   });
   const url = sodaPlan.url;
-  return fetchJsonWithRetry<any[]>(url, { headers, retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
+  const response = await fetchJsonWithRetry<any[]>(url, { headers, retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
+  if (sodaPlan.ragUsageId) {
+    const success = response.ok && Array.isArray(response.data) && response.data.length > 0;
+    recordRagOutcome(sodaPlan.ragUsageId, success);
+  }
+  return response;
 };
 
 const filterTabularCandidates = (results: any[]): DallasDatasetCandidate[] => {

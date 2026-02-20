@@ -484,10 +484,12 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       hasAppToken: Boolean(config.auth.socrataAppToken),
       params
     });
+    const ragUsageId = sodaPlan.ragUsageId;
     const url = sodaPlan.url;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
     const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {
+      if (ragUsageId) recordRagOutcome(ragUsageId, false);
       return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
     }
     const records = response.data.map((row: any) => ({
@@ -495,6 +497,7 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       attributes: row,
       geometry: parseSocrataGeometry(row?.location || row?.geom || row?.the_geom)
     }));
+    if (ragUsageId) recordRagOutcome(ragUsageId, records.length > 0);
     return {
       records,
       nextOffset: records.length === limit ? offset + limit : undefined
@@ -532,10 +535,12 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       hasAppToken: Boolean(config.auth.socrataAppToken),
       params
     });
+    const ragUsageId = sodaPlan.ragUsageId;
     const url = sodaPlan.url;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
     const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {
+      if (ragUsageId) recordRagOutcome(ragUsageId, false);
       return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
     }
     const records = response.data.map((row: any) => ({
@@ -543,6 +548,7 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       attributes: row,
       geometry: parseSocrataGeometry(row?.location || row?.geom || row?.the_geom)
     }));
+    if (ragUsageId) recordRagOutcome(ragUsageId, records.length > 0);
     return {
       records,
       nextOffset: records.length === limit ? offset + limit : undefined
