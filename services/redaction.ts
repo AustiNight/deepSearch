@@ -7,14 +7,16 @@ const SENSITIVE_KEYS = new Set([
   "api_key",
   "apikey",
   "access_token",
+  "$$app_token",
+  "app_token",
+  "app-token",
   "token",
   "client_secret",
   "client_id",
   "key",
   "authorization",
   "x-app-token",
-  "app_token",
-  "app-token",
+  "x_app_token",
   "secret"
 ]);
 
@@ -34,10 +36,16 @@ const QUERY_KEYS = new Set([
   "api_key",
   "apikey",
   "access_token",
+  "$$app_token",
+  "app_token",
+  "app-token",
+  "x-app-token",
+  "x_app_token",
   "token",
   "client_secret",
   "client_id",
   "key",
+  "authorization",
   "address",
   "addr",
   "street",
@@ -47,7 +55,8 @@ const QUERY_KEYS = new Set([
 ]);
 
 const ADDRESS_PATTERN = /\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s){0,5}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Circle|Cir|Way|Parkway|Pkwy|Place|Pl|Terrace|Ter|Trail|Trl|Highway|Hwy|Loop|Lp|Plaza|Plz|Square|Sq)\b\.?/gi;
-const QUERY_PARAM_PATTERN = /([?&](?:api_key|apikey|access_token|token|client_secret|client_id|key|address|addr|street|location|query|q)=)([^&\s]+)/gi;
+const QUERY_PARAM_PATTERN =
+  /([?&](?:api_key|apikey|access_token|\\$\\$app_token|app_token|app-token|x-app-token|x_app_token|token|client_secret|client_id|key|authorization|address|addr|street|location|query|q)=)([^&\s]+)/gi;
 const BEARER_PATTERN = /\b(Bearer|Basic)\s+[A-Za-z0-9\-._~+/]+=*\b/gi;
 const OPENAI_KEY_PATTERN = /\bsk-[A-Za-z0-9]{10,}\b/g;
 const GOOGLE_KEY_PATTERN = /\bAIza[0-9A-Za-z\-_]{10,}\b/g;
