@@ -136,9 +136,7 @@ export class RagIndex {
   private readonly options: RagIndexOptions;
 
   constructor(chunks: RagChunk[], options: RagIndexOptions = {}) {
-    if (options.allowEmbeddings) {
-      throw new Error("Embeddings are disabled. Use local BM25/TF-IDF only.");
-    }
+    assertRagGuardrails({ allowEmbeddings: options.allowEmbeddings });
     this.options = options;
     const maxChunks = options.maxChunks ?? DEFAULT_MAX_CHUNKS;
     const trimmed = chunks.slice(0, maxChunks);
@@ -225,3 +223,4 @@ export const buildRagIndexFromJsonl = (jsonl: string, options: RagIndexOptions =
   const chunks = parseJsonl<RagChunk>(jsonl);
   return new RagIndex(chunks, options);
 };
+import { assertRagGuardrails } from "./ragGuardrails";
