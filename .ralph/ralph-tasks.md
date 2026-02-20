@@ -71,7 +71,7 @@
   - [x] Acceptance: secret scanning runs in CI and pre-commit, and a documented history-scrub procedure exists and is validated
 
 - [x] Epic: Address-First Evidence Enforcement (Property Reports)
-  - [ ] Implement a section-level evidence gate that blocks “Governance” and “Economy” sections from using macro-scale sources when address/parcel evidence is missing; instead, render a `DataGap` with specific portal/endpoint pointers
+- [x] Implement a section-level evidence gate that blocks “Governance” and “Economy” sections from using macro-scale sources when address/parcel evidence is missing; instead, render a `DataGap` with specific portal/endpoint pointers
   - [ ] Add an “address evidence minimum” checklist for property reports: CAD/assessor OR tax roll, permits/BOA/case logs, police incident/311 signals if available, zoning/land-use layer, and parcel geometry
   - [ ] Enforce address/parcel-first sourcing order in method discovery: address/parcel datasets → jurisdictional records → neighborhood/tract → city/metro context (context must be labeled as non-local)
   - [ ] Add a report-level “Scale Compatibility” check that downgrades confidence if any section relies on citywide data without a parcel/neighborhood bridge dataset
