@@ -18,6 +18,12 @@ This project centralizes client storage behavior in `services/storagePolicy.ts` 
 - Optional open-data keys are moved from legacy localStorage into sessionStorage on first load.
 - Settings metadata migrates from legacy per-key storage into a versioned record.
 
+**Legacy Keys and Migration Behavior**
+- `overseer_open_data_config` (localStorage): legacy combined open-data config. On migration, split into `overseer_open_data_auth_v1` (sessionStorage, auth only when present) and `overseer_open_data_settings_v2` (localStorage), then remove this key.
+- `overseer_open_data_config_session` (sessionStorage): same as above, then remove this key.
+- `overseer_open_data_persist` (localStorage): legacy boolean persistence flag. Replaced by `overseer_open_data_persist_v2` consent record; remove legacy key without data carryover.
+- `overseer_settings_updated_at`, `overseer_settings_updated_by`, `overseer_settings_version`, `overseer_settings_local_updated_at` (localStorage): legacy settings metadata. Migrated into `overseer_settings_metadata_v1` and legacy keys are removed.
+
 **Downgrade and Cleanup**
 - If downgrading to a build before `storagePolicy.ts`, remove `overseer_open_data_auth_v1` and `overseer_open_data_settings_v2` to avoid stale reads.
 - Legacy keys that can be safely cleared when troubleshooting: `overseer_open_data_config`, `overseer_open_data_config_session`, `overseer_open_data_persist`.
