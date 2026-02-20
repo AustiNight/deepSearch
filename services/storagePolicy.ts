@@ -240,6 +240,9 @@ const readRaw = (tier: StorageTier, key: string) => {
 };
 
 const writeRaw = (tier: StorageTier, key: string, value: string): boolean => {
+  if (tier === "local" && key === OPTIONAL_KEYS_STORAGE_KEY && !allowOptionalKeysInLocal()) {
+    return false;
+  }
   if (tier === "memory") {
     memoryStore.set(key, value);
     return true;
