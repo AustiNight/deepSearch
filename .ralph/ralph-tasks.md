@@ -44,7 +44,7 @@
   - [x] Add tests/asserts that block optional key writes to localStorage unless opt-in is explicitly set
   - [x] Add a settings UI toggle to allow optional key persistence (default-off, warnings + explicit consent, re-consent on schema version bump)
 - [x] Migrate existing storage calls in `App.tsx`, `hooks/useOverseer.ts`, and `services/*` to use the storage policy module
-  - [ ] Ensure storage policy enforces same-origin API + no secret exfiltration (keys never leave client, no KV writes)
+  - [x] Ensure storage policy enforces same-origin API + no secret exfiltration (keys never leave client, no KV writes)
   - [ ] Add tests for storage policy enforcement (keys default to sessionStorage, caches respect TTL, and disallowed writes are blocked)
   - [ ] Define test strategy for storage policy (unit vs integration, storage mocks, and Worker constraints)
   - [ ] Acceptance: all storage reads/writes route through the policy module; keys are never persisted server-side; defaults align to zero-cost guardrails

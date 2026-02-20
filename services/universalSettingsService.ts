@@ -1,5 +1,6 @@
 import type { UniversalSettingsPayload, UniversalSettingsResponse } from '../types';
 import { apiFetch } from "./apiClient";
+import { assertNoSecretExfiltration } from "./storagePolicy";
 
 const parseJson = async (res: Response) => {
   try {
@@ -36,6 +37,7 @@ export const updateUniversalSettings = async (
   expectedUpdatedAt?: string | null,
   expectedVersion?: number | null
 ): Promise<UniversalSettingsUpdateResult> => {
+  assertNoSecretExfiltration(payload, "settings sync");
   const body: Record<string, unknown> = { settings: payload };
   if (expectedUpdatedAt) body.expectedUpdatedAt = expectedUpdatedAt;
   if (typeof expectedVersion === 'number') body.expectedVersion = expectedVersion;

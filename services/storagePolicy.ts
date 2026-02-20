@@ -3,6 +3,7 @@ import {
   OPEN_DATA_GEOCODE_CACHE_TTL_MS,
   OPEN_DATA_INDEX_TTL_DAYS
 } from "../constants";
+import { redactSensitiveValue } from "./redaction";
 import type {
   OpenDataAuthConfig,
   OpenDataFeatureFlags,
@@ -122,6 +123,25 @@ const OPTIONAL_KEYS_PERSIST_SCHEMA_VERSION = 1;
 const OPTIONAL_KEYS_CONSENT_VERSION = 1;
 const OPEN_DATA_SETTINGS_SCHEMA_VERSION = 1;
 export const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
+
+const isSensitivePayload = (payload: unknown) => {
+  if (!payload) return false;
+  try {
+    const redacted = redactSensitiveValue(payload);
+    return JSON.stringify(payload) !== JSON.stringify(redacted);
+  } catch (_) {
+    return true;
+  }
+};
+
+export const assertNoSecretExfiltration = (payload: unknown, context: string) => {
+  if (!payload) return;
+  if (isSensitivePayload(payload)) {
+    throw new Error(
+      `Blocked ${context}: payload contains sensitive fields. Keys must remain client-only and never sync to Worker/KV.`
+    );
+  }
+};
 
 const SETTINGS_METADATA_MIGRATIONS: Array<StorageMigration<SettingsMetadataRecord>> = [
   {
