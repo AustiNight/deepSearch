@@ -31,6 +31,7 @@ const {
   __internalStorageKeys,
   EVIDENCE_RECOVERY_CACHE_TTL_MS,
   GEOCODE_CACHE_MAX_ENTRIES,
+  OPEN_DATA_INDEX_SCHEMA_VERSION,
   readEvidenceRecoveryCache,
   readGeocodeCache,
   readOpenDataIndex,
@@ -96,6 +97,14 @@ assert.equal(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
 assert.equal(window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
 
 resetStorage();
+setOptionalKeysPersistencePreference(true);
+writeOptionalKeys(authPayload, { persist: true });
+assert.ok(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY));
+setOptionalKeysPersistencePreference(false);
+assert.equal(window.localStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
+assert.equal(window.sessionStorage.getItem(OPTIONAL_KEYS_STORAGE_KEY), null);
+
+resetStorage();
 const now = Date.now();
 writeEvidenceRecoveryCache({
   stale: { text: "old", sources: [], timestamp: now - EVIDENCE_RECOVERY_CACHE_TTL_MS - 1000 },
@@ -107,21 +116,33 @@ assert.equal(Boolean(evidenceCache.fresh), true);
 
 resetStorage();
 const geocodePayload = {};
+geocodePayload["expired"] = { value: { point: { lat: 0, lon: 0 } }, expiresAt: now - 1000 };
 for (let i = 0; i < GEOCODE_CACHE_MAX_ENTRIES + 50; i += 1) {
   geocodePayload[`addr-${i}`] = { value: { point: { lat: i, lon: i } }, expiresAt: now + 10000 };
 }
 writeGeocodeCache(geocodePayload);
 const geocodeCache = readGeocodeCache();
+assert.equal(Boolean(geocodeCache.expired), false);
 assert.ok(Object.keys(geocodeCache).length <= GEOCODE_CACHE_MAX_ENTRIES);
 
 resetStorage();
 const oldIso = new Date(Date.now() - 1000 * 60 * 60 * 24 * 365).toISOString();
 writeOpenDataIndex({
-  schemaVersion: 1,
+  schemaVersion: OPEN_DATA_INDEX_SCHEMA_VERSION,
   updatedAt: oldIso,
   datasets: [{ datasetId: "1", portalType: "socrata", portalUrl: "https://example.com", title: "Legacy" }]
 });
 const index = readOpenDataIndex();
 assert.equal(index.datasets.length, 0);
+
+resetStorage();
+const freshIso = new Date().toISOString();
+writeOpenDataIndex({
+  schemaVersion: OPEN_DATA_INDEX_SCHEMA_VERSION,
+  updatedAt: freshIso,
+  datasets: [{ datasetId: "2", portalType: "socrata", portalUrl: "https://example.com", title: "Current" }]
+});
+const freshIndex = readOpenDataIndex();
+assert.equal(freshIndex.datasets.length, 1);
 
 console.log("storage-policy.test.mjs: ok");
