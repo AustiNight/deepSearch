@@ -12,7 +12,7 @@
   - [x] Add a Settings UI section that lists optional keys (Socrata app token, ArcGIS API key, optional geocoding key if supported) with clear “not required” language
   - [x] Explain zero-cost mode defaults and what improves with keys (rate limits, reliability, throughput) without changing core functionality
   - [x] Link to public setup instructions for each optional key and summarize required fields/format
-  - [ ] Add validation messaging that treats missing keys as “OK” and only warns about rate limiting
+  - [x] Add validation messaging that treats missing keys as “OK” and only warns about rate limiting
   - [ ] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
   - [ ] Review UI copy to explicitly disclose keys remain client-only and are never sent to Worker/KV
   - [ ] Gate Settings UI persistence toggle on Storage Policy module wiring (no toggle exposure before policy enforcement)

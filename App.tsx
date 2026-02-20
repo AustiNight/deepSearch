@@ -1062,6 +1062,9 @@ const App: React.FC = () => {
                   Not required. Zero-cost mode uses anonymous public endpoints by default. Adding keys only improves rate limits, reliability, and throughput; core functionality stays the same.
                 </p>
                 <p className="text-[10px] text-gray-500">
+                  Validation: leaving any field blank is OK. Any warning below only reflects potential rate limiting.
+                </p>
+                <p className="text-[10px] text-gray-500">
                   Keys stay client-only in this browser. Never synced to cloud settings, never sent to Worker/KV, and never included in telemetry.
                 </p>
                 <p className="text-[10px] text-gray-500">
@@ -1097,7 +1100,7 @@ const App: React.FC = () => {
                   {socrataToken ? (
                     <p className="text-[10px] text-cyber-green font-mono">Token configured. Higher rate limits enabled.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">OK: running without a token (rate limited).</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: missing token. Anonymous mode stays enabled; requests may be rate limited.</p>
                   )}
                 </div>
                 <div>
@@ -1115,7 +1118,7 @@ const App: React.FC = () => {
                   {arcgisApiKey ? (
                     <p className="text-[10px] text-cyber-green font-mono">Key configured. Higher throughput enabled.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">OK: anonymous mode (rate limited).</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: missing key. Anonymous mode stays enabled; requests may be rate limited.</p>
                   )}
                 </div>
                 <div>
@@ -1133,7 +1136,7 @@ const App: React.FC = () => {
                   {geocodingEmail ? (
                     <p className="text-[10px] text-cyber-green font-mono">Contact email configured.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">OK: keyless geocoding (rate limited).</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: no contact email set. Nominatim still works but may be rate limited.</p>
                   )}
                 </div>
                 <div>
@@ -1151,7 +1154,7 @@ const App: React.FC = () => {
                   {geocodingKey ? (
                     <p className="text-[10px] text-cyber-green font-mono">Key stored locally for supported providers.</p>
                   ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">OK: keyless mode remains active (rate limited).</p>
+                    <p className="text-[10px] text-yellow-500 font-mono">OK: no provider key set. Nominatim remains active; requests may be rate limited.</p>
                   )}
                 </div>
               </div>
