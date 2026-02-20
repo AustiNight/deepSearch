@@ -1431,15 +1431,6 @@ const dedupeParagraphs = (text: string) => {
 
 const DEFAULT_METHOD_AUDIT = "Deep Drill Protocol: 3-Stage Recursive Verification.";
 
-const isReportLike = (value: any): value is FinalReport => {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    typeof value.title === 'string' &&
-    typeof value.summary === 'string' &&
-    Array.isArray(value.sections)
-  );
-};
 
 const buildNarrativeMessage = (phase: string, decision: string, action: string, outcome?: string) => {
   const parts = [phase, `Decision: ${decision}`, `Action: ${action}`];
@@ -3459,11 +3450,9 @@ export const useOverseer = () => {
       // Calculate total unique sources across all agents
       const uniqueSourceCount = allowedSources.length;
 
-      const baseReport = isReportLike(finalReportData)
-        ? finalReportData
-        : finalReportData && typeof finalReportData === 'object' && !(finalReportData as any).__rawText
-          ? coerceReportData(finalReportData, topic)
-          : null;
+      const baseReport = finalReportData && typeof finalReportData === 'object' && !(finalReportData as any).__rawText
+        ? coerceReportData(finalReportData, topic)
+        : null;
 
       let reportFromRaw: FinalReport | null = null;
       if (rawText) {
@@ -3564,7 +3553,9 @@ export const useOverseer = () => {
         }];
       }
 
-      const reportTitle = normalizedReport.title || `Deep Dive: ${topic}`;
+      const reportTitle = typeof normalizedReport.title === 'string' && normalizedReport.title.trim().length > 0
+        ? normalizedReport.title
+        : `Deep Dive: ${topic}`;
       let reportCandidate = {
         title: reportTitle,
         summary,
