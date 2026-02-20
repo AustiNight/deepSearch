@@ -67,7 +67,7 @@
   - [x] Verify CI already runs secret scanning; if missing, add CI secret scan with clear allowlist policy
   - [x] Add pre-commit secret scan hook to block known key patterns and large sensitive blobs
   - [x] Add a documented history-scrub procedure for accidental secret commits (local-only, no secrets in repo), and wire it into incident response steps
-  - [ ] Add tests or CI checks to ensure secret scanning is enforced on PRs
+  - [x] Add tests or CI checks to ensure secret scanning is enforced on PRs
   - [ ] Acceptance: secret scanning runs in CI and pre-commit, and a documented history-scrub procedure exists and is validated
 
 - [x] Epic: Address-First Evidence Enforcement (Property Reports)

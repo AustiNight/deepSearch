@@ -21,6 +21,8 @@ jobs:
           cache: npm
       - name: Install deps
         run: npm ci
+      - name: Guardrails workflow check
+        run: npm run test:guardrails
       - name: Storage policy tests
         run: npm run test:storage-policy
       - name: Same-origin tests
