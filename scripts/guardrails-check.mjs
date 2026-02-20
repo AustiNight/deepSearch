@@ -44,6 +44,36 @@ if (!/Blocked non-API endpoint request/.test(apiClient)) {
   errors.push("API client must block non-/api requests.");
 }
 
+const pkg = JSON.parse(readText("package.json"));
+const depNames = Object.keys({ ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) });
+const bannedDeps = [
+  "@pinecone-database/pinecone",
+  "pinecone",
+  "weaviate",
+  "qdrant",
+  "@qdrant/js-client-rest",
+  "@zilliz/milvus2-sdk-node",
+  "milvus",
+  "chromadb",
+  "lancedb",
+  "voyageai",
+  "cohere-ai",
+  "langchain",
+  "@langchain",
+  "llamaindex",
+  "vectara",
+  "supabase",
+  "redis-om",
+  "elasticsearch",
+  "opensearch"
+];
+const bannedFound = depNames.filter((dep) => (
+  bannedDeps.some((banned) => dep === banned || dep.startsWith(`${banned}/`))
+));
+if (bannedFound.length > 0) {
+  errors.push(`Vector/embedding client dependencies are disallowed: ${bannedFound.join(", ")}`);
+}
+
 if (!exists("CNAME")) {
   errors.push("CNAME file missing at repo root (GitHub Pages guardrail).");
 }

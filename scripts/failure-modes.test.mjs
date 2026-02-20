@@ -40,7 +40,7 @@ recordPortalError({
   status: 429,
   portalType: "socrata",
   portalUrl: "https://data.example.gov",
-  endpoint: "https://data.example.gov/api/search/views"
+  endpoint: "https://api.us.socrata.com/api/catalog/v1?search_context=data.example.gov&q=parcel"
 });
 recordPortalError({
   status: 503,

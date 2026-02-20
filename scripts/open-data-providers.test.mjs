@@ -40,7 +40,7 @@ const runSocrataTests = async () => {
   updateOpenDataConfig({ auth: { socrataAppToken: "token-123" } });
   global.fetch = buildProxyFetch((target, body) => {
     calls.push({ target, body });
-    if (String(target).includes("/api/search/views")) {
+    if (String(target).includes("/api/catalog/v1")) {
       return buildResponse({
         results: [
           { resource: { id: "abcd", name: "Parcel Dataset", updatedAt: "2024-01-01", description: "Parcel data" } }
@@ -71,7 +71,7 @@ const runSocrataTests = async () => {
   assert.equal(result.records.length, 1);
   assert.equal(result.records[0].attributes.parcel_id, "P-123");
 
-  const searchCall = calls.find((call) => call.target.includes("/api/search/views"));
+  const searchCall = calls.find((call) => call.target.includes("/api/catalog/v1"));
   assert.ok(searchCall, "Expected Socrata discovery call.");
   assert.equal(searchCall.body.headers["X-App-Token"], "token-123");
 };

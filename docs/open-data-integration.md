@@ -2,6 +2,7 @@
 
 ## Zero-Cost Mode
 - Default behavior uses public, anonymous endpoints.
+- Socrata SODA defaults to v2 `/resource/{id}.json` unless a token is available and v3 is explicitly requested.
 - Providers that require paid access are skipped and surfaced as `DataGap` entries.
 - Compliance gates block datasets with restrictive licenses/terms or stale updates.
 
@@ -10,7 +11,7 @@
 - ArcGIS API key (`token` query param) is optional and used only when provided.
 
 ## Providers
-- Socrata: discovery via `/api/search/views`, metadata via `/api/views/{id}.json`, data via `/resource/{id}.json`.
+- Socrata: discovery via `https://api.us.socrata.com/api/catalog/v1` with `search_context={domain}` (EU domains use `api.eu.socrata.com`), metadata via `/api/views/{id}.json`, data via `/resource/{id}.json` (v2) or `/api/v3/views/{id}/query.json` (v3).
 - ArcGIS: discovery via `/sharing/rest/search`, item metadata via `/sharing/rest/content/items/{id}`, layer queries via `{layerUrl}/query` with `outSR=4326`.
 - DCAT: catalog ingestion from `data.json`/`catalog.json`, distributions fetched via `accessURL`/`downloadURL`.
 

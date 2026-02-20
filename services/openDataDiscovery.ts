@@ -8,6 +8,8 @@ import {
 import { applyDatasetUsageGates } from "./openDataUsage";
 import { fetchJsonWithRetry } from "./openDataHttp";
 import { OPEN_DATA_INDEX_SCHEMA_VERSION, readOpenDataIndex, writeOpenDataIndex } from "./storagePolicy";
+import { planSocrataDiscoveryQuery } from "./socrataRagPlanner";
+import { recordRagOutcome } from "./ragTelemetry";
 const DEFAULT_LIMIT = Math.min(25, OPEN_DATA_DISCOVERY_MAX_DATASETS);
 
 
@@ -281,8 +283,8 @@ const normalizeDataset = (input: {
 
 const discoverSocrataDatasets = async (portalUrl: string, query: string, limit: number): Promise<OpenDatasetMetadata[]> => {
   const base = normalizePortalUrl(portalUrl);
-  const searchUrl = `${base}/api/search/views?q=${encodeURIComponent(query)}&limit=${limit}`;
-  const response = await safeFetchJson(searchUrl, { portalType: "socrata", portalUrl: base });
+  const plan = planSocrataDiscoveryQuery({ portalUrl: base, query, limit });
+  const response = await safeFetchJson(plan.endpoint, { portalType: "socrata", portalUrl: base });
   if (!response.ok || !response.data) return [];
   const results = Array.isArray(response.data?.results) ? response.data.results : [];
   const datasets: OpenDatasetMetadata[] = [];
@@ -320,6 +322,7 @@ const discoverSocrataDatasets = async (portalUrl: string, query: string, limit: 
     });
     if (dataset) datasets.push(dataset);
   }
+  if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, datasets.length > 0);
   return datasets;
 };
 

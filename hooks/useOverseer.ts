@@ -1748,6 +1748,8 @@ export const useOverseer = () => {
       addLog(agentId, agentName, `Skipped external call (${reason}).`, 'warning');
     };
 
+    let performDeepResearchFn: typeof performDeepResearchOpenAI | typeof performDeepResearchGemini | null = null;
+
     const runDeepResearchWithGuards = async (
       agentId: string,
       agentName: string,
@@ -1762,7 +1764,10 @@ export const useOverseer = () => {
         markAgentSkipped(agentId, agentName, guard.reason, phase, query);
         return { text: '', sources: [], skipped: true, skipReason: guard.reason };
       }
-      const result = await runSafely(performDeepResearch(
+      if (!performDeepResearchFn) {
+        throw new Error('performDeepResearch not initialized');
+      }
+      const result = await runSafely(performDeepResearchFn(
         agentName,
         focus,
         query,
@@ -1920,7 +1925,7 @@ export const useOverseer = () => {
       }
 
       const generateSectorAnalysis = provider === 'openai' ? generateSectorAnalysisOpenAI : generateSectorAnalysisGemini;
-      const performDeepResearch = provider === 'openai' ? performDeepResearchOpenAI : performDeepResearchGemini;
+      performDeepResearchFn = provider === 'openai' ? performDeepResearchOpenAI : performDeepResearchGemini;
       const critiqueAndFindGaps = provider === 'openai' ? critiqueAndFindGapsOpenAI : critiqueAndFindGapsGemini;
       const synthesizeGrandReport = provider === 'openai' ? synthesizeGrandReportOpenAI : synthesizeGrandReportGemini;
       const extractResearchMethods = provider === 'openai' ? extractResearchMethodsOpenAI : extractResearchMethodsGemini;

@@ -14,6 +14,8 @@ import {
 } from "../constants";
 import { fetchJsonWithRetry, fetchTextWithRetry, enforceRateLimit } from "./openDataHttp";
 import { getOpenDataConfig } from "./openDataConfig";
+import { planSocrataDiscoveryQuery, planSocrataSodaEndpoint } from "./socrataRagPlanner";
+import { recordRagOutcome } from "./ragTelemetry";
 import { MAX_LOCAL_SPATIAL_JOIN_FEATURES, pointInGeometry } from "./spatialJoin";
 import type { GeoJsonGeometry } from "./parcelResolution";
 
@@ -296,9 +298,9 @@ export const detectPortalType = (portalUrl: string): OpenDataPortalType => {
 
 export const probePortalType = async (portalUrl: string): Promise<OpenDataPortalType> => {
   const base = normalizePortalUrl(portalUrl);
-  const socrataUrl = `${base}/api/search/views?q=parcel&limit=1`;
-  const socrataProbe = await fetchJsonWithRetry<any>(socrataUrl, { retries: 0 }, { portalType: "unknown", portalUrl: base });
-  if (socrataProbe.ok && socrataProbe.data && Array.isArray(socrataProbe.data?.results)) {
+  const socrataPlan = planSocrataDiscoveryQuery({ portalUrl: base, query: "parcel", limit: 1 });
+  const socrataProbe = await fetchJsonWithRetry<any>(socrataPlan.endpoint, { retries: 0 }, { portalType: "unknown", portalUrl: base });
+  if (socrataProbe.ok && socrataProbe.data && Array.isArray(socrataProbe.data?.results) && socrataProbe.data.results.length > 0) {
     return "socrata";
   }
 
@@ -366,7 +368,8 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
   const socrataRateLimitMs = config.auth.socrataAppToken ? 100 : 500;
 
   const discoverDatasets = async (query: string, limit = OPEN_DATA_DISCOVERY_MAX_DATASETS) => {
-    const searchUrl = `${portalUrl}/api/search/views?q=${encodeURIComponent(query)}&limit=${limit}`;
+    const plan = planSocrataDiscoveryQuery({ portalUrl, query, limit });
+    const searchUrl = plan.endpoint;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
     const response = await fetchJsonWithRetry<any>(searchUrl, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !response.data) return [];
@@ -405,6 +408,7 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       });
       if (dataset) datasets.push(dataset);
     }
+    if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, datasets.length > 0);
     return datasets;
   };
 
@@ -474,7 +478,8 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       "$offset": String(offset)
     });
     if (input.searchText) params.set("$q", input.searchText);
-    const url = `${portalUrl}/resource/${input.datasetId}.json?${params.toString()}`;
+    const sodaPlan = planSocrataSodaEndpoint({ datasetId: input.datasetId, hasAppToken: Boolean(config.auth.socrataAppToken) });
+    const url = `${portalUrl}${sodaPlan.path}?${params.toString()}`;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
     const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {
@@ -516,7 +521,8 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       const wkt = wktFromPolygon(input.geometry);
       params.set("$where", `within_polygon(${geometryField}, '${wkt}')`);
     }
-    const url = `${portalUrl}/resource/${input.datasetId}.json?${params.toString()}`;
+    const sodaPlan = planSocrataSodaEndpoint({ datasetId: input.datasetId, hasAppToken: Boolean(config.auth.socrataAppToken) });
+    const url = `${portalUrl}${sodaPlan.path}?${params.toString()}`;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
     const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {

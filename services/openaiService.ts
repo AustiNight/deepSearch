@@ -23,6 +23,7 @@ import {
   recordEmptySources
 } from "./sourceNormalization";
 import { readLogModelsPreference, writeRawSynthesisDebug } from "./storagePolicy";
+import { fetchSocrataDiscoveryRag, fetchSocrataSodaRag } from "./socrataRagClient";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 import { resolveProxyBaseUrl } from "./proxyBaseUrl";
@@ -255,6 +256,16 @@ export const extractResearchMethods = async (
 ) => {
   ensureOpenAIReady();
   const model = resolveRoleModel('method_discovery', modelOverrides);
+  const formatRagHits = (hits: Array<{ id: string; text: string; doc_id?: string }>) => {
+    if (!hits || hits.length === 0) return "none";
+    return hits
+      .map((hit) => `- [${hit.id}${hit.doc_id ? `|${hit.doc_id}` : ""}] ${hit.text.substring(0, 600)}`)
+      .join("\n");
+  };
+  const [discoveryRag, sodaRag] = await Promise.all([
+    fetchSocrataDiscoveryRag().catch(() => []),
+    fetchSocrataSodaRag().catch(() => [])
+  ]);
   const addressOrderDirective = isAddressLike(topic)
     ? `
     Address-first order required:
@@ -270,11 +281,20 @@ export const extractResearchMethods = async (
     Research Context (taxonomy + blueprint):
     ${contextText || "none"}
 
+    Socrata RAG Reference (use ONLY if you propose Socrata discovery or SODA requests):
+    Discovery API:
+    ${formatRagHits(discoveryRag)}
+
+    SODA API:
+    ${formatRagHits(sodaRag)}
+
     SOURCE TEXT:
     ${sourceText.substring(0, 8000)}
 
     Extract multiple distinct research methods and concrete search queries that would help research the topic.
     Use the context to avoid duplicating existing tactic templates and to cover blueprint fields.
+    If you propose Socrata discovery or SODA requests, you MUST cite the exact parameter rules and endpoint format from the RAG reference above.
+    Include a field `ragEvidence` on any Socrata-related method with the chunk ids you used (e.g., ["section-purpose-1"]).
     ${addressOrderDirective}
     Return JSON.
   `;

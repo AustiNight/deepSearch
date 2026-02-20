@@ -92,7 +92,7 @@
   - [ ] Add a citation-quality check that flags sections with “No verified sources” and prevents them from being labeled “Overseer Verified”
   - [ ] Acceptance: report renders without `[object Object]`, the main narrative is address‑focused, method details are separated, and all sections either carry verified citations or are marked as data gaps
 
-- [ ] Epic: Discovery + SODA RAG Integration for Agent Guidance
+- [x] Epic: Discovery + SODA RAG Integration for Agent Guidance
   - [ ] Register the Socrata RAG artifacts in-repo as first-class references (Discovery API + SODA API): `docs/Discovery_API.rag.json`, `docs/Discovery_API.rag.chunks.jsonl`, `docs/Discovery_API.rag.endpoints.jsonl`, `docs/Discovery_API_2.rag.json`, `docs/Discovery_API_2.rag.chunks.jsonl`, `docs/Socrata.rag.bundle.jsonl`, `docs/Socrata.rag.index.json`
   - [ ] Add a RAG loader/indexer that can read `docs/Socrata.rag.bundle.jsonl` locally (no external vector DB), build a lightweight in-memory index (BM25/TF-IDF by default; embeddings only if pre-existing, local, offline, and free), and expose query APIs to agents via the same-origin API
   - [ ] Add a build/refresh command (script + `package.json` entry) to regenerate RAG artifacts from source docs using `scripts/parse_discovery_api.py`, and ensure it never pulls remote data or requires secrets

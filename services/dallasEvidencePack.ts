@@ -3,6 +3,8 @@ import { fetchJsonWithRetry } from "./openDataHttp";
 import { getOpenDataConfig } from "./openDataConfig";
 import { normalizeAddressVariants } from "./addressNormalization";
 import { addressToGeometry } from "./openDataGeocoding";
+import { planSocrataDiscoveryQuery, planSocrataSodaEndpoint } from "./socrataRagPlanner";
+import { recordRagOutcome } from "./ragTelemetry";
 import {
   readDallasSchemaCache,
   writeDallasSchemaCache,
@@ -327,6 +329,18 @@ const isTabularMeta = (meta: any) => {
   return true;
 };
 
+const requiresAuthMeta = (meta: any) => {
+  if (!meta) return false;
+  const access = String(meta?.accessLevel || meta?.access_level || meta?.access || "").toLowerCase();
+  if (access.includes("private") || access.includes("restricted") || access.includes("non-public")) return true;
+  if (meta?.private === true) return true;
+  const publicationStage = String(meta?.publicationStage || meta?.publication_stage || "").toLowerCase();
+  if (publicationStage && publicationStage !== "published") return true;
+  const approval = String(meta?.approvalStatus || meta?.approval_status || meta?.state || "").toLowerCase();
+  if (approval && approval !== "approved") return true;
+  return false;
+};
+
 const buildDatasetSourcePointer = (portalUrl: string, datasetId?: string, query?: string): SourcePointer[] => {
   if (!datasetId) {
     return [{ label: "Dallas Open Data portal", portalUrl }];
@@ -393,8 +407,13 @@ const summarizeRecords = (datasetLabel: string, datasetId: string, records: Arra
 };
 
 const fetchSocrataSearch = async (portalUrl: string, query: string, limit = 8) => {
-  const url = `${portalUrl}/api/search/views?q=${encodeURIComponent(query)}&limit=${limit}`;
-  return fetchJsonWithRetry<any>(url, { retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
+  const plan = planSocrataDiscoveryQuery({ portalUrl, query, limit });
+  const response = await fetchJsonWithRetry<any>(plan.endpoint, { retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
+  if (plan.ragUsageId) {
+    const results = Array.isArray(response.data?.results) ? response.data.results : [];
+    recordRagOutcome(plan.ragUsageId, results.length > 0);
+  }
+  return response;
 };
 
 const fetchSocrataMetadata = async (portalUrl: string, datasetId: string) => {
@@ -405,7 +424,8 @@ const fetchSocrataMetadata = async (portalUrl: string, datasetId: string) => {
 
 const fetchSocrataRows = async (portalUrl: string, datasetId: string, params: URLSearchParams) => {
   const headers = buildSocrataHeaders();
-  const url = `${portalUrl}/resource/${datasetId}.json?${params.toString()}`;
+  const sodaPlan = planSocrataSodaEndpoint({ datasetId, hasAppToken: Boolean(getOpenDataConfig().auth.socrataAppToken) });
+  const url = `${portalUrl}${sodaPlan.path}?${params.toString()}`;
   return fetchJsonWithRetry<any[]>(url, { headers, retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
 };
 
@@ -680,7 +700,26 @@ export const runDallasEvidencePack = async (input: {
         metaResponse = response;
         continue;
       }
+      if (requiresAuthMeta(response.data)) {
+        dataGaps.push(buildDataGap(
+          `${candidate.title} (${candidate.datasetId}) requires authentication or elevated access on Dallas Open Data.`,
+          "Dataset requires authentication or restricted access.",
+          "restricted",
+          DATASET_CONFIG[kind].recordType,
+          buildDatasetSourcePointer(portalUrl, candidate.datasetId)
+        ));
+        metaResponse = response;
+        continue;
+      }
       if (!isTabularMeta(response.data)) {
+        dataGaps.push(buildDataGap(
+          `${candidate.title} (${candidate.datasetId}) is not a tabular dataset (map or visualization).`,
+          "Dataset is not tabular; cannot query via SODA.",
+          "unavailable",
+          DATASET_CONFIG[kind].recordType,
+          buildDatasetSourcePointer(portalUrl, candidate.datasetId)
+        ));
+        metaResponse = response;
         continue;
       }
       selected = candidate;

@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { buildAllowlistMetadata, hashEntries, hashValue, stripSettingsForKv } from "./kvPolicy";
 import { installLogRedactionGuard, redactSensitiveValue } from "../services/redaction";
+import { querySocrataRag } from "./socrataRagIndex";
 
 export interface Env {
   OPENAI_API_KEY: string;
@@ -33,6 +34,7 @@ const MAX_ALLOWLIST_ENTRIES = 500;
 const MAX_ALLOWLIST_BODY_BYTES = 50_000;
 const MAX_SETTINGS_BODY_BYTES = 50_000;
 const MAX_OPEN_DATA_PROXY_BODY_BYTES = 20_000;
+const MAX_RAG_QUERY_BODY_BYTES = 12_000;
 const SETTINGS_SCHEMA_VERSION = 1;
 const ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion";
 const ACCESS_EMAIL_HEADER = "Cf-Access-Authenticated-User-Email";
@@ -544,6 +546,31 @@ export default {
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
+    if (url.pathname === "/api/rag/query") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405, corsHeaders);
+      }
+      const { data, error } = await readJsonBody(request, MAX_RAG_QUERY_BODY_BYTES);
+      if (error) {
+        return json({ error }, 400, corsHeaders);
+      }
+      const query = typeof data?.query === "string" ? data.query.trim() : "";
+      if (!query) {
+        return json({ error: "Query required." }, 400, corsHeaders);
+      }
+      const topK = clamp(Number(data?.topK ?? 6), 1, 20);
+      const rawFilters = data?.filters && typeof data.filters === "object" ? data.filters as any : {};
+      const toList = (value: any) => Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+      const filters = {
+        docIds: toList(rawFilters.docIds),
+        sourceFiles: toList(rawFilters.sourceFiles),
+        types: toList(rawFilters.types),
+        tags: toList(rawFilters.tags)
+      };
+      const hits = querySocrataRag(query, { topK, filters });
+      return json({ hits }, 200, corsHeaders);
     }
 
     if (url.pathname === "/api/open-data/fetch") {

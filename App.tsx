@@ -11,6 +11,8 @@ import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistServi
 import { fetchUniversalSettings, updateUniversalSettings } from './services/universalSettingsService';
 import { buildUniversalSettingsPayload, normalizeUniversalSettingsPayload } from './services/universalSettingsPayload';
 import { isSystemTestTopic } from './data/verticalLogic';
+import { querySocrataRag } from './services/socrataRagClient';
+import type { RagQueryHit } from './services/ragIndex';
 import {
   clearOpenDataPersistentConfig,
   getOpenDataConfig,
@@ -173,6 +175,10 @@ const App: React.FC = () => {
   const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
   const [draftOpenDataAuth, setDraftOpenDataAuth] = useState<OpenDataAuthConfig>(() => ({ ...getOpenDataConfig().auth }));
   const [openDataPersist, setOpenDataPersist] = useState<boolean>(() => getOpenDataPersistencePreference());
+  const [ragQuery, setRagQuery] = useState('catalog/v1 search_context q limit offset');
+  const [ragHits, setRagHits] = useState<RagQueryHit[]>([]);
+  const [ragStatus, setRagStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [ragError, setRagError] = useState('');
   const [bulkModelValue, setBulkModelValue] = useState('');
   const [accessAllowlist, setAccessAllowlist] = useState<string[]>([]);
   const [draftAllowlistText, setDraftAllowlistText] = useState('');
@@ -210,6 +216,27 @@ const App: React.FC = () => {
       });
     } catch (_) {
       // ignore
+    }
+  };
+
+  const handleRagLookup = async () => {
+    const query = ragQuery.trim();
+    if (!query) {
+      setRagError('Enter a query to search the RAG bundle.');
+      return;
+    }
+    setRagStatus('loading');
+    setRagError('');
+    try {
+      const hits = await querySocrataRag(query, { topK: 4 });
+      setRagHits(hits);
+      if (hits.length === 0) {
+        setRagError('No snippets matched.');
+      }
+      setRagStatus('idle');
+    } catch (_) {
+      setRagStatus('error');
+      setRagError('RAG lookup failed.');
     }
   };
 
@@ -1125,6 +1152,46 @@ const App: React.FC = () => {
                     <p className="text-[10px] text-cyber-green font-mono">Key stored locally for supported providers.</p>
                   ) : (
                     <p className="text-[10px] text-yellow-500 font-mono">OK: keyless mode remains active (rate limited).</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-2">
+                <label className="block text-xs font-mono text-gray-400">DEVELOPER REFERENCE (SOCRATA RAG)</label>
+                <p className="text-[10px] text-gray-500">
+                  Read-only snippets from the local Socrata RAG bundle. No secrets, no external calls.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={ragQuery}
+                    onChange={(e) => setRagQuery(e.target.value)}
+                    placeholder="catalog/v1 search_context q limit offset"
+                    className="flex-1 bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  />
+                  <button
+                    onClick={handleRagLookup}
+                    disabled={ragStatus === 'loading'}
+                    className="px-3 py-2 text-xs font-mono border border-gray-700 rounded text-gray-400 hover:text-white hover:border-gray-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {ragStatus === 'loading' ? 'LOOKING…' : 'LOOKUP'}
+                  </button>
+                </div>
+                {ragError && (
+                  <p className="text-[10px] text-yellow-500 font-mono">{ragError}</p>
+                )}
+                <div className="max-h-48 overflow-y-auto border border-gray-800 rounded p-2 text-[10px] font-mono text-gray-300 space-y-2 bg-black/40">
+                  {ragHits.length === 0 ? (
+                    <span className="text-gray-600">No RAG snippets loaded.</span>
+                  ) : (
+                    ragHits.map((hit) => (
+                      <div key={hit.id} className="space-y-1">
+                        <div className="text-[10px] text-gray-500">
+                          {hit.id} {hit.doc_id ? `· ${hit.doc_id}` : ''}
+                        </div>
+                        <div className="whitespace-pre-wrap">{hit.text}</div>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>
