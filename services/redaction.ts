@@ -100,6 +100,21 @@ export const redactSensitiveText = (input: string) => {
   return output;
 };
 
+const applyRedactionPatterns = (input: string, patterns: RegExp[], replacement: string) => {
+  if (!input || patterns.length === 0) return input;
+  let output = input;
+  patterns.forEach((pattern) => {
+    output = output.replace(pattern, replacement);
+  });
+  return output;
+};
+
+export const redactSensitiveTextWithPatterns = (input: string, patterns: RegExp[] = []) => {
+  if (!input) return input;
+  const baseRedacted = redactSensitiveText(input);
+  return applyRedactionPatterns(baseRedacted, patterns, REDACTED_ADDRESS);
+};
+
 export const redactSensitiveValue = (value: unknown, seen = new WeakSet<object>()): unknown => {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return redactSensitiveText(value);

@@ -54,7 +54,7 @@
   - [x] Add tests that verify same-origin enforcement for client API calls and RAG endpoints
   - [x] Add Worker-side outbound allowlist that blocks external fetches beyond approved public APIs (or none) and logs violations safely
   - [x] Add telemetry/logging redaction guard that blocks or strips keys, addresses, and token-like query fragments from any payloads
-  - [ ] Add shared redaction utility used by both frontend and Worker logging/telemetry paths
+  - [x] Add shared redaction utility used by both frontend and Worker logging/telemetry paths
   - [ ] Add tests that ensure Worker logs and telemetry never contain secrets or address PII
   - [ ] Add tests that ensure telemetry/logging never contains secrets or address PII
   - [ ] Add production routing validation for GitHub Pages → Worker API path mapping (CORS, path routing, and local dev parity)

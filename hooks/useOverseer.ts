@@ -41,6 +41,7 @@ import { getOpenDatasetHints } from '../services/openDataPortalService';
 import { buildUnsupportedJurisdictionGap, classifyAddressScope, AddressScopeClassification } from '../services/addressScope';
 import { getOpenDataConfig } from '../services/openDataConfig';
 import { runDallasEvidencePack, isDallasJurisdiction } from '../services/dallasEvidencePack';
+import { redactSensitiveTextWithPatterns } from '../services/redaction';
 import {
   EVIDENCE_RECOVERY_CACHE_TTL_MS,
   EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES,
@@ -100,9 +101,6 @@ const orderAddressMethodDiscoveryQueries = (queries: string[]) => {
   return uniqueList(scored.map(item => item.query));
 };
 
-const ADDRESS_REDACTION_TOKEN = '[REDACTED_ADDRESS]';
-const SECRET_REDACTION_TOKEN = '[REDACTED_SECRET]';
-
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const buildAddressRedactionPatterns = (topic: string) => {
@@ -118,34 +116,6 @@ const buildAddressRedactionPatterns = (topic: string) => {
       const pattern = parts.length > 0 ? parts.join('\\s+') : escapeRegExp(token);
       return new RegExp(pattern, 'gi');
     });
-};
-
-const redactAddressFromMessage = (message: string, patterns: RegExp[]) => {
-  if (!message || patterns.length === 0) return message;
-  let redacted = message;
-  patterns.forEach((pattern) => {
-    redacted = redacted.replace(pattern, ADDRESS_REDACTION_TOKEN);
-  });
-  return redacted;
-};
-
-const redactSecretsFromMessage = (message: string) => {
-  if (!message) return message;
-  let redacted = message;
-  redacted = redacted.replace(/sk-[A-Za-z0-9-]{10,}/g, SECRET_REDACTION_TOKEN);
-  redacted = redacted.replace(/AIza[0-9A-Za-z-_]{30,}/g, SECRET_REDACTION_TOKEN);
-  redacted = redacted.replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, `$1${SECRET_REDACTION_TOKEN}`);
-  redacted = redacted.replace(
-    /([?&](?:api_key|apikey|access_token|token|client_secret|client_id|key)=)([^&\s]+)/gi,
-    `$1${SECRET_REDACTION_TOKEN}`
-  );
-  return redacted;
-};
-
-const redactSensitiveFromMessage = (message: string, patterns: RegExp[]) => {
-  if (!message) return message;
-  const withAddressRedaction = redactAddressFromMessage(message, patterns);
-  return redactSecretsFromMessage(withAddressRedaction);
 };
 
 const hashString = (value: string) => {
@@ -1545,7 +1515,7 @@ export const useOverseer = () => {
 
     const addLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
       if (!isActive()) return;
-      const safeMessage = redactSensitiveFromMessage(message, addressRedactionPatterns);
+      const safeMessage = redactSensitiveTextWithPatterns(message, addressRedactionPatterns);
       appendLog(agentId, agentName, safeMessage, type);
     };
     const updateAgent = (id: string, updates: Partial<Agent>) => {
@@ -3809,7 +3779,7 @@ export const useOverseer = () => {
       if (signal.aborted || runVersionRef.current !== runVersion || e?.name === 'AbortError') {
         return;
       }
-      const safeErrorMessage = redactSensitiveFromMessage(
+      const safeErrorMessage = redactSensitiveTextWithPatterns(
         typeof e?.message === 'string' ? e.message : String(e),
         addressRedactionPatterns
       );
