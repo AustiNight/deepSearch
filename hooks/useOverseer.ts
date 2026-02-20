@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision, DataGap } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -40,6 +40,7 @@ import { evaluatePrimaryRecordCoverage } from '../services/primaryRecordCoverage
 import { getOpenDatasetHints } from '../services/openDataPortalService';
 import { buildUnsupportedJurisdictionGap, classifyAddressScope, AddressScopeClassification } from '../services/addressScope';
 import { getOpenDataConfig } from '../services/openDataConfig';
+import { runDallasEvidencePack, isDallasJurisdiction } from '../services/dallasEvidencePack';
 import {
   EVIDENCE_RECOVERY_CACHE_TTL_MS,
   EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES,
@@ -1653,6 +1654,7 @@ export const useOverseer = () => {
       loggedExternalCallGuard: false,
       loggedLatencyGuard: false
     };
+    let dallasPackDataGaps: DataGap[] = [];
 
     const registerMethodQuery = (
       query: string,
@@ -2071,6 +2073,7 @@ export const useOverseer = () => {
       const slotValues = buildSlotValues(topic, nameVariants, addressLike);
       const slotValuesAny = slotValues as Record<string, unknown>;
       const addressScope = addressLike ? classifyAddressScope({ topic, slots: slotValuesAny }) : undefined;
+      // re-use derived jurisdiction from earlier slot parsing
       const usOnlyAddressPolicy = getOpenDataConfig().featureFlags.usOnlyAddressPolicy;
       const enforceUsOnlyPolicy = Boolean(addressLike && usOnlyAddressPolicy && addressScope?.scope === 'non_us');
       const unsupportedJurisdictionGap = enforceUsOnlyPolicy && addressScope
@@ -2962,6 +2965,73 @@ export const useOverseer = () => {
         }
       }
 
+      // --- PHASE 3C: DALLAS OPEN DATA PACK (ADDRESS-LIKE) ---
+      if (addressLike && !enforceUsOnlyPolicy && isDallasJurisdiction(jurisdiction)) {
+        const guard = canUseExternalCall('PHASE 3C: DALLAS PACK', topic);
+        if (!guard.allowed) {
+          logOverseer(
+            'PHASE 3C: DALLAS PACK',
+            'performance guardrail',
+            'skip Dallas open data pack',
+            guard.detail,
+            'warning'
+          );
+        } else {
+          logOverseer(
+            'PHASE 3C: DALLAS PACK',
+            'run Dallas open data evidence pack',
+            'query Dallas Open Data (Socrata)',
+            undefined,
+            'action'
+          );
+          const packResult = await runSafely(runDallasEvidencePack({
+            address: topic,
+            jurisdiction
+          }));
+          if (packResult && typeof packResult === 'object') {
+            dallasPackDataGaps = Array.isArray((packResult as any).dataGaps) ? (packResult as any).dataGaps : [];
+            const packSources = Array.isArray((packResult as any).sources) ? (packResult as any).sources : [];
+            const findingsText = typeof (packResult as any).findingsText === 'string' ? (packResult as any).findingsText : '';
+            if (findingsText && packSources.length > 0) {
+              const packFinding: Finding = {
+                source: 'Dallas Open Data Pack',
+                content: findingsText,
+                confidence: 0.9,
+                url: packSources.map((s: any) => s.uri).filter(Boolean).join(', ')
+              };
+              pushFinding({ ...packFinding, rawSources: packSources } as any);
+              const attemptSummary = Array.isArray((packResult as any).queryAttempts)
+                ? (packResult as any).queryAttempts
+                  .slice(0, 4)
+                  .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType}:${entry.matched}`)
+                  .join(' | ')
+                : undefined;
+              logOverseer(
+                'PHASE 3C: DALLAS PACK',
+                'Dallas open data pack complete',
+                `sources ${packSources.length}`,
+                attemptSummary,
+                'success'
+              );
+            } else {
+              const attemptSummary = Array.isArray((packResult as any).queryAttempts)
+                ? (packResult as any).queryAttempts
+                  .slice(0, 4)
+                  .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType}:${entry.matched}`)
+                  .join(' | ')
+                : undefined;
+              logOverseer(
+                'PHASE 3C: DALLAS PACK',
+                'no open data findings',
+                'Dallas open data pack returned no usable records',
+                attemptSummary,
+                'warning'
+              );
+            }
+          }
+        }
+      }
+
       // --- PHASE 3C: EVIDENCE RECOVERY (ADDRESS-LIKE) ---
       let evidenceRecoveryMetrics: EvidenceRecoveryMetrics | undefined;
       if (addressLike && !enforceUsOnlyPolicy) {
@@ -3523,7 +3593,7 @@ export const useOverseer = () => {
           kind: 'unknown'
         };
       });
-      const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike, addressScope);
+      // re-use derived jurisdiction from earlier slot parsing
       const primaryRecordCoverage = addressLike && !enforceUsOnlyPolicy
         ? evaluatePrimaryRecordCoverage(reportSourceDetails, jurisdiction)
         : undefined;
@@ -3621,7 +3691,8 @@ export const useOverseer = () => {
       const citationRegistry = buildCitationRegistry(reportSourceDetails);
       const policyDataGaps = [
         ...(unsupportedJurisdictionGap ? [unsupportedJurisdictionGap] : []),
-        ...addressEvidencePolicy.dataGaps
+        ...addressEvidencePolicy.dataGaps,
+        ...dallasPackDataGaps
       ];
       const propertyDossier = addressLike
         ? buildPropertyDossier({

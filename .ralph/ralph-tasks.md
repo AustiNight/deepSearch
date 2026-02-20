@@ -76,15 +76,15 @@
   - [ ] Add tests with a known address that fail if the report uses only macro sources without parcel-level evidence
   - [ ] Acceptance: for an address input, the report either (a) includes parcel/address evidence for governance/economy sections, or (b) explicitly marks those sections as `DataGap` and excludes macro-only claims from the verdict
 
-- [ ] Epic: Dallas Address Evidence Pack (Socrata + CAD)
-  - [ ] Add a Dallas-specific evidence pack that uses Socrata Discovery + SODA to locate and query “Police Incidents” and tabular “311 Service Requests” datasets using address variants and pre‑2023 date filters
-  - [ ] Implement address variant generation for Socrata queries (e.g., `819 S VAN BUREN AVE`, `819 S VAN BUREN`, `819 VAN BUREN`) and add a fallback to geocoded radius if string match fails
-  - [ ] Add a dataset shape detector that rejects non‑tabular map layers and automatically searches for tabular alternatives via Discovery results
-  - [ ] Add a CAD/assessor lookup path for Dallas (appraisal district / tax assessor) and map parcel IDs into the report as primary governance keys
-  - [ ] Cache dataset schemas and field mappings for Dallas datasets to stabilize queries across schema drift
-  - [ ] Add schema drift handling: if Dallas dataset fields change, return a `DataGap` with dataset IDs and query attempts
-  - [ ] Define PII handling for incident/311 datasets (field allowlist, redaction rules, retention limits, and safe-display policy)
-  - [ ] Acceptance: for the test address, the system can surface at least one address‑tied police incident or 311 record when present, or explicitly mark those datasets as unavailable with the exact dataset IDs and query attempts logged
+- [x] Epic: Dallas Address Evidence Pack (Socrata + CAD)
+  - [x] Add a Dallas-specific evidence pack that uses Socrata Discovery + SODA to locate and query “Police Incidents” and tabular “311 Service Requests” datasets using address variants and pre‑2023 date filters
+  - [x] Implement address variant generation for Socrata queries (e.g., `819 S VAN BUREN AVE`, `819 S VAN BUREN`, `819 VAN BUREN`) and add a fallback to geocoded radius if string match fails
+  - [x] Add a dataset shape detector that rejects non‑tabular map layers and automatically searches for tabular alternatives via Discovery results
+  - [x] Add a CAD/assessor lookup path for Dallas (appraisal district / tax assessor) and map parcel IDs into the report as primary governance keys
+  - [x] Cache dataset schemas and field mappings for Dallas datasets to stabilize queries across schema drift
+  - [x] Add schema drift handling: if Dallas dataset fields change, return a `DataGap` with dataset IDs and query attempts
+  - [x] Define PII handling for incident/311 datasets (field allowlist, redaction rules, retention limits, and safe-display policy)
+  - [x] Acceptance: for the test address, the system can surface at least one address‑tied police incident or 311 record when present, or explicitly mark those datasets as unavailable with the exact dataset IDs and query attempts logged
 
 - [ ] Epic: Report Cleanliness & Validation Output
   - [ ] Separate “Method Audit” into a collapsible methodology section; keep the main report focused on address‑level findings and data gaps

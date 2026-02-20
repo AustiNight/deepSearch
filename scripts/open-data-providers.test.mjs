@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createOpenDataProvider } from "../services/openDataProviders.ts";
 import { getOpenDataConfig, updateOpenDataConfig, resetOpenDataConfig } from "../services/openDataConfig.ts";
 import { resolveParcelFromOpenDataPortal } from "../services/openDataParcelResolution.ts";
+import { buildDallasAddressVariants } from "../services/dallasEvidencePack.ts";
 
 const buildResponse = (body, { status = 200, headers = {} } = {}) => {
   const ok = status >= 200 && status < 300;
@@ -229,9 +230,17 @@ const runZeroCostGuardTests = () => {
   assert.equal(config.allowPaidAccess, false);
 };
 
+const runDallasVariantTest = () => {
+  const variants = buildDallasAddressVariants("819 S Van Buren Ave, Dallas, TX");
+  assert.ok(variants.includes("819 S VAN BUREN AVE"), "Expected full suffix variant.");
+  assert.ok(variants.includes("819 S VAN BUREN"), "Expected suffix-stripped variant.");
+  assert.ok(variants.includes("819 VAN BUREN"), "Expected direction-stripped variant.");
+};
+
 await runSocrataTests();
 await runArcGisTests();
 await runDcatTests();
 await runSpatialJoinParcelTest();
 await runZeroCostGuardTests();
+runDallasVariantTest();
 resetOpenDataConfig();

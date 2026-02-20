@@ -55,6 +55,18 @@ export type EvidenceRecoveryCacheEntry = {
 
 export type EvidenceRecoveryCacheRecord = Record<string, EvidenceRecoveryCacheEntry>;
 
+export type DallasSchemaCacheEntry = {
+  datasetId: string;
+  portalUrl: string;
+  schemaHash: string;
+  fieldMap: Record<string, string | undefined>;
+  fields: Array<{ name: string; type?: string }>;
+  updatedAt: number;
+  expiresAt: number;
+};
+
+export type DallasSchemaCacheRecord = Record<string, DallasSchemaCacheEntry>;
+
 type StorageWriteResult = {
   storedIn: StorageTier;
   blockedLocal?: boolean;
@@ -74,6 +86,7 @@ export const EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES = 200;
 export const GEOCODE_CACHE_MAX_ENTRIES = 200;
 const OPEN_DATA_INDEX_MAX_ENTRIES = 500;
 const OPEN_DATA_INDEX_MAX_BYTES = 1_500_000;
+const DALLAS_SCHEMA_CACHE_MAX_ENTRIES = 30;
 const RAW_SYNTHESIS_MAX_CHARS = 200000;
 
 const SETTINGS_METADATA_STORAGE_KEY = "overseer_settings_metadata_v1";
@@ -96,6 +109,7 @@ const LEGACY_OPEN_DATA_PERSIST_KEY = "overseer_open_data_persist";
 const OPEN_DATA_INDEX_STORAGE_KEY = "overseer_open_data_index";
 const GEOCODE_CACHE_STORAGE_KEY = "overseer_geocode_cache_v1";
 const EVIDENCE_RECOVERY_CACHE_STORAGE_KEY = "overseer_evidence_recovery_cache_v2";
+const DALLAS_SCHEMA_CACHE_STORAGE_KEY = "overseer_dallas_schema_cache_v1";
 const KNOWLEDGE_BASE_STORAGE_KEY = "overseer_kb";
 const SKILLS_STORAGE_KEY = "overseer_skills";
 const SLO_HISTORY_STORAGE_KEY = "overseer_slo_history";
@@ -626,6 +640,28 @@ export const writeEvidenceRecoveryCache = (cache: EvidenceRecoveryCacheRecord) =
   writeRaw("local", EVIDENCE_RECOVERY_CACHE_STORAGE_KEY, payload);
 };
 
+export const readDallasSchemaCache = (): DallasSchemaCacheRecord => {
+  const raw = readRaw("local", DALLAS_SCHEMA_CACHE_STORAGE_KEY);
+  const parsed = safeJsonParse<DallasSchemaCacheRecord>(raw);
+  if (!parsed || typeof parsed !== "object") return {};
+  const now = Date.now();
+  const entries = Object.entries(parsed)
+    .filter(([_, entry]) => entry && typeof entry.expiresAt === "number" && entry.expiresAt > now)
+    .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
+    .slice(0, DALLAS_SCHEMA_CACHE_MAX_ENTRIES);
+  return Object.fromEntries(entries);
+};
+
+export const writeDallasSchemaCache = (cache: DallasSchemaCacheRecord) => {
+  const now = Date.now();
+  const entries = Object.entries(cache)
+    .filter(([_, entry]) => entry && typeof entry.expiresAt === "number" && entry.expiresAt > now)
+    .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
+    .slice(0, DALLAS_SCHEMA_CACHE_MAX_ENTRIES);
+  const payload = JSON.stringify(Object.fromEntries(entries));
+  writeRaw("local", DALLAS_SCHEMA_CACHE_STORAGE_KEY, payload);
+};
+
 export const readKnowledgeBaseRaw = () => safeJsonParse<unknown>(readRaw("local", KNOWLEDGE_BASE_STORAGE_KEY));
 export const writeKnowledgeBaseRaw = (value: unknown) => {
   writeRaw("local", KNOWLEDGE_BASE_STORAGE_KEY, JSON.stringify(value));
@@ -668,5 +704,6 @@ export const __internalStorageKeys = {
   OPTIONAL_KEYS_PERSISTENCE_KEY,
   OPEN_DATA_INDEX_STORAGE_KEY,
   GEOCODE_CACHE_STORAGE_KEY,
-  EVIDENCE_RECOVERY_CACHE_STORAGE_KEY
+  EVIDENCE_RECOVERY_CACHE_STORAGE_KEY,
+  DALLAS_SCHEMA_CACHE_STORAGE_KEY
 };
