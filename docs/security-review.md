@@ -57,6 +57,12 @@ Status
 - Unit: `scripts/telemetry-redaction.test.mjs` verifies redaction of keys and address-like strings in logs and telemetry.
 - Integration: `tests/system-test.spec.ts` exercises same-origin routing via the normal UI flow.
 
+## Routing Validation (No-Approval)
+Use config checks that do not require Access approvals or external credentials.
+
+1. Run `npm run test:routing`. This verifies CNAME/ALLOWED_ORIGINS parity, the `/api/` prefix in the API client, proxy base defaulting to `window.location.origin`, CORS headers in the Worker, and that all Worker routes are scoped to `/api/*`.
+2. Run `npm run test:pages`. This verifies GitHub Pages SPA routing (base path + `public/404.html` redirect).
+
 ## Incident Response
 - Secret scanning policy and pre-commit setup: `docs/secret-scanning.md`.
 - If a secret is committed, follow the local history scrub procedure: `docs/incident-response.md`.
