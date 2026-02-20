@@ -16,7 +16,7 @@
   - [x] Add telemetry-free local UI hints that keys are stored securely and never required for baseline operation
   - [x] Review UI copy to explicitly disclose keys remain client-only and are never sent to Worker/KV
   - [x] Gate Settings UI persistence toggle on Storage Policy module wiring (no toggle exposure before policy enforcement)
-  - [ ] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, keys never leave client storage or sync to Worker/KV, the persistence toggle is default-off and requires explicit consent, and adding keys improves scalability only
+  - [x] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, keys never leave client storage or sync to Worker/KV, the persistence toggle is default-off and requires explicit consent, and adding keys improves scalability only
 
 - [x] Epic: Transparency Map Scaling + Auto-Updates
   - [ ] Set Transparency Map default scale to 80% (CSS transform or layout scaling) without affecting readability or responsiveness
