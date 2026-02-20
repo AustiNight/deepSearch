@@ -97,6 +97,36 @@ const truncateText = (value: string, max: number) => {
   return `${value.slice(0, max - 3)}...`;
 };
 
+const coerceText = (value: unknown, fallback = '') => {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return fallback;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_) {
+    return String(value);
+  }
+};
+
+const normalizeSectionLabel = (value: string) =>
+  value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const isGovernanceSection = (title: string) => {
+  const normalized = normalizeSectionLabel(title);
+  return normalized.includes('governance') || normalized.includes('government') || normalized.includes('policy');
+};
+
+const isEconomySection = (title: string) => {
+  const normalized = normalizeSectionLabel(title);
+  return normalized.includes('economy') || normalized.includes('economic') || normalized.includes('employment');
+};
+
+const extractDataGapMessage = (content: string) => {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  if (!/^data gap:/i.test(trimmed)) return null;
+  return trimmed.replace(/^data gap:\s*/i, '').trim() || null;
+};
+
 const isTableDivider = (line: string) => {
   const trimmed = line.trim();
   if (!trimmed) return false;
@@ -254,6 +284,9 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const hasDatasetCompliance = datasetCompliance.length > 0;
   const dataGaps = report.propertyDossier?.dataGaps || [];
   const hasDataGaps = dataGaps.length > 0;
+  const dataGapRecordTypes = new Set(
+    dataGaps.map((gap) => gap.recordType).filter((recordType): recordType is string => Boolean(recordType))
+  );
   const bibliographySources = Array.from(
     new Set(
       report.sections.flatMap((section) => section.sources || []).filter(Boolean)
@@ -261,6 +294,37 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   );
   const hasBibliography = bibliographySources.length > 0;
   const printDate = new Date();
+  const summaryText = coerceText(report.summary, 'No summary available.');
+  const methodAuditText = coerceText(report.provenance?.methodAudit, 'Method audit unavailable.');
+
+  const isSectionDataGap = (section: FinalReport['sections'][number]) => {
+    const contentText = coerceText(section.content, '');
+    if (extractDataGapMessage(contentText)) return true;
+    if (isGovernanceSection(section.title)) return dataGapRecordTypes.has('governance_section');
+    if (isEconomySection(section.title)) return dataGapRecordTypes.has('economy_section');
+    return false;
+  };
+
+  const sectionsWithNoSources = report.sections.filter((section) => {
+    const sources = Array.isArray(section.sources) ? section.sources.filter(Boolean) : [];
+    return sources.length === 0 && !isSectionDataGap(section);
+  });
+  const hasCitationIssues = sectionsWithNoSources.length > 0;
+  const hasSectionDataGaps = report.sections.some((section) => isSectionDataGap(section));
+  const hasEvidenceGaps = hasSectionDataGaps || hasCitationIssues || hasDataGaps;
+  const isOverseerVerified = isCoverageComplete && !hasEvidenceGaps;
+  const verificationDetail = (() => {
+    if (!isCoverageComplete) {
+      return 'Primary Records Incomplete';
+    }
+    if (hasSectionDataGaps || hasDataGaps) {
+      return 'Data Gaps Present';
+    }
+    if (hasCitationIssues) {
+      return 'Missing Verified Sources';
+    }
+    return hasUnavailable ? 'Coverage Complete (Unavailable Records)' : 'Exhaustive Search Complete';
+  })();
 
   const downloadJson = () => {
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -304,10 +368,10 @@ export const ReportView: React.FC<Props> = ({ report }) => {
       <div className="flex justify-between items-start border-b border-gray-700 pb-6 mb-6 print:border-gray-300">
         <div>
            <h1 className="text-3xl font-bold text-white mb-2">{report.title}</h1>
-           <div className={`flex items-center gap-2 text-sm ${isCoverageComplete ? 'text-cyber-green' : 'text-yellow-400'}`}>
-             {isCoverageComplete ? <ShieldCheck className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+           <div className={`flex items-center gap-2 text-sm ${isOverseerVerified ? 'text-cyber-green' : 'text-yellow-400'}`}>
+             {isOverseerVerified ? <ShieldCheck className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
              <span>
-               Overseer Verified • {isCoverageComplete ? (hasUnavailable ? 'Coverage Complete (Unavailable Records)' : 'Exhaustive Search Complete') : 'Primary Records Incomplete'}
+               {isOverseerVerified ? 'Overseer Verified' : 'Evidence Gaps'} • {verificationDetail}
              </span>
            </div>
         </div>
@@ -351,37 +415,83 @@ export const ReportView: React.FC<Props> = ({ report }) => {
           </p>
         </div>
       )}
+      {hasDataGaps && (
+        <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+          <p className="font-semibold">Data gaps were detected in the report narrative.</p>
+          <p className="mt-1 text-amber-200/80">
+            Any section marked as a Data Gap is withheld until parcel/address evidence is available.
+          </p>
+        </div>
+      )}
+      {hasCitationIssues && (
+        <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+          <p className="font-semibold">Some sections have no verified sources.</p>
+          <p className="mt-1 text-amber-200/80">
+            Those sections are not labeled Overseer Verified until citations are provided.
+          </p>
+        </div>
+      )}
 
       <div className="prose prose-invert max-w-none print:text-black">
         <div className="bg-gray-900/50 p-6 rounded-lg mb-8 border-l-4 border-cyber-blue print:bg-gray-100 print:border-gray-300">
           <h3 className="text-cyber-blue mt-0 print:text-black">Executive Summary</h3>
-          <p className="text-gray-300 leading-relaxed print:text-black">{report.summary}</p>
+          <p className="text-gray-300 leading-relaxed print:text-black">{summaryText}</p>
         </div>
 
         <ReportVisualizations visualizations={report.visualizations || []} />
 
-        {report.sections.map((section, idx) => (
+        {report.sections.map((section, idx) => {
+          const sectionSources = Array.isArray(section.sources) ? section.sources.filter(Boolean) : [];
+          const hasSources = sectionSources.length > 0;
+          const isDataGapSection = isSectionDataGap(section);
+          const dataGapMessage = extractDataGapMessage(coerceText(section.content, ''));
+          const contentText = coerceText(section.content, '');
+          const contentToRender = dataGapMessage ? '' : contentText;
+          return (
           <div key={idx} className="mb-8 print-avoid-break">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-2 mb-4 print:border-gray-300">
               <h2 className="text-xl font-bold text-white print:text-black">
                 {idx + 1}. {section.title}
               </h2>
-              {typeof section.confidence === 'number' && (
-                <span
-                  className={`text-xs px-2 py-1 rounded-full border print:border-gray-300 print:bg-white print:text-gray-700 ${confidenceBadgeClasses(
-                    section.confidence
-                  )}`}
-                >
-                  Confidence: {(section.confidence * 100).toFixed(0)}% ({formatConfidenceLabel(section.confidence)})
-                </span>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {isDataGapSection && (
+                  <span className="text-[11px] uppercase tracking-wide text-amber-200 border border-amber-500/40 bg-amber-500/10 px-2 py-1 rounded-full print:text-gray-700 print:border-gray-300 print:bg-white">
+                    Data Gap
+                  </span>
+                )}
+                {!isDataGapSection && !hasSources && (
+                  <span className="text-[11px] uppercase tracking-wide text-amber-200 border border-amber-500/40 bg-amber-500/10 px-2 py-1 rounded-full print:text-gray-700 print:border-gray-300 print:bg-white">
+                    No Verified Sources
+                  </span>
+                )}
+                {typeof section.confidence === 'number' && (
+                  <span
+                    className={`text-xs px-2 py-1 rounded-full border print:border-gray-300 print:bg-white print:text-gray-700 ${confidenceBadgeClasses(
+                      section.confidence
+                    )}`}
+                  >
+                    Confidence: {(section.confidence * 100).toFixed(0)}% ({formatConfidenceLabel(section.confidence)})
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="mb-4 space-y-4">{renderMarkdownBlocks(section.content)}</div>
-            {section.sources.length > 0 ? (
+            {isDataGapSection && (
+              <div className="mb-4 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100 print:bg-white print:border-gray-300 print:text-gray-700">
+                <p className="font-semibold">Data Gap</p>
+                <p className="mt-1 text-amber-200/80">
+                  {dataGapMessage ||
+                    'Address/parcel evidence is required before macro-scale context can be used. See Data Gaps & Next Steps for source pointers.'}
+                </p>
+              </div>
+            )}
+            {contentToRender && (
+              <div className="mb-4 space-y-4">{renderMarkdownBlocks(contentToRender)}</div>
+            )}
+            {hasSources ? (
               <div className="bg-black/20 p-3 rounded text-xs print:bg-gray-100 print:border print:border-gray-300 print:text-black">
                 <span className="font-bold text-gray-500 block mb-2 print:text-gray-700">SOURCES:</span>
                 <div className="flex flex-wrap gap-2">
-                  {section.sources.map((src, i) => (
+                  {sectionSources.map((src, i) => (
                     <a 
                       key={i} 
                       href={src.startsWith('http') ? src : '#'} 
@@ -401,7 +511,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
               </div>
             )}
           </div>
-        ))}
+        )})}
 
         {hasDataGaps && (
           <div className="mt-10 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
@@ -688,10 +798,19 @@ export const ReportView: React.FC<Props> = ({ report }) => {
           </div>
         )}
 
-        <div className="mt-12 pt-6 border-t border-gray-800 text-xs text-gray-500 font-mono print:border-gray-300 print:text-gray-600">
-          <p>METHOD AUDIT: {report.provenance.methodAudit}</p>
-          <p>TOTAL SOURCES INDEXED: {report.provenance.totalSources}</p>
-        </div>
+        <details className="mt-12 rounded-lg border border-gray-800 bg-black/20 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
+          <summary className="cursor-pointer select-none text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">
+            Methodology & Audit
+          </summary>
+          <div className="mt-3 space-y-2 text-gray-400 print:text-gray-700">
+            <div>
+              Method audit: <span className="text-gray-200 print:text-gray-800">{methodAuditText}</span>
+            </div>
+            <div>
+              Total sources indexed: <span className="text-gray-200 print:text-gray-800">{report.provenance.totalSources}</span>
+            </div>
+          </div>
+        </details>
         <div className="hidden print:block mt-6 pt-4 border-t border-gray-300 text-[10px] text-gray-600">
           <div className="flex items-center justify-between">
             <span>DeepSearch Overseer • PDF Export</span>
