@@ -176,6 +176,7 @@ const PROVIDER_KEY_STORAGE: Record<"google" | "openai", string> = {
 };
 const OPTIONAL_KEYS_STORAGE_KEY = "overseer_open_data_auth_v1";
 const OPTIONAL_KEYS_PERSISTENCE_KEY = "overseer_open_data_persist_v2";
+const OPTIONAL_KEYS_PERSISTENCE_INVALIDATED_KEY = "overseer_open_data_persist_invalidated_v1";
 const OPTIONAL_KEYS_MIGRATION_KEY = "overseer_open_data_auth_migrated_v1";
 const OPTIONAL_KEYS_LOCAL_MIGRATION_KEY = "overseer_open_data_auth_migrated_v2";
 const OPEN_DATA_SETTINGS_STORAGE_KEY = "overseer_open_data_settings_v2";
@@ -397,6 +398,10 @@ const normalizeSettingsMetadata = (input: any): SettingsMetadata => {
   };
 };
 
+const markOptionalKeysPersistenceInvalidated = () => {
+  writeRaw("session", OPTIONAL_KEYS_PERSISTENCE_INVALIDATED_KEY, "true");
+};
+
 const readPersistRecord = (): OptionalKeyPersistRecord | null => {
   const storage = getLocalStorage();
   if (!storage) return null;
@@ -404,6 +409,7 @@ const readPersistRecord = (): OptionalKeyPersistRecord | null => {
   if (!parsed || typeof parsed !== "object") return null;
   if (parsed.schemaVersion !== OPTIONAL_KEYS_PERSIST_SCHEMA_VERSION || parsed.consentVersion !== OPTIONAL_KEYS_CONSENT_VERSION) {
     storage.removeItem(OPTIONAL_KEYS_PERSISTENCE_KEY);
+    markOptionalKeysPersistenceInvalidated();
     return null;
   }
   return parsed;
@@ -445,6 +451,14 @@ export const clearOptionalKeysPersistencePreference = () => {
 };
 
 export const isOptionalKeysPersistenceSupported = (): boolean => Boolean(getLocalStorage());
+
+export const consumeOptionalKeysPersistenceInvalidation = (): boolean => {
+  const value = readRaw("session", OPTIONAL_KEYS_PERSISTENCE_INVALIDATED_KEY) === "true";
+  if (value) {
+    removeRaw("session", OPTIONAL_KEYS_PERSISTENCE_INVALIDATED_KEY);
+  }
+  return value;
+};
 
 const allowOptionalKeysInLocal = () => getOptionalKeysPersistencePreference();
 
@@ -1041,6 +1055,7 @@ export const getStoragePolicySummary = () => ({
 export const __internalStorageKeys = {
   OPTIONAL_KEYS_STORAGE_KEY,
   OPTIONAL_KEYS_PERSISTENCE_KEY,
+  OPTIONAL_KEYS_PERSISTENCE_INVALIDATED_KEY,
   OPEN_DATA_INDEX_STORAGE_KEY,
   GEOCODE_CACHE_STORAGE_KEY,
   EVIDENCE_RECOVERY_CACHE_STORAGE_KEY,

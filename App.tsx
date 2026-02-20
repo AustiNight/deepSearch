@@ -32,6 +32,7 @@ import {
   readSettingsMetadata,
   readSettingsMigrationComplete,
   readUnlocked,
+  consumeOptionalKeysPersistenceInvalidation,
   isOptionalKeysPersistenceSupported,
   updateSettingsMetadata,
   writeAllowlist,
@@ -178,6 +179,7 @@ const App: React.FC = () => {
   const [draftOpenDataAuth, setDraftOpenDataAuth] = useState<OpenDataAuthConfig>(() => ({ ...getOpenDataConfig().auth }));
   const [openDataPersist, setOpenDataPersist] = useState<boolean>(() => getOpenDataPersistencePreference());
   const [optionalKeysPolicyReady] = useState<boolean>(() => isOptionalKeysPersistenceSupported());
+  const [openDataPersistNeedsReconsent, setOpenDataPersistNeedsReconsent] = useState<boolean>(false);
   const [ragQuery, setRagQuery] = useState('catalog/v1 search_context q limit offset');
   const [ragHits, setRagHits] = useState<RagQueryHit[]>([]);
   const [ragStatus, setRagStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -677,6 +679,7 @@ const App: React.FC = () => {
     setDraftModelOverrides(modelOverrides);
     setDraftOpenDataAuth({ ...getOpenDataConfig().auth });
     setOpenDataPersist(getOpenDataPersistencePreference());
+    setOpenDataPersistNeedsReconsent(consumeOptionalKeysPersistenceInvalidation());
     setBulkModelValue('');
     setDraftAllowlistText(accessAllowlist.join('\n'));
     setAllowlistInput('');
@@ -722,11 +725,14 @@ const App: React.FC = () => {
     if (!optionalKeysPolicyReady) return;
     if (next) {
       const confirmed = window.confirm(
-        'Persist optional open-data keys in localStorage across browser restarts? This is optional and stores keys only on this device.'
+        'Persist optional open-data keys in localStorage across browser restarts? This is optional, stores keys only on this device, and should be enabled only on a trusted machine.'
       );
       if (!confirmed) return;
     }
     setOpenDataPersist(next);
+    if (next) {
+      setOpenDataPersistNeedsReconsent(false);
+    }
   };
 
   const socrataToken = (draftOpenDataAuth.socrataAppToken || '').trim();
@@ -1078,8 +1084,16 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-gray-500">
                   Keys stay client-only in this browser. Never synced to cloud settings, never sent to Worker/KV, and never included in telemetry.
                 </p>
+                <p className="text-[10px] text-gray-500">
+                  Warning: enabling persistence writes keys to localStorage on this device. Only enable on trusted machines and shared accounts you control.
+                </p>
                 {optionalKeysPolicyReady ? (
                   <>
+                    {openDataPersistNeedsReconsent && (
+                      <p className="text-[10px] text-yellow-500 font-mono">
+                        Persistence consent was reset after a storage policy update. Re-enable to persist keys again.
+                      </p>
+                    )}
                     <p className="text-[10px] text-gray-500">
                       Default storage is sessionStorage (clears on tab close). Enable persistence to keep keys across browser restarts.
                     </p>
@@ -1093,6 +1107,9 @@ const App: React.FC = () => {
                     </label>
                     <p className="text-[10px] text-gray-500">
                       Requires explicit consent. Turn off to keep keys session-only and clear any persistent copy.
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      If storage policy schema changes, persistence resets and requires re-consent.
                     </p>
                   </>
                 ) : (
