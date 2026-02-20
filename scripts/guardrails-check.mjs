@@ -56,6 +56,8 @@ const bannedDeps = [
   "milvus",
   "chromadb",
   "lancedb",
+  "jina-ai",
+  "@jina-ai/embeddings",
   "voyageai",
   "cohere-ai",
   "langchain",
@@ -72,6 +74,12 @@ const bannedFound = depNames.filter((dep) => (
 ));
 if (bannedFound.length > 0) {
   errors.push(`Vector/embedding client dependencies are disallowed: ${bannedFound.join(", ")}`);
+}
+
+const embeddingKeywordPattern = /(embedding|embeddings|vectorstore|vector-db|vectordb)/i;
+const embeddingKeywordFound = depNames.filter((dep) => embeddingKeywordPattern.test(dep));
+if (embeddingKeywordFound.length > 0) {
+  errors.push(`Embedding/vector client dependencies are disallowed: ${embeddingKeywordFound.join(", ")}`);
 }
 
 if (!exists("CNAME")) {
