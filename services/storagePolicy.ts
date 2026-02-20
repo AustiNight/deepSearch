@@ -13,6 +13,32 @@ import {
 } from "../constants";
 
 type StorageTier = "memory" | "session" | "local";
+export type StorageDataClassId =
+  | "settings_metadata"
+  | "run_config"
+  | "model_overrides"
+  | "allowlist"
+  | "optional_keys"
+  | "open_data_index"
+  | "geocode_cache"
+  | "evidence_recovery_cache"
+  | "knowledge_base"
+  | "slo_history"
+  | "raw_synthesis_debug";
+
+export type StorageDataClassPolicy = {
+  id: StorageDataClassId;
+  description: string;
+  defaultTier: StorageTier;
+  keys?: string[];
+  keyPrefix?: string;
+  cache?: {
+    ttlMs?: number;
+    maxEntries?: number;
+    maxBytes?: number;
+  };
+  notes?: string;
+};
 
 type OptionalKeyPersistRecord = {
   schemaVersion: number;
@@ -285,6 +311,95 @@ export const clearOptionalKeysPersistencePreference = () => {
 export const isOptionalKeysPersistenceSupported = (): boolean => Boolean(getLocalStorage());
 
 const allowOptionalKeysInLocal = () => getOptionalKeysPersistencePreference();
+
+export const STORAGE_DATA_CLASS_POLICIES: Record<StorageDataClassId, StorageDataClassPolicy> = {
+  settings_metadata: {
+    id: "settings_metadata",
+    description: "Settings version/updated metadata and last local sync info.",
+    defaultTier: "local",
+    keys: [SETTINGS_METADATA_STORAGE_KEY],
+    notes: "Non-secret metadata for settings audits."
+  },
+  run_config: {
+    id: "run_config",
+    description: "User run configuration (non-secret preferences).",
+    defaultTier: "local",
+    keys: [RUN_CONFIG_STORAGE_KEY],
+    notes: "May include user selections; avoid storing sensitive run data here."
+  },
+  model_overrides: {
+    id: "model_overrides",
+    description: "Model override config used for synthesis planning.",
+    defaultTier: "local",
+    keys: [MODEL_OVERRIDE_STORAGE_KEY],
+    notes: "Non-secret configuration."
+  },
+  allowlist: {
+    id: "allowlist",
+    description: "Access allowlist data and its updated timestamp.",
+    defaultTier: "local",
+    keys: [ACCESS_ALLOWLIST_STORAGE_KEY, ACCESS_ALLOWLIST_UPDATED_AT_KEY],
+    notes: "Non-secret access policy data."
+  },
+  optional_keys: {
+    id: "optional_keys",
+    description: "Optional open-data API keys (Socrata/ArcGIS/geocoding).",
+    defaultTier: "session",
+    keys: [OPTIONAL_KEYS_STORAGE_KEY, OPTIONAL_KEYS_PERSISTENCE_KEY],
+    notes: "Session-only by default; local storage only when explicit consent is recorded."
+  },
+  open_data_index: {
+    id: "open_data_index",
+    description: "Cached open-data dataset index and discovery metadata.",
+    defaultTier: "local",
+    keys: [OPEN_DATA_INDEX_STORAGE_KEY],
+    cache: {
+      maxEntries: OPEN_DATA_INDEX_MAX_ENTRIES,
+      maxBytes: OPEN_DATA_INDEX_MAX_BYTES
+    },
+    notes: "TTL enforced via OPEN_DATA_INDEX_TTL_DAYS."
+  },
+  geocode_cache: {
+    id: "geocode_cache",
+    description: "Geocoding cache entries keyed by address.",
+    defaultTier: "local",
+    keys: [GEOCODE_CACHE_STORAGE_KEY],
+    cache: {
+      maxEntries: GEOCODE_CACHE_MAX_ENTRIES
+    },
+    notes: "Entries include per-item expiration timestamps."
+  },
+  evidence_recovery_cache: {
+    id: "evidence_recovery_cache",
+    description: "Evidence recovery cache for fallback summarization.",
+    defaultTier: "local",
+    keys: [EVIDENCE_RECOVERY_CACHE_STORAGE_KEY],
+    cache: {
+      ttlMs: EVIDENCE_RECOVERY_CACHE_TTL_MS,
+      maxEntries: EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES
+    },
+    notes: "Time-bounded cache with entry limit."
+  },
+  knowledge_base: {
+    id: "knowledge_base",
+    description: "Local knowledge base data for report generation.",
+    defaultTier: "local",
+    keys: [KNOWLEDGE_BASE_STORAGE_KEY]
+  },
+  slo_history: {
+    id: "slo_history",
+    description: "Client-side SLO history snapshots.",
+    defaultTier: "local",
+    keys: [SLO_HISTORY_STORAGE_KEY]
+  },
+  raw_synthesis_debug: {
+    id: "raw_synthesis_debug",
+    description: "Transient raw synthesis debug payloads.",
+    defaultTier: "memory",
+    keyPrefix: SYNTHESIS_RAW_PREFIX,
+    notes: "Never persisted to session/local storage."
+  }
+};
 
 const migrateLegacyOpenDataConfig = () => {
   const local = getLocalStorage();
