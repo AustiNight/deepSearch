@@ -44,6 +44,12 @@ export type StorageDataClassPolicy = {
   notes?: string;
 };
 
+type StorageMigration<T> = {
+  fromVersion: number;
+  toVersion: number;
+  migrate: (record: any) => T | null;
+};
+
 type OptionalKeyPersistRecord = {
   schemaVersion: number;
   consentVersion: number;
@@ -56,6 +62,11 @@ export type SettingsMetadata = {
   updatedBy: string | null;
   version: number | null;
   localUpdatedAt: string | null;
+};
+
+type SettingsMetadataRecord = {
+  schemaVersion: number;
+  meta: SettingsMetadata;
 };
 
 export type OptionalKeysRecord = {
@@ -112,6 +123,37 @@ const OPTIONAL_KEYS_CONSENT_VERSION = 1;
 const OPEN_DATA_SETTINGS_SCHEMA_VERSION = 1;
 export const OPEN_DATA_INDEX_SCHEMA_VERSION = 1;
 
+const SETTINGS_METADATA_MIGRATIONS: Array<StorageMigration<SettingsMetadataRecord>> = [
+  {
+    fromVersion: 0,
+    toVersion: 1,
+    migrate: (record: any) => {
+      if (!record || typeof record !== "object") return null;
+      if (record.meta && typeof record.meta === "object") {
+        return { schemaVersion: 1, meta: normalizeSettingsMetadata(record.meta) };
+      }
+      return { schemaVersion: 1, meta: normalizeSettingsMetadata(record) };
+    }
+  }
+];
+
+const OPEN_DATA_INDEX_MIGRATIONS: Array<StorageMigration<OpenDatasetIndex>> = [
+  {
+    fromVersion: 0,
+    toVersion: 1,
+    migrate: (record: any) => {
+      if (!record || typeof record !== "object") return null;
+      return {
+        schemaVersion: 1,
+        updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
+        datasets: Array.isArray(record.datasets) ? record.datasets : [],
+        portalCrawls: record.portalCrawls && typeof record.portalCrawls === "object" ? record.portalCrawls : undefined,
+        expiresAt: typeof record.expiresAt === "string" ? record.expiresAt : undefined
+      };
+    }
+  }
+];
+
 export const EVIDENCE_RECOVERY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 export const EVIDENCE_RECOVERY_MAX_CACHE_ENTRIES = 200;
 export const GEOCODE_CACHE_MAX_ENTRIES = 200;
@@ -160,6 +202,15 @@ const isStorageAvailable = (storage?: Storage | null) => {
   } catch (_) {
     return false;
   }
+};
+
+const parseSchemaVersion = (value: unknown): number => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
 };
 
 const getLocalStorage = () => {
@@ -226,6 +277,56 @@ const safeJsonParse = <T>(raw: string | null): T | null => {
   }
 };
 
+const applyMigrations = <T>(
+  record: any,
+  currentVersion: number,
+  targetVersion: number,
+  migrations: Array<StorageMigration<T>>
+): T | null => {
+  if (!record || typeof record !== "object") return null;
+  if (currentVersion === targetVersion) return record as T;
+  const migrationMap = new Map<number, StorageMigration<T>>();
+  for (const migration of migrations) {
+    migrationMap.set(migration.fromVersion, migration);
+  }
+  let working: any = record;
+  let version = currentVersion;
+  while (version < targetVersion) {
+    const migration = migrationMap.get(version);
+    if (!migration) return null;
+    const next = migration.migrate(working);
+    if (!next || typeof next !== "object") return null;
+    version = migration.toVersion;
+    working = { ...next, schemaVersion: version };
+  }
+  if (version !== targetVersion) return null;
+  return working as T;
+};
+
+const loadVersionedRecord = <T>(
+  raw: string | null,
+  currentSchemaVersion: number,
+  migrations: Array<StorageMigration<T>>
+) => {
+  if (!raw) return { record: null, migrated: false, invalid: false };
+  const parsed = safeJsonParse<any>(raw);
+  if (!parsed || typeof parsed !== "object") {
+    return { record: null, migrated: false, invalid: true };
+  }
+  const version = parseSchemaVersion(parsed.schemaVersion);
+  if (version === currentSchemaVersion) {
+    return { record: parsed as T, migrated: false, invalid: false };
+  }
+  if (version > currentSchemaVersion) {
+    return { record: null, migrated: false, invalid: true };
+  }
+  const migrated = applyMigrations(parsed, version, currentSchemaVersion, migrations);
+  if (!migrated) {
+    return { record: null, migrated: false, invalid: true };
+  }
+  return { record: migrated, migrated: true, invalid: false };
+};
+
 const measureBytes = (value: string) => {
   if (typeof TextEncoder !== "undefined") {
     return new TextEncoder().encode(value).length;
@@ -278,6 +379,19 @@ const pickOpenDataSettings = (config?: Partial<OpenDataRuntimeConfig> | null) =>
   allowPaidAccess: config?.allowPaidAccess === true,
   featureFlags: normalizeFeatureFlags(config?.featureFlags)
 });
+
+const normalizeSettingsMetadata = (input: any): SettingsMetadata => {
+  const versionValue = input?.version;
+  const version = typeof versionValue === "number"
+    ? versionValue
+    : (typeof versionValue === "string" && versionValue.trim() ? Number(versionValue) : NaN);
+  return {
+    updatedAt: typeof input?.updatedAt === "string" ? input.updatedAt : null,
+    updatedBy: typeof input?.updatedBy === "string" ? input.updatedBy : null,
+    version: Number.isFinite(version) ? version : null,
+    localUpdatedAt: typeof input?.localUpdatedAt === "string" ? input.localUpdatedAt : null
+  };
+};
 
 const readPersistRecord = (): OptionalKeyPersistRecord | null => {
   const storage = getLocalStorage();
@@ -574,14 +688,28 @@ export const readSettingsMetadata = (): SettingsMetadata => {
   };
   const storage = getLocalStorage();
   if (!storage) return fallback;
-  const record = safeJsonParse<{ schemaVersion: number; meta: SettingsMetadata }>(storage.getItem(SETTINGS_METADATA_STORAGE_KEY));
-  if (record && record.schemaVersion === SETTINGS_METADATA_SCHEMA_VERSION) {
-    return {
-      updatedAt: record.meta.updatedAt ?? null,
-      updatedBy: record.meta.updatedBy ?? null,
-      version: typeof record.meta.version === "number" ? record.meta.version : null,
-      localUpdatedAt: record.meta.localUpdatedAt ?? null
-    };
+
+  const { record, migrated, invalid } = loadVersionedRecord<SettingsMetadataRecord>(
+    storage.getItem(SETTINGS_METADATA_STORAGE_KEY),
+    SETTINGS_METADATA_SCHEMA_VERSION,
+    SETTINGS_METADATA_MIGRATIONS
+  );
+  if (record) {
+    const normalized = normalizeSettingsMetadata(record.meta);
+    if (migrated) {
+      try {
+        storage.setItem(
+          SETTINGS_METADATA_STORAGE_KEY,
+          JSON.stringify({ schemaVersion: SETTINGS_METADATA_SCHEMA_VERSION, meta: normalized })
+        );
+      } catch (_) {
+        // ignore
+      }
+    }
+    return normalized;
+  }
+  if (invalid) {
+    storage.removeItem(SETTINGS_METADATA_STORAGE_KEY);
   }
 
   const updatedAt = storage.getItem(SETTINGS_UPDATED_AT_KEY);
@@ -589,13 +717,13 @@ export const readSettingsMetadata = (): SettingsMetadata => {
   const versionRaw = storage.getItem(SETTINGS_VERSION_KEY);
   const localUpdatedAt = storage.getItem(SETTINGS_LOCAL_UPDATED_AT_KEY);
   const version = versionRaw && Number.isFinite(Number(versionRaw)) ? Number(versionRaw) : null;
-  const migrated: SettingsMetadata = {
+  const migratedLegacy: SettingsMetadata = {
     updatedAt: updatedAt || null,
     updatedBy: updatedBy || null,
     version,
     localUpdatedAt: localUpdatedAt || null
   };
-  const migratedRecord = { schemaVersion: SETTINGS_METADATA_SCHEMA_VERSION, meta: migrated };
+  const migratedRecord = { schemaVersion: SETTINGS_METADATA_SCHEMA_VERSION, meta: migratedLegacy };
   try {
     storage.setItem(SETTINGS_METADATA_STORAGE_KEY, JSON.stringify(migratedRecord));
     storage.removeItem(SETTINGS_UPDATED_AT_KEY);
@@ -605,7 +733,7 @@ export const readSettingsMetadata = (): SettingsMetadata => {
   } catch (_) {
     // ignore
   }
-  return migrated;
+  return migratedLegacy;
 };
 
 export const updateSettingsMetadata = (patch: Partial<SettingsMetadata>): SettingsMetadata => {
@@ -697,20 +825,26 @@ export const readOpenDataIndex = (): OpenDatasetIndex => {
     datasets: []
   };
   const raw = readRaw("local", OPEN_DATA_INDEX_STORAGE_KEY);
-  if (!raw) return fallback;
-  const parsed = safeJsonParse<OpenDatasetIndex>(raw);
-  if (!parsed || parsed.schemaVersion !== OPEN_DATA_INDEX_SCHEMA_VERSION || !Array.isArray(parsed.datasets)) {
-    removeRaw("local", OPEN_DATA_INDEX_STORAGE_KEY);
+  const { record, migrated, invalid } = loadVersionedRecord<OpenDatasetIndex>(
+    raw,
+    OPEN_DATA_INDEX_SCHEMA_VERSION,
+    OPEN_DATA_INDEX_MIGRATIONS
+  );
+  if (!record || !Array.isArray(record.datasets)) {
+    if (invalid) removeRaw("local", OPEN_DATA_INDEX_STORAGE_KEY);
     return fallback;
   }
-  if (parsed.expiresAt) {
-    const expiresMs = Date.parse(parsed.expiresAt);
+  if (migrated) {
+    writeOpenDataIndex(record);
+  }
+  if (record.expiresAt) {
+    const expiresMs = Date.parse(record.expiresAt);
     if (Number.isFinite(expiresMs) && Date.now() > expiresMs) {
       removeRaw("local", OPEN_DATA_INDEX_STORAGE_KEY);
       return fallback;
     }
   }
-  const updatedMs = Date.parse(parsed.updatedAt);
+  const updatedMs = Date.parse(record.updatedAt);
   if (Number.isFinite(updatedMs)) {
     const ageMs = Date.now() - updatedMs;
     if (ageMs > OPEN_DATA_INDEX_TTL_MS) {
@@ -718,7 +852,7 @@ export const readOpenDataIndex = (): OpenDatasetIndex => {
       return fallback;
     }
   }
-  return parsed;
+  return record;
 };
 
 export const writeOpenDataIndex = (index: OpenDatasetIndex) => {
