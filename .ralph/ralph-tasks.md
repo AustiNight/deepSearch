@@ -21,7 +21,7 @@
 - [x] Epic: Transparency Map Scaling + Auto-Updates
   - [x] Set Transparency Map default scale to 80% (CSS transform or layout scaling) without affecting readability or responsiveness
   - [x] Ensure the scaled map maintains legible typography and column alignment across mobile/tablet/desktop breakpoints
-  - [ ] Implement an auto-update mechanism for the Transparency Map that re-renders whenever taxonomy/blueprint/vertical/method/tactic sources change
+  - [x] Implement an auto-update mechanism for the Transparency Map that re-renders whenever taxonomy/blueprint/vertical/method/tactic sources change
   - [ ] Add a single source of truth for Transparency Map data (derived from taxonomy + settings) and recompute on load, settings save, and taxonomy updates
   - [ ] Define update triggers and performance budget (event sources, debounce/throttle rules, max recompute time)
   - [ ] Define and implement a map invalidation event contract (settings save, taxonomy fetch completion, blueprint updates)
