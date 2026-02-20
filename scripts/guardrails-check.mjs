@@ -53,6 +53,14 @@ if (!/actions\/deploy-pages/.test(pagesWorkflow) || !/upload-pages-artifact/.tes
   errors.push("GitHub Pages workflow must upload and deploy Pages artifacts.");
 }
 
+const guardrailsWorkflow = readText(".github/workflows/guardrails.yml");
+if (!/pull_request\s*:/.test(guardrailsWorkflow)) {
+  errors.push("Guardrails workflow must run on pull_request.");
+}
+if (!/test:secrets/.test(guardrailsWorkflow)) {
+  errors.push("Guardrails workflow must run test:secrets.");
+}
+
 if (errors.length > 0) {
   console.error("Guardrail check failed:");
   errors.forEach((error) => console.error(`- ${error}`));

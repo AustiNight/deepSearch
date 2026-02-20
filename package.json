@@ -26,7 +26,8 @@
     "test:secrets": "node scripts/secret-scan.test.mjs",
     "test:kv-policy": "node --loader ./scripts/ts-loader.mjs scripts/kv-policy.test.mjs",
     "test:pages": "node scripts/pages-sanity.test.mjs",
-    "test:transparency-map": "node scripts/transparency-map-updates.test.mjs"
+    "test:transparency-map": "node scripts/transparency-map-updates.test.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs"
   },
   "dependencies": {
     "framer-motion": "^12.34.0",

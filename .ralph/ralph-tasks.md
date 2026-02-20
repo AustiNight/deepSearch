@@ -59,7 +59,7 @@
   - [ ] Define test strategy for same-origin and telemetry safeguards (lint, unit, and integration coverage)
   - [ ] Acceptance: all client fetches are same-origin, and telemetry/logs are free of keys, addresses, or tokens
 
-- [ ] Epic: Secret Scanning + History Scrub
+- [x] Epic: Secret Scanning + History Scrub
   - [ ] Verify CI already runs secret scanning; if missing, add CI secret scan with clear allowlist policy
   - [ ] Add pre-commit secret scan hook to block known key patterns and large sensitive blobs
   - [ ] Add a documented history-scrub procedure for accidental secret commits (local-only, no secrets in repo), and wire it into incident response steps

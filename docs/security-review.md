@@ -56,3 +56,7 @@ Status
 - Unit: `scripts/same-origin-runtime.test.mjs` asserts `/api/*` enforcement for client calls (including `/api/rag/*`).
 - Unit: `scripts/telemetry-redaction.test.mjs` verifies redaction of keys and address-like strings in logs and telemetry.
 - Integration: `tests/system-test.spec.ts` exercises same-origin routing via the normal UI flow.
+
+## Incident Response
+- Secret scanning policy and pre-commit setup: `docs/secret-scanning.md`.
+- If a secret is committed, follow the local history scrub procedure: `docs/incident-response.md`.
