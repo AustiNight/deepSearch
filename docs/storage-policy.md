@@ -50,6 +50,9 @@ This project centralizes client storage behavior in `services/storagePolicy.ts` 
 - Safe to remove when troubleshooting legacy carryover: `overseer_open_data_config`, `overseer_open_data_config_session`, `overseer_open_data_persist`, `overseer_settings_updated_at`, `overseer_settings_updated_by`, `overseer_settings_version`, `overseer_settings_local_updated_at`.
 
 **Test Strategy**
-- Unit-level tests with storage mocks live in `scripts/storage-policy.test.mjs`.
-- These verify optional key persistence rules, cache TTL pruning, and size caps.
-- Integration coverage relies on existing UI/system tests; no Worker storage usage is permitted because Workers lack `localStorage`.
+- Unit tests (`scripts/storage-policy.test.mjs`) run in Node with in-memory storage mocks that emulate `localStorage`/`sessionStorage`. These cover:
+- Optional key persistence rules (session-only by default, localStorage only with explicit consent).
+- Cache TTL pruning, size caps, and schema migration behavior.
+- Guardrails that block disallowed writes and enforce schema version invalidation.
+- Integration coverage stays in the browser/UI layer to confirm settings flows, migrations, and persistence toggles behave end-to-end.
+- Worker constraints: no storage policy code is executed in Workers because Workers lack `localStorage`/`sessionStorage`; Worker tests should assert client-only usage and zero server-side persistence of optional keys.
