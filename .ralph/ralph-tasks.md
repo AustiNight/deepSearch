@@ -19,7 +19,7 @@
   - [x] Acceptance: Settings UI clearly indicates optional keys are not required, the app functions without them, keys never leave client storage or sync to Worker/KV, the persistence toggle is default-off and requires explicit consent, and adding keys improves scalability only
 
 - [x] Epic: Transparency Map Scaling + Auto-Updates
-  - [ ] Set Transparency Map default scale to 80% (CSS transform or layout scaling) without affecting readability or responsiveness
+  - [x] Set Transparency Map default scale to 80% (CSS transform or layout scaling) without affecting readability or responsiveness
   - [ ] Ensure the scaled map maintains legible typography and column alignment across mobile/tablet/desktop breakpoints
   - [ ] Implement an auto-update mechanism for the Transparency Map that re-renders whenever taxonomy/blueprint/vertical/method/tactic sources change
   - [ ] Add a single source of truth for Transparency Map data (derived from taxonomy + settings) and recompute on load, settings save, and taxonomy updates
