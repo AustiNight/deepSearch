@@ -8,6 +8,7 @@ const readText = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath)
 const redaction = await import("../services/redaction.ts");
 const {
   redactSensitiveText,
+  redactSensitiveTextWithPatterns,
   redactSensitiveValue,
   installLogRedactionGuard,
   __redactionInternals
@@ -85,6 +86,21 @@ const metrics = telemetry.getPortalErrorMetrics();
 const metricsText = JSON.stringify(metrics);
 assert.ok(!metricsText.includes("Main St"));
 assert.ok(!metricsText.includes("sk-test-123"));
+
+const zipPattern = /Dallas\s+TX\s+75202/gi;
+const zipLog = redactSensitiveTextWithPatterns("Investigating Dallas TX 75202 for permits.", [zipPattern]);
+assert.ok(!zipLog.includes("75202"));
+assert.ok(zipLog.includes(__redactionInternals.REDACTED_ADDRESS));
+
+const overseerSource = readText("hooks/useOverseer.ts");
+assert.ok(
+  overseerSource.includes("redactSensitiveTextWithPatterns(message, addressRedactionPatterns)"),
+  "Overseer logging must redact messages with address patterns."
+);
+assert.ok(
+  overseerSource.includes("buildAddressRedactionPatterns(topic)"),
+  "Overseer should build address redaction patterns from the topic."
+);
 
 const workerSource = readText("workers/worker.ts");
 assert.ok(workerSource.includes("installLogRedactionGuard"));
