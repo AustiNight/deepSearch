@@ -5,8 +5,7 @@ import { applySectionConfidences, buildCitationRegistry, buildPropertyDossier } 
 import { applyScaleCompatibility, enforceAddressEvidencePolicy } from "../services/addressEvidencePolicy.ts";
 import { evaluatePrimaryRecordCoverage } from "../services/primaryRecordCoverage.ts";
 
-const fixture = {
-  topic: "742 Evergreen Terrace, Springfield, IL 62704",
+const baseMacroFixture = {
   jurisdiction: {
     country: "US",
     state: "IL",
@@ -64,44 +63,28 @@ const fixture = {
   ]
 };
 
-let reportCandidate = coerceReportData(fixture.report, fixture.topic);
-const sourceMap = new Map(fixture.sources.map((source) => [source.uri, source]));
-let reportSources = Array.from(
-  new Set(
-    reportCandidate.sections.flatMap((section) => (Array.isArray(section.sources) ? section.sources : []))
-  )
-);
-let reportSourceDetails = reportSources.map((uri) => {
-  const mapped = sourceMap.get(uri);
-  if (mapped) return mapped;
-  return {
-    uri,
-    title: "",
-    domain: "",
-    provider: "unknown",
-    kind: "unknown"
-  };
-});
+const fixtures = [
+  {
+    label: "fictional address",
+    topic: "742 Evergreen Terrace, Springfield, IL 62704",
+    ...baseMacroFixture
+  },
+  {
+    label: "known address",
+    topic: "123 Main Street, Springfield, IL 62704",
+    ...baseMacroFixture
+  }
+];
 
-const primaryRecordCoverage = evaluatePrimaryRecordCoverage(reportSourceDetails, fixture.jurisdiction);
-const addressEvidencePolicy = enforceAddressEvidencePolicy({
-  sections: reportCandidate.sections,
-  sources: reportSourceDetails,
-  jurisdiction: fixture.jurisdiction,
-  primaryRecordCoverage
-});
-
-if (addressEvidencePolicy.sections !== reportCandidate.sections) {
-  reportCandidate = {
-    ...reportCandidate,
-    sections: addressEvidencePolicy.sections
-  };
-  reportSources = Array.from(
+const runScenario = (fixture, label) => {
+  let reportCandidate = coerceReportData(fixture.report, fixture.topic);
+  const sourceMap = new Map(fixture.sources.map((source) => [source.uri, source]));
+  let reportSources = Array.from(
     new Set(
       reportCandidate.sections.flatMap((section) => (Array.isArray(section.sources) ? section.sources : []))
     )
   );
-  reportSourceDetails = reportSources.map((uri) => {
+  let reportSourceDetails = reportSources.map((uri) => {
     const mapped = sourceMap.get(uri);
     if (mapped) return mapped;
     return {
@@ -112,40 +95,73 @@ if (addressEvidencePolicy.sections !== reportCandidate.sections) {
       kind: "unknown"
     };
   });
-}
 
-const citationRegistry = buildCitationRegistry(reportSourceDetails);
-const propertyDossier = buildPropertyDossier({
-  topic: fixture.topic,
-  addressLike: true,
-  jurisdiction: fixture.jurisdiction,
-  sections: reportCandidate.sections,
-  registry: citationRegistry,
-  primaryRecordCoverage,
-  dataGaps: addressEvidencePolicy.dataGaps
-});
+  const primaryRecordCoverage = evaluatePrimaryRecordCoverage(reportSourceDetails, fixture.jurisdiction);
+  const addressEvidencePolicy = enforceAddressEvidencePolicy({
+    sections: reportCandidate.sections,
+    sources: reportSourceDetails,
+    jurisdiction: fixture.jurisdiction,
+    primaryRecordCoverage
+  });
 
-const baseSections = applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier.dataGaps);
-const scaledSections = applyScaleCompatibility(baseSections, addressEvidencePolicy.scaleCompatibility);
+  if (addressEvidencePolicy.sections !== reportCandidate.sections) {
+    reportCandidate = {
+      ...reportCandidate,
+      sections: addressEvidencePolicy.sections
+    };
+    reportSources = Array.from(
+      new Set(
+        reportCandidate.sections.flatMap((section) => (Array.isArray(section.sources) ? section.sources : []))
+      )
+    );
+    reportSourceDetails = reportSources.map((uri) => {
+      const mapped = sourceMap.get(uri);
+      if (mapped) return mapped;
+      return {
+        uri,
+        title: "",
+        domain: "",
+        provider: "unknown",
+        kind: "unknown"
+      };
+    });
+  }
 
-const governanceSection = scaledSections.find((section) => section.title === "Governance");
-const economySection = scaledSections.find((section) => section.title === "Economy");
-const communityBase = baseSections.find((section) => section.title === "Community Context");
-const communityScaled = scaledSections.find((section) => section.title === "Community Context");
+  const citationRegistry = buildCitationRegistry(reportSourceDetails);
+  const propertyDossier = buildPropertyDossier({
+    topic: fixture.topic,
+    addressLike: true,
+    jurisdiction: fixture.jurisdiction,
+    sections: reportCandidate.sections,
+    registry: citationRegistry,
+    primaryRecordCoverage,
+    dataGaps: addressEvidencePolicy.dataGaps
+  });
 
-assert.ok(governanceSection, "Expected Governance section to exist.");
-assert.ok(economySection, "Expected Economy section to exist.");
-assert.equal(governanceSection.sources.length, 0, "Governance section should be gated and have no sources.");
-assert.equal(economySection.sources.length, 0, "Economy section should be gated and have no sources.");
+  const baseSections = applySectionConfidences(reportCandidate.sections, citationRegistry, propertyDossier.dataGaps);
+  const scaledSections = applyScaleCompatibility(baseSections, addressEvidencePolicy.scaleCompatibility);
 
-const gapRecordTypes = new Set(propertyDossier.dataGaps.map((gap) => gap.recordType));
-assert.ok(gapRecordTypes.has("governance_section"), "Expected governance_section DataGap.");
-assert.ok(gapRecordTypes.has("economy_section"), "Expected economy_section DataGap.");
+  const governanceSection = scaledSections.find((section) => section.title === "Governance");
+  const economySection = scaledSections.find((section) => section.title === "Economy");
+  const communityBase = baseSections.find((section) => section.title === "Community Context");
+  const communityScaled = scaledSections.find((section) => section.title === "Community Context");
 
-assert.ok(communityBase?.confidence && communityScaled?.confidence, "Expected confidence scores for Community Context.");
-assert.ok(
-  (communityScaled?.confidence || 0) < (communityBase?.confidence || 0),
-  "Expected scale compatibility downgrade for macro-only context section."
-);
+  assert.ok(governanceSection, `Expected Governance section to exist (${label}).`);
+  assert.ok(economySection, `Expected Economy section to exist (${label}).`);
+  assert.equal(governanceSection.sources.length, 0, `Governance section should be gated (${label}).`);
+  assert.equal(economySection.sources.length, 0, `Economy section should be gated (${label}).`);
+
+  const gapRecordTypes = new Set(propertyDossier.dataGaps.map((gap) => gap.recordType));
+  assert.ok(gapRecordTypes.has("governance_section"), `Expected governance_section DataGap (${label}).`);
+  assert.ok(gapRecordTypes.has("economy_section"), `Expected economy_section DataGap (${label}).`);
+
+  assert.ok(communityBase?.confidence && communityScaled?.confidence, `Expected confidence scores (${label}).`);
+  assert.ok(
+    (communityScaled?.confidence || 0) < (communityBase?.confidence || 0),
+    `Expected scale compatibility downgrade (${label}).`
+  );
+};
+
+fixtures.forEach((fixture) => runScenario(fixture, fixture.label));
 
 console.log("Address evidence enforcement checks passed.");
