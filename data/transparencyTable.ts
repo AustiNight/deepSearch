@@ -48,6 +48,12 @@ export type TransparencyMapInvalidationDetail = {
   changes?: Array<'taxonomy' | 'blueprint' | 'vertical' | 'subtopic' | 'method' | 'tactic' | 'settings'>;
 };
 
+export type TransparencyMapInvalidationContractEntry = {
+  defaultReason: string;
+  defaultChanges: Array<'taxonomy' | 'blueprint' | 'vertical' | 'subtopic' | 'method' | 'tactic' | 'settings'>;
+  requiresUpdatedAt?: boolean;
+};
+
 export type TransparencyIntegrity = {
   ok: boolean;
   missingVerticals: string[];
@@ -81,6 +87,38 @@ export const TRANSPARENCY_MAP_UPDATE_POLICY = {
   debounceMs: 80,
   throttleMs: 240,
   maxComputeMs: 16
+};
+
+export const TRANSPARENCY_MAP_INVALIDATION_CONTRACT: Record<
+  TransparencyMapInvalidationSource,
+  TransparencyMapInvalidationContractEntry
+> = {
+  'panel-open': {
+    defaultReason: 'panel opened',
+    defaultChanges: ['taxonomy', 'settings']
+  },
+  'settings-save': {
+    defaultReason: 'settings save completed',
+    defaultChanges: ['settings']
+  },
+  'settings-storage': {
+    defaultReason: 'settings storage updated',
+    defaultChanges: ['settings']
+  },
+  'taxonomy-update': {
+    defaultReason: 'taxonomy fetch/save completed',
+    defaultChanges: ['taxonomy', 'vertical', 'subtopic', 'method', 'tactic', 'blueprint'],
+    requiresUpdatedAt: true
+  },
+  'taxonomy-storage': {
+    defaultReason: 'taxonomy storage updated',
+    defaultChanges: ['taxonomy', 'vertical', 'subtopic', 'method', 'tactic', 'blueprint']
+  },
+  'blueprint-update': {
+    defaultReason: 'taxonomy + blueprint update',
+    defaultChanges: ['taxonomy', 'vertical', 'subtopic', 'method', 'tactic', 'blueprint'],
+    requiresUpdatedAt: true
+  }
 };
 
 const groupHintRules = () => {
