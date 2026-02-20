@@ -21,6 +21,7 @@ import {
   updateOpenDataConfig
 } from './services/openDataConfig';
 import { dispatchTransparencyMapInvalidate } from './services/transparencyMapEvents';
+import { initTransparencyMapStore } from './services/transparencyMapStore';
 import {
   hasLocalSettingsSnapshot,
   readAllowlist,
@@ -206,6 +207,10 @@ const App: React.FC = () => {
   const [authInput, setAuthInput] = useState('');
   const [authError, setAuthError] = useState('');
   const [pendingAction, setPendingAction] = useState<'settings' | 'start' | null>(null);
+
+  useEffect(() => {
+    initTransparencyMapStore();
+  }, []);
 
   const dispatchSettingsUpdate = (detail?: Record<string, unknown>) => {
     if (typeof window === 'undefined') return;
