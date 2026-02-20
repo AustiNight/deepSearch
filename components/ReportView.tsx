@@ -28,6 +28,33 @@ const PRIMARY_RECORD_LABELS: Record<string, string> = {
   economy_section: 'Economy Section'
 };
 
+const ADDRESS_EVIDENCE_MINIMUM = [
+  {
+    key: 'assessor_or_tax',
+    label: 'CAD/Assessor or Tax Roll',
+    coverageRecordTypes: ['assessor_parcel', 'tax_collector']
+  },
+  {
+    key: 'permits_or_cases',
+    label: 'Permits / BOA / Case Logs',
+    coverageRecordTypes: ['permits', 'code_enforcement']
+  },
+  {
+    key: 'police_311_signals',
+    label: 'Police Incidents / 311 Signals (if available)',
+    optional: true
+  },
+  {
+    key: 'zoning_land_use',
+    label: 'Zoning / Land-Use Layer',
+    coverageRecordTypes: ['zoning_gis']
+  },
+  {
+    key: 'parcel_geometry',
+    label: 'Parcel Geometry (GIS parcel layer)'
+  }
+];
+
 const formatRecordTypeLabel = (recordType: string) =>
   PRIMARY_RECORD_LABELS[recordType] || recordType.replace(/_/g, ' ');
 
@@ -43,6 +70,20 @@ const confidenceBadgeClasses = (confidence?: number) => {
   if (confidence >= 0.8) return 'text-emerald-200 bg-emerald-500/15 border-emerald-500/40';
   if (confidence >= 0.6) return 'text-yellow-200 bg-yellow-500/15 border-yellow-500/40';
   return 'text-red-200 bg-red-500/15 border-red-500/40';
+};
+
+const checklistStatusLabel = (status: 'present' | 'missing' | 'unavailable' | 'optional') => {
+  if (status === 'present') return 'Present';
+  if (status === 'unavailable') return 'Unavailable';
+  if (status === 'optional') return 'Optional / Not Detected';
+  return 'Missing';
+};
+
+const checklistStatusClasses = (status: 'present' | 'missing' | 'unavailable' | 'optional') => {
+  if (status === 'present') return 'text-emerald-200 border-emerald-500/40 bg-emerald-500/10';
+  if (status === 'unavailable') return 'text-gray-300 border-gray-600/40 bg-gray-600/10';
+  if (status === 'optional') return 'text-sky-200 border-sky-500/40 bg-sky-500/10';
+  return 'text-amber-200 border-amber-500/40 bg-amber-500/10';
 };
 
 const formatPortalLabel = (portalUrl?: string) => {
@@ -287,6 +328,33 @@ export const ReportView: React.FC<Props> = ({ report }) => {
   const dataGapRecordTypes = new Set(
     dataGaps.map((gap) => gap.recordType).filter((recordType): recordType is string => Boolean(recordType))
   );
+  const coverageEntries = primaryRecordCoverage?.entries || [];
+  const hasCoverageStatus = (recordTypes: string[], statuses: string[]) =>
+    coverageEntries.some((entry) => recordTypes.includes(entry.recordType) && statuses.includes(entry.status));
+  const policeSignalPattern = /(police|incident|crime|calls[-_ ]for[-_ ]service|service[-_ ]requests?|311)/i;
+  const hasPoliceSignals = report.sections.some((section) =>
+    (section.sources || []).some((source) => policeSignalPattern.test(source))
+  );
+  const addressEvidenceChecklist = report.propertyDossier
+    ? ADDRESS_EVIDENCE_MINIMUM.map((item) => {
+        const isMissing = dataGapRecordTypes.has(item.key);
+        const isUnavailable = Boolean(
+          !isMissing &&
+            item.coverageRecordTypes &&
+            hasCoverageStatus(item.coverageRecordTypes, ['unavailable', 'restricted'])
+        );
+        let status: 'present' | 'missing' | 'unavailable' | 'optional' = 'present';
+        if (isMissing) {
+          status = 'missing';
+        } else if (item.key === 'police_311_signals' && !hasPoliceSignals) {
+          status = 'optional';
+        } else if (isUnavailable) {
+          status = 'unavailable';
+        }
+        return { ...item, status };
+      })
+    : [];
+  const hasAddressEvidenceChecklist = addressEvidenceChecklist.length > 0;
   const bibliographySources = Array.from(
     new Set(
       report.sections.flatMap((section) => section.sources || []).filter(Boolean)
@@ -413,6 +481,31 @@ export const ReportView: React.FC<Props> = ({ report }) => {
               return `${label} (${status})`;
             }).join(', ')}
           </p>
+        </div>
+      )}
+      {hasAddressEvidenceChecklist && (
+        <div className="mb-6 rounded-lg border border-gray-700 bg-black/30 p-4 text-sm text-gray-200">
+          <p className="font-semibold">Address Evidence Minimum</p>
+          <p className="mt-1 text-gray-400">
+            Parcel-level evidence required before macro-scale claims are used in governance or economy sections.
+          </p>
+          <div className="mt-3 grid gap-2">
+            {addressEvidenceChecklist.map((item) => (
+              <div
+                key={item.key}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-gray-800/60 px-3 py-2"
+              >
+                <span>{item.label}</span>
+                <span
+                  className={`text-[10px] uppercase tracking-wide border px-2 py-1 rounded-full ${checklistStatusClasses(
+                    item.status
+                  )}`}
+                >
+                  {checklistStatusLabel(item.status)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {hasDataGaps && (
