@@ -36,7 +36,7 @@
   - [x] Enforce default storage tiers: optional keys -> sessionStorage (default), non-secrets -> localStorage, sensitive run data -> memory only
   - [x] Add TTL and size limits in the storage policy for caches (open-data index, geocode cache, evidence recovery cache)
   - [x] Add schema versioning + migration hooks for storage entries (especially open-data index and settings metadata)
-  - [ ] Add one-time migration: move existing optional keys from localStorage to sessionStorage on first load under new policy
+  - [x] Add one-time migration: move existing optional keys from localStorage to sessionStorage on first load under new policy
   - [ ] Delete legacy localStorage key entries after migration to prevent lingering sensitive data
   - [ ] Add opt-out behavior: purge optional keys from all storage when persistence is disabled
   - [ ] Version and document migration steps, including downgrade/cleanup paths for legacy entries

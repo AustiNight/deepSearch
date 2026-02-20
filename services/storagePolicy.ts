@@ -177,6 +177,7 @@ const PROVIDER_KEY_STORAGE: Record<"google" | "openai", string> = {
 const OPTIONAL_KEYS_STORAGE_KEY = "overseer_open_data_auth_v1";
 const OPTIONAL_KEYS_PERSISTENCE_KEY = "overseer_open_data_persist_v2";
 const OPTIONAL_KEYS_MIGRATION_KEY = "overseer_open_data_auth_migrated_v1";
+const OPTIONAL_KEYS_LOCAL_MIGRATION_KEY = "overseer_open_data_auth_migrated_v2";
 const OPEN_DATA_SETTINGS_STORAGE_KEY = "overseer_open_data_settings_v2";
 const LEGACY_OPEN_DATA_STORAGE_KEY = "overseer_open_data_config";
 const LEGACY_OPEN_DATA_SESSION_KEY = "overseer_open_data_config_session";
@@ -573,11 +574,52 @@ const migrateLegacyOpenDataConfig = () => {
   local?.setItem(OPTIONAL_KEYS_MIGRATION_KEY, "true");
 };
 
+const migrateOptionalKeysToSession = () => {
+  const local = getLocalStorage();
+  const session = getSessionStorage();
+  if (!local || !session) return;
+  if (local.getItem(OPTIONAL_KEYS_LOCAL_MIGRATION_KEY) === "true") return;
+
+  const allowLocal = allowOptionalKeysInLocal();
+  if (allowLocal) {
+    local.setItem(OPTIONAL_KEYS_LOCAL_MIGRATION_KEY, "true");
+    return;
+  }
+
+  const localRecord = safeJsonParse<OptionalKeysRecord>(local.getItem(OPTIONAL_KEYS_STORAGE_KEY));
+  if (!localRecord || localRecord.schemaVersion !== OPTIONAL_KEYS_SCHEMA_VERSION) {
+    if (localRecord) {
+      local.removeItem(OPTIONAL_KEYS_STORAGE_KEY);
+    }
+    local.setItem(OPTIONAL_KEYS_LOCAL_MIGRATION_KEY, "true");
+    return;
+  }
+
+  const normalized = normalizeAuth(localRecord.auth);
+  if (!isNonEmptyAuth(normalized)) {
+    local.removeItem(OPTIONAL_KEYS_STORAGE_KEY);
+    local.setItem(OPTIONAL_KEYS_LOCAL_MIGRATION_KEY, "true");
+    return;
+  }
+
+  const sessionRecord = safeJsonParse<OptionalKeysRecord>(session.getItem(OPTIONAL_KEYS_STORAGE_KEY));
+  if (!sessionRecord || sessionRecord.schemaVersion !== OPTIONAL_KEYS_SCHEMA_VERSION) {
+    if (sessionRecord && sessionRecord.schemaVersion !== OPTIONAL_KEYS_SCHEMA_VERSION) {
+      session.removeItem(OPTIONAL_KEYS_STORAGE_KEY);
+    }
+    writeRaw("session", OPTIONAL_KEYS_STORAGE_KEY, JSON.stringify({ ...localRecord, auth: normalized }));
+  }
+
+  local.removeItem(OPTIONAL_KEYS_STORAGE_KEY);
+  local.setItem(OPTIONAL_KEYS_LOCAL_MIGRATION_KEY, "true");
+};
+
 const ensureOpenDataMigration = (() => {
   let done = false;
   return () => {
     if (done) return;
     migrateLegacyOpenDataConfig();
+    migrateOptionalKeysToSession();
     done = true;
   };
 })();
