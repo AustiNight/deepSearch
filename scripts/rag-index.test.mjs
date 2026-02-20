@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const { buildRagIndexFromJsonl } = await import("../services/ragIndex.ts");
+const { SOCRATA_RAG_ARTIFACTS } = await import("../data/ragReferences.ts");
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+for (const artifact of SOCRATA_RAG_ARTIFACTS) {
+  const artifactPath = path.resolve(rootDir, artifact.path);
+  assert.ok(fs.existsSync(artifactPath), `Missing RAG artifact: ${artifact.path}`);
+}
 
 const bundle = fs.readFileSync(new URL("../docs/Socrata.rag.bundle.jsonl", import.meta.url), "utf8");
 const index = buildRagIndexFromJsonl(bundle);
