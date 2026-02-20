@@ -1092,7 +1092,7 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Paste the `X-App-Token` value (no prefix). Create it in the Socrata developer portal. <a href="https://dev.socrata.com/docs/app-tokens.html" target="_blank" className="underline hover:text-cyber-green">Socrata setup</a>.
+                    Field format: App Token (`X-App-Token`) value as a raw token string (no prefix). Create it in the Socrata developer portal. <a href="https://dev.socrata.com/docs/app-tokens.html" target="_blank" className="underline hover:text-cyber-green">Socrata setup</a>.
                   </p>
                   {socrataToken ? (
                     <p className="text-[10px] text-cyber-green font-mono">Token configured. Higher rate limits enabled.</p>
@@ -1110,7 +1110,7 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Create an API key in the ArcGIS developer console and paste the full token (often starts with `AAPK`). <a href="https://developers.arcgis.com/documentation/security-and-authentication/api-keys/" target="_blank" className="underline hover:text-cyber-green">ArcGIS API keys</a>.
+                    Field format: API key token string (often starts with `AAPK`). Paste the full token with no `token=` prefix. <a href="https://developers.arcgis.com/documentation/security-and-authentication/api-keys/" target="_blank" className="underline hover:text-cyber-green">ArcGIS API keys</a>.
                   </p>
                   {arcgisApiKey ? (
                     <p className="text-[10px] text-cyber-green font-mono">Key configured. Higher throughput enabled.</p>
@@ -1128,7 +1128,7 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Optional contact email for Nominatim usage compliance (format: you@example.com). <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" className="underline hover:text-cyber-green">Nominatim policy</a>.
+                    Field format: contact email address for Nominatim usage compliance (format: you@example.com). <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" className="underline hover:text-cyber-green">Nominatim policy</a>.
                   </p>
                   {geocodingEmail ? (
                     <p className="text-[10px] text-cyber-green font-mono">Contact email configured.</p>
@@ -1146,7 +1146,7 @@ const App: React.FC = () => {
                     className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">
-                    Reserved for key-based geocoders (not enabled by default). Paste provider token if supported; leave blank for Nominatim. <a href="https://nominatim.org/release-docs/latest/api/Overview/" target="_blank" className="underline hover:text-cyber-green">Nominatim overview</a>.
+                    Reserved for key-based geocoders (not enabled by default). Field format: provider API key string (paste full token, no prefix). Leave blank for Nominatim. <a href="https://nominatim.org/release-docs/latest/api/Overview/" target="_blank" className="underline hover:text-cyber-green">Nominatim overview</a>.
                   </p>
                   {geocodingKey ? (
                     <p className="text-[10px] text-cyber-green font-mono">Key stored locally for supported providers.</p>
