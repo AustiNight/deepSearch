@@ -23,6 +23,7 @@ type RagSpec = typeof ragSpec;
 
 type ParamPattern = {
   name: string;
+  kind: "literal" | "dynamic" | "customMetadata";
   regex?: RegExp;
 };
 
@@ -44,24 +45,43 @@ const resolveCatalogBase = (portalUrl: string, spec: RagSpec) => {
 
 const buildParamPatterns = (spec: RagSpec): ParamPattern[] => {
   return spec.discovery.allowedParams.map((name: string) => {
+    if (name === "{custom_metadata_key}") {
+      return {
+        name,
+        kind: "customMetadata",
+        regex: /^.+$/i
+      };
+    }
     if (name.includes("{") || name.includes("[")) {
       const pattern = name
         .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
         .replace(/\\\{[^}]+\\\}/g, ".+")
         .replace(/\\\[[^\]]+\\\]/g, "\\\\[.+\\\\]");
-      return { name, regex: new RegExp(`^${pattern}$`, "i") };
+      return { name, kind: "dynamic", regex: new RegExp(`^${pattern}$`, "i") };
     }
-    return { name };
+    return { name, kind: "literal" };
   });
 };
 
 const DISCOVERY_PARAM_PATTERNS = buildParamPatterns(ragSpec);
 
-const isParamAllowed = (param: string) => {
-  return DISCOVERY_PARAM_PATTERNS.some((pattern) => {
-    if (pattern.regex) return pattern.regex.test(param);
-    return pattern.name.toLowerCase() === param.toLowerCase();
-  });
+const matchParam = (param: string, allowCustomMetadata: boolean) => {
+  const lower = param.toLowerCase();
+  for (const pattern of DISCOVERY_PARAM_PATTERNS) {
+    if (pattern.kind === "customMetadata") continue;
+    if (pattern.regex) {
+      if (pattern.regex.test(param)) return { allowed: true, kind: pattern.kind };
+      continue;
+    }
+    if (pattern.name.toLowerCase() === lower) return { allowed: true, kind: pattern.kind };
+  }
+  if (allowCustomMetadata) {
+    const customPattern = DISCOVERY_PARAM_PATTERNS.find((pattern) => pattern.kind === "customMetadata");
+    if (customPattern?.regex?.test(param)) {
+      return { allowed: true, kind: "customMetadata" as const };
+    }
+  }
+  return { allowed: false, kind: undefined };
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -71,9 +91,12 @@ export const planSocrataDiscoveryQuery = (input: {
   query: string;
   limit?: number;
   offset?: number;
+  scrollId?: string;
   filters?: Record<string, string>;
+  allowCustomMetadata?: boolean;
 }): SocrataDiscoveryPlan => {
   const spec = ragSpec as RagSpec;
+  const allowCustomMetadata = input.allowCustomMetadata === true;
   const { base, domain } = resolveCatalogBase(input.portalUrl, spec);
   const params: Record<string, string> = {};
   const unknownParams: string[] = [];
@@ -86,9 +109,13 @@ export const planSocrataDiscoveryQuery = (input: {
   const filters = input.filters || {};
   Object.entries(filters).forEach(([key, value]) => {
     if (!value) return;
-    if (!isParamAllowed(key)) {
+    const match = matchParam(key, allowCustomMetadata);
+    if (!match.allowed) {
       unknownParams.push(key);
       return;
+    }
+    if (match.kind === "customMetadata") {
+      warnings.push(`Custom metadata param used: ${key}`);
     }
     params[key] = value;
   });
@@ -96,7 +123,15 @@ export const planSocrataDiscoveryQuery = (input: {
   const limit = clamp(Math.floor(input.limit ?? spec.discovery.pagination.defaultLimit), 1, 1000);
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
   params.limit = String(limit);
-  if (offset > 0) params.offset = String(offset);
+  const scrollId = input.scrollId?.trim();
+  if (scrollId) {
+    params.scroll_id = scrollId;
+    if (offset > 0) {
+      warnings.push("scroll_id provided; offset ignored.");
+    }
+  } else if (offset > 0) {
+    params.offset = String(offset);
+  }
 
   if (offset + limit > spec.discovery.pagination.maxOffsetPlusLimit) {
     warnings.push("Discovery pagination exceeded max offset + limit; consider scroll_id.");

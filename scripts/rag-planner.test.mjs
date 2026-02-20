@@ -21,6 +21,21 @@ assert.ok(plan.endpoint.includes("q=parcel"), "Expected q param.");
 assert.ok(plan.endpoint.includes("limit=5"), "Expected limit param.");
 assert.ok(plan.endpoint.includes("offset=10"), "Expected offset param.");
 assert.ok(plan.unknownParams.includes("foo"), "Expected unknown param to be reported.");
+assert.ok(!plan.endpoint.includes("foo="), "Expected unknown param to be rejected.");
+
+const planWithCustom = planSocrataDiscoveryQuery({
+  portalUrl: "https://data.example.gov",
+  query: "parcel",
+  filters: {
+    custom_key: "value"
+  },
+  allowCustomMetadata: true
+});
+assert.ok(planWithCustom.endpoint.includes("custom_key=value"), "Expected custom metadata param to be included when allowed.");
+assert.ok(
+  planWithCustom.warnings.some((warning) => warning.includes("Custom metadata param")),
+  "Expected custom metadata warning."
+);
 
 const sodaDefault = planSocrataSodaEndpoint({ datasetId: "abcd" });
 assert.equal(sodaDefault.version, "2.1");
