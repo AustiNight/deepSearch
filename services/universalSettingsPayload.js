@@ -76,6 +76,33 @@ export const sanitizeRunConfig = (rawRunConfig, defaults) => {
   );
   const earlyStopNewDomains = Math.max(0, Math.floor(toNumber(base.earlyStopNewDomains, fallback.earlyStopNewDomains || 0)));
   const earlyStopNewSources = Math.max(0, Math.floor(toNumber(base.earlyStopNewSources, fallback.earlyStopNewSources || 0)));
+  const estimatedCallLatencyMs = Math.max(500, Math.floor(toNumber(base.estimatedCallLatencyMs, fallback.estimatedCallLatencyMs || 0)));
+
+  const normalizePriorityWeights = (raw, defaults) => {
+    const rawWeights = isPlainObject(raw) ? raw : {};
+    const fallbackWeights = isPlainObject(defaults) ? defaults : {};
+    const methodDefaults = isPlainObject(fallbackWeights.method) ? fallbackWeights.method : {};
+    const sectorDefaults = isPlainObject(fallbackWeights.sector) ? fallbackWeights.sector : {};
+    const methodRaw = isPlainObject(rawWeights.method) ? rawWeights.method : {};
+    const sectorRaw = isPlainObject(rawWeights.sector) ? rawWeights.sector : {};
+    const norm = (value, fallbackValue) => clamp(toNumber(value, fallbackValue), 0, 1);
+    return {
+      method: {
+        llm_method_discovery: norm(methodRaw.llm_method_discovery, methodDefaults.llm_method_discovery ?? 0.95),
+        address_direct: norm(methodRaw.address_direct, methodDefaults.address_direct ?? 0.9),
+        knowledge_base_method: norm(methodRaw.knowledge_base_method, methodDefaults.knowledge_base_method ?? 0.75),
+        knowledge_base_domain: norm(methodRaw.knowledge_base_domain, methodDefaults.knowledge_base_domain ?? 0.6),
+        method_template_fallback: norm(methodRaw.method_template_fallback, methodDefaults.method_template_fallback ?? 0.45)
+      },
+      sector: {
+        subtopicBoost: norm(sectorRaw.subtopicBoost, sectorDefaults.subtopicBoost ?? 0.2),
+        verticalSeedBase: norm(sectorRaw.verticalSeedBase, sectorDefaults.verticalSeedBase ?? 0.3),
+        rawSectorBase: norm(sectorRaw.rawSectorBase, sectorDefaults.rawSectorBase ?? 0.25),
+        fallback: norm(sectorRaw.fallback, sectorDefaults.fallback ?? 0.15)
+      }
+    };
+  };
+  const priorityWeights = normalizePriorityWeights(base.priorityWeights, fallback.priorityWeights || {});
 
   return {
     minAgents,
@@ -87,7 +114,9 @@ export const sanitizeRunConfig = (rawRunConfig, defaults) => {
     earlyStopDiminishingScore,
     earlyStopNoveltyRatio,
     earlyStopNewDomains,
-    earlyStopNewSources
+    earlyStopNewSources,
+    estimatedCallLatencyMs,
+    priorityWeights
   };
 };
 

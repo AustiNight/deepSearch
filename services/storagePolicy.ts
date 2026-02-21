@@ -20,6 +20,7 @@ import {
 type StorageTier = "memory" | "session" | "local";
 export type StorageDataClassId =
   | "settings_metadata"
+  | "ui_preferences"
   | "run_config"
   | "model_overrides"
   | "allowlist"
@@ -63,6 +64,10 @@ export type SettingsMetadata = {
   updatedBy: string | null;
   version: number | null;
   localUpdatedAt: string | null;
+};
+
+export type UiPreferences = {
+  showGuardrailDebug?: boolean;
 };
 
 type SettingsMetadataRecord = {
@@ -185,6 +190,7 @@ const DALLAS_SCHEMA_CACHE_MAX_ENTRIES = 30;
 const RAW_SYNTHESIS_MAX_CHARS = 200000;
 
 const SETTINGS_METADATA_STORAGE_KEY = "overseer_settings_metadata_v1";
+const UI_PREFERENCES_STORAGE_KEY = "overseer_ui_preferences_v1";
 const SETTINGS_MIGRATION_KEY = "overseer_settings_migrated";
 const PROVIDER_STORAGE_KEY = "overseer_provider";
 const RUN_CONFIG_STORAGE_KEY = "overseer_run_config";
@@ -489,6 +495,13 @@ export const STORAGE_DATA_CLASS_POLICIES: Record<StorageDataClassId, StorageData
     defaultTier: "local",
     keys: [SETTINGS_METADATA_STORAGE_KEY],
     notes: "Non-secret metadata for settings audits."
+  },
+  ui_preferences: {
+    id: "ui_preferences",
+    description: "Local UI preferences for debug panels and visibility toggles.",
+    defaultTier: "local",
+    keys: [UI_PREFERENCES_STORAGE_KEY],
+    notes: "Non-secret UI state; never synced to cloud."
   },
   run_config: {
     id: "run_config",
@@ -877,6 +890,14 @@ export const writeProvider = (provider: string) => {
 export const readRunConfig = () => safeJsonParse<unknown>(readRaw("local", RUN_CONFIG_STORAGE_KEY));
 export const writeRunConfig = (config: unknown) => {
   writeRaw("local", RUN_CONFIG_STORAGE_KEY, JSON.stringify(config));
+};
+
+export const readUiPreferences = (): UiPreferences => {
+  return safeJsonParse<UiPreferences>(readRaw("local", UI_PREFERENCES_STORAGE_KEY)) || {};
+};
+
+export const writeUiPreferences = (prefs: UiPreferences) => {
+  writeRaw("local", UI_PREFERENCES_STORAGE_KEY, JSON.stringify(prefs || {}));
 };
 
 export const readLocalJson = <T>(key: string): T | null => safeJsonParse<T>(readRaw("local", key));

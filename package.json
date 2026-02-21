@@ -31,6 +31,7 @@
     "test:kv-policy": "node --loader ./scripts/ts-loader.mjs scripts/kv-policy.test.mjs",
     "test:pages": "node scripts/pages-sanity.test.mjs",
     "test:transparency-map": "node scripts/transparency-map-updates.test.mjs",
+    "test": "npm run test:sources && npm run test:settings && npm run test:address-quality && npm run test:address-evidence && npm run test:address-report && npm run test:dallas-enforcement && npm run test:failure-modes && npm run test:open-data && npm run test:storage-policy && npm run test:same-origin && npm run test:redaction && npm run test:rag && npm run test:routing && npm run test:ui && npm run test:guardrails && npm run test:secrets && npm run test:kv-policy && npm run test:pages && npm run test:transparency-map",
     "hooks:install": "node scripts/install-git-hooks.mjs"
   },
   "dependencies": {

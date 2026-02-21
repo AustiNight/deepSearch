@@ -77,6 +77,7 @@ const runSocrataTests = async () => {
 };
 
 const runSocrataValidationTests = async () => {
+  const updatedAt = new Date().toISOString();
   updateOpenDataConfig({ auth: { socrataAppToken: "token-123" } });
   global.fetch = buildProxyFetch((target) => {
     if (String(target).includes("nominatim.openstreetmap.org/search")) {
@@ -87,8 +88,26 @@ const runSocrataValidationTests = async () => {
     if (String(target).includes("/api/catalog/v1")) {
       return buildResponse({
         results: [
-          { resource: { id: "map-1", name: "Parcel Map", updatedAt: "2024-01-01", description: "Map layer" } },
-          { resource: { id: "good-1", name: "Parcel Table", updatedAt: "2024-01-01", description: "Tabular parcel data" } }
+          {
+            resource: {
+              id: "map-1",
+              name: "Parcel Map",
+              updatedAt,
+              description: "Map layer",
+              license: "Public Domain"
+            },
+            metadata: { termsOfService: "https://example.gov/terms" }
+          },
+          {
+            resource: {
+              id: "good-1",
+              name: "Parcel Table",
+              updatedAt,
+              description: "Tabular parcel data",
+              license: "Public Domain"
+            },
+            metadata: { termsOfService: "https://example.gov/terms" }
+          }
         ]
       });
     }

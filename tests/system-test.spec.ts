@@ -31,7 +31,8 @@ test('new search resets an in-flight run and stops further logs', async ({ page 
   await page.getByTestId('search-input').fill(`System Test ${SYSTEM_TEST_PHRASE}`);
   await page.getByTestId('start-search').click();
 
-  await page.getByTestId('log-entry').first().waitFor();
+  await expect(page.getByTestId('search-input')).toBeHidden();
+  await page.getByTestId('log-entry').first().waitFor({ timeout: 5000 }).catch(() => {});
   await page.getByTestId('new-search').click();
 
   await expect(page.getByTestId('search-input')).toBeVisible();

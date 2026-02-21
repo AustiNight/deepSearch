@@ -5,6 +5,7 @@ export enum AgentStatus {
   ANALYZING = 'ANALYZING',
   COMPLETE = 'COMPLETE',
   FAILED = 'FAILED',
+  SKIPPED = 'SKIPPED',
 }
 
 export enum AgentType {
@@ -769,6 +770,28 @@ export type RunConfig = {
   earlyStopNoveltyRatio: number;
   earlyStopNewDomains: number;
   earlyStopNewSources: number;
+  estimatedCallLatencyMs?: number;
+  priorityWeights?: PriorityWeights;
+};
+
+export type MethodPriorityWeights = {
+  llm_method_discovery?: number;
+  address_direct?: number;
+  knowledge_base_method?: number;
+  knowledge_base_domain?: number;
+  method_template_fallback?: number;
+};
+
+export type SectorPriorityWeights = {
+  subtopicBoost?: number;
+  verticalSeedBase?: number;
+  rawSectorBase?: number;
+  fallback?: number;
+};
+
+export type PriorityWeights = {
+  method?: MethodPriorityWeights;
+  sector?: SectorPriorityWeights;
 };
 
 export type UniversalSettingsPayload = {

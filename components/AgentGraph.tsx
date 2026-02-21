@@ -24,6 +24,7 @@ const getStatusColor = (status: AgentStatus) => {
     case AgentStatus.ANALYZING: return 'border-purple-500 text-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]';
     case AgentStatus.COMPLETE: return 'border-green-500 text-green-500 bg-green-900/10';
     case AgentStatus.FAILED: return 'border-red-500 text-red-500';
+    case AgentStatus.SKIPPED: return 'border-gray-600 text-gray-400 bg-gray-900/30';
     default: return 'border-gray-700 text-gray-500';
   }
 };

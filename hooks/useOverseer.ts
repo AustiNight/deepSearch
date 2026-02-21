@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision, DataGap, OpenDatasetMetadata } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunConfig, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision, DataGap, OpenDatasetMetadata, PriorityWeights } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -31,7 +31,9 @@ import {
   MIN_EVIDENCE_AUTHORITATIVE_SOURCES,
   MIN_EVIDENCE_AUTHORITY_SCORE,
   MAX_EXTERNAL_CALLS_PER_RUN,
-  RUN_TOTAL_TIME_BUDGET_MS
+  RUN_TOTAL_TIME_BUDGET_MS,
+  DEFAULT_ESTIMATED_CALL_LATENCY_MS,
+  DEFAULT_PRIORITY_WEIGHTS
 } from '../constants';
 import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals, listTacticsForVertical, expandTacticTemplates } from '../data/researchTaxonomy';
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
@@ -1404,15 +1406,23 @@ const normalizeClassification = (
   };
 };
 
-const buildVerticalSeedSectors = (selected: WeightedVertical[], verticalLabels: Map<string, string>, topic: string) => {
+const buildVerticalSeedSectors = (
+  selected: WeightedVertical[],
+  verticalLabels: Map<string, string>,
+  topic: string,
+  sectorWeights: PriorityWeights['sector']
+) => {
   return selected.map((vertical) => {
     const label = verticalLabels.get(vertical.id) || vertical.id;
     const queryTemplate = VERTICAL_SEED_QUERIES[vertical.id] || '{topic} overview';
     const initialQuery = queryTemplate.replace('{topic}', topic);
+    const baseWeight = typeof vertical.weight === 'number' ? vertical.weight : 0.3;
+    const seedBase = typeof sectorWeights?.verticalSeedBase === 'number' ? sectorWeights.verticalSeedBase : 0.3;
     return {
       name: `Vertical: ${label}`,
       focus: `Vertical branch: ${label}`,
-      initialQuery
+      initialQuery,
+      priority: Math.max(0, Math.min(1, baseWeight + seedBase))
     };
   });
 };
@@ -1535,19 +1545,12 @@ export const useOverseer = () => {
     const runMetrics: RunMetrics = {};
   }, []);
 
-  const startResearch = useCallback(async (topic: string, provider: LLMProvider, apiKey: string, runConfig?: {
-    minAgents?: number;
-    maxAgents?: number;
-    maxMethodAgents?: number;
-    forceExhaustion?: boolean;
-    minRounds?: number;
-    maxRounds?: number;
-    earlyStopDiminishingScore?: number;
-    earlyStopNoveltyRatio?: number;
-    earlyStopNewDomains?: number;
-    earlyStopNewSources?: number;
-    modelOverrides?: ModelOverrides;
-  }) => {
+  const startResearch = useCallback(async (
+    topic: string,
+    provider: LLMProvider,
+    apiKey: string,
+    runConfig?: RunConfig & { modelOverrides?: ModelOverrides }
+  ) => {
     const previousRunId = runIdRef.current;
     const previousController = abortControllerRef.current;
     if (previousController && !previousController.signal.aborted) {
@@ -1633,6 +1636,7 @@ export const useOverseer = () => {
     const envMaxMethod = resolveNumber(process.env.MAX_METHOD_AGENTS, MAX_METHOD_AGENTS);
     const envMaxExternalCalls = resolveNumber(process.env.MAX_EXTERNAL_CALLS_PER_RUN, MAX_EXTERNAL_CALLS_PER_RUN);
     const envLatencyBudgetMs = resolveNumber(process.env.RUN_TOTAL_TIME_BUDGET_MS, RUN_TOTAL_TIME_BUDGET_MS);
+    const envEstimatedCallLatencyMs = resolveNumber(process.env.ESTIMATED_CALL_LATENCY_MS, DEFAULT_ESTIMATED_CALL_LATENCY_MS);
 
     const minAgents = Math.max(1, resolveNumber(runConfig?.minAgents, envMin));
     const maxAgents = Math.max(minAgents, resolveNumber(runConfig?.maxAgents, envMax));
@@ -1656,6 +1660,34 @@ export const useOverseer = () => {
     );
     const earlyStopNewDomains = Math.max(0, resolveNumber(runConfig?.earlyStopNewDomains, EARLY_STOP_NEW_DOMAINS));
     const earlyStopNewSources = Math.max(0, resolveNumber(runConfig?.earlyStopNewSources, EARLY_STOP_NEW_SOURCES));
+    const estimatedCallLatencyMs = Math.max(500, resolveNumber(runConfig?.estimatedCallLatencyMs, envEstimatedCallLatencyMs));
+    const resolvePriorityWeights = (input?: PriorityWeights) => {
+      const methodDefaults = DEFAULT_PRIORITY_WEIGHTS.method;
+      const sectorDefaults = DEFAULT_PRIORITY_WEIGHTS.sector;
+      const methodInput = input?.method || {};
+      const sectorInput = input?.sector || {};
+      const clampWeight = (value: unknown, fallback: number) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        return clamp(n, 0, 1);
+      };
+      return {
+        method: {
+          llm_method_discovery: clampWeight(methodInput.llm_method_discovery, methodDefaults.llm_method_discovery),
+          address_direct: clampWeight(methodInput.address_direct, methodDefaults.address_direct),
+          knowledge_base_method: clampWeight(methodInput.knowledge_base_method, methodDefaults.knowledge_base_method),
+          knowledge_base_domain: clampWeight(methodInput.knowledge_base_domain, methodDefaults.knowledge_base_domain),
+          method_template_fallback: clampWeight(methodInput.method_template_fallback, methodDefaults.method_template_fallback)
+        },
+        sector: {
+          subtopicBoost: clampWeight(sectorInput.subtopicBoost, sectorDefaults.subtopicBoost),
+          verticalSeedBase: clampWeight(sectorInput.verticalSeedBase, sectorDefaults.verticalSeedBase),
+          rawSectorBase: clampWeight(sectorInput.rawSectorBase, sectorDefaults.rawSectorBase),
+          fallback: clampWeight(sectorInput.fallback, sectorDefaults.fallback)
+        }
+      };
+    };
+    const priorityWeights = resolvePriorityWeights(runConfig?.priorityWeights);
     const modelOverrides = runConfig?.modelOverrides;
     const requestOptions = { signal };
     const knowledgeBase = loadKnowledgeBase();
@@ -1682,6 +1714,22 @@ export const useOverseer = () => {
     const verticalLabels = new Map(taxonomy.verticals.map(v => [v.id, v.label]));
     let taxonomyProposalBudget = Math.min(4, maxAgents);
     let taxonomyGrowthQueue = Promise.resolve();
+
+    const METHOD_QUERY_PRIORITY: Record<string, number> = {
+      llm_method_discovery: priorityWeights.method.llm_method_discovery,
+      address_direct: priorityWeights.method.address_direct,
+      knowledge_base_method: priorityWeights.method.knowledge_base_method,
+      knowledge_base_domain: priorityWeights.method.knowledge_base_domain,
+      method_template_fallback: priorityWeights.method.method_template_fallback
+    };
+
+    const scoreMethodQuery = (query: string) => {
+      const meta = methodQueryMeta.get(query);
+      const base = METHOD_QUERY_PRIORITY[meta?.source || 'method_template_fallback']
+        ?? METHOD_QUERY_PRIORITY.method_template_fallback;
+      const quotedBonus = query.includes('"') ? 0.05 : 0;
+      return base + quotedBonus;
+    };
 
     const performanceBudget = {
       maxExternalCalls: envMaxExternalCalls,
@@ -1782,14 +1830,21 @@ export const useOverseer = () => {
 
     const markAgentSkipped = (agentId: string, agentName: string, reason: 'latency_budget' | 'external_call_budget', phase: string, query?: string) => {
       const detail = formatGuardDetail(phase, query);
+      if (reason === 'latency_budget') {
+        performanceState.latencyBudgetExceeded = true;
+      }
+      if (reason === 'external_call_budget') {
+        performanceState.externalCallBudgetExceeded = true;
+      }
       updateAgent(agentId, {
-        status: AgentStatus.FAILED,
+        status: AgentStatus.SKIPPED,
         reasoning: [`performance guardrail: ${reason}`, detail]
       });
       addLog(agentId, agentName, `Skipped external call (${reason}).`, 'warning');
     };
 
     let performDeepResearchFn: typeof performDeepResearchOpenAI | typeof performDeepResearchGemini | null = null;
+    const recentCallLatencies: number[] = [];
 
     const runDeepResearchWithGuards = async (
       agentId: string,
@@ -1808,6 +1863,7 @@ export const useOverseer = () => {
       if (!performDeepResearchFn) {
         throw new Error('performDeepResearch not initialized');
       }
+      const startedAt = Date.now();
       const result = await runSafely(performDeepResearchFn(
         agentName,
         focus,
@@ -1815,7 +1871,73 @@ export const useOverseer = () => {
         logFn,
         options
       ));
+      const elapsed = Date.now() - startedAt;
+      if (Number.isFinite(elapsed) && elapsed > 0) {
+        recentCallLatencies.push(elapsed);
+        if (recentCallLatencies.length > 12) {
+          recentCallLatencies.shift();
+        }
+      }
       return result as DeepResearchResult;
+    };
+
+    const estimateCallLatencyMs = () => {
+      if (recentCallLatencies.length === 0) return estimatedCallLatencyMs;
+      const sorted = [...recentCallLatencies].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 === 1
+        ? sorted[mid]
+        : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+      return Math.max(500, median);
+    };
+
+    const planBudgetedCalls = <T,>(input: {
+      candidates: Array<{ item: T; priority: number; label?: string }>;
+      phase: string;
+      minSpacingMs: number;
+      maxSpacingMs: number;
+      deadlineMs?: number;
+    }) => {
+      const deadline = typeof input.deadlineMs === 'number'
+        ? Math.min(runDeadline, input.deadlineMs)
+        : runDeadline;
+      const remainingMs = Math.max(0, deadline - Date.now());
+      const estimatedMs = Math.max(750, estimateCallLatencyMs());
+      const maxByLatency = Math.floor(remainingMs / estimatedMs);
+      const remainingExternal = Math.max(0, performanceBudget.maxExternalCalls - performanceState.externalCallsUsed);
+      const allowedCount = Math.max(0, Math.min(input.candidates.length, maxByLatency, remainingExternal));
+      const limitingReason = allowedCount < input.candidates.length
+        ? (remainingExternal < maxByLatency ? 'external_call_budget' : 'latency_budget')
+        : null;
+      const ordered = [...input.candidates].sort((a, b) => {
+        if (b.priority !== a.priority) return b.priority - a.priority;
+        return 0;
+      });
+      const allowed = ordered.slice(0, allowedCount);
+      const skipped = ordered.slice(allowedCount);
+      const spacingMs = allowedCount > 1
+        ? clamp(Math.floor(remainingMs / allowedCount), input.minSpacingMs, input.maxSpacingMs)
+        : 0;
+      if (skipped.length > 0 && limitingReason) {
+        const shouldLog = limitingReason === 'latency_budget'
+          ? !performanceState.loggedLatencyGuard
+          : !performanceState.loggedExternalCallGuard;
+        if (shouldLog) {
+          logOverseer(
+            'PERF PLANNER',
+            limitingReason === 'latency_budget' ? 'latency budget constraint' : 'external call cap constraint',
+            `plan ${allowedCount}/${input.candidates.length} calls`,
+            `${input.phase} · est ${estimatedMs}ms/call · remaining ${Math.round(remainingMs / 1000)}s`,
+            'warning'
+          );
+          if (limitingReason === 'latency_budget') {
+            performanceState.loggedLatencyGuard = true;
+          } else {
+            performanceState.loggedExternalCallGuard = true;
+          }
+        }
+      }
+      return { allowed, skipped, spacingMs, remainingMs, estimatedMs, limitingReason };
     };
 
     const recordEvidenceGate = (
@@ -2119,6 +2241,7 @@ export const useOverseer = () => {
       const slotValues = buildSlotValues(topic, nameVariants, addressLike);
       const slotValuesAny = slotValues as Record<string, unknown>;
       const addressScope = addressLike ? classifyAddressScope({ topic, slots: slotValuesAny }) : undefined;
+      const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike, addressScope);
       // re-use derived jurisdiction from earlier slot parsing
       const usOnlyAddressPolicy = getOpenDataConfig().featureFlags.usOnlyAddressPolicy;
       const enforceUsOnlyPolicy = Boolean(addressLike && usOnlyAddressPolicy && addressScope?.scope === 'non_us');
@@ -2464,22 +2587,24 @@ export const useOverseer = () => {
               ? `${pack.verticalLabel} · ${pack.subtopicLabel}`
               : `${pack.verticalLabel} · ${pack.subtopicLabel} ${index + 1}`,
             focus: `${pack.verticalLabel} / ${pack.subtopicLabel}`,
-            initialQuery: seed.query
+            initialQuery: seed.query,
+            priority: clamp((weightMap.get(pack.verticalId) || 0) + priorityWeights.sector.subtopicBoost, 0, 1)
           }));
         })
-        .filter((sector) => Boolean(sector?.initialQuery)) as Array<{ name: string; focus: string; initialQuery: string }>;
+        .filter((sector) => Boolean(sector?.initialQuery)) as Array<{ name: string; focus: string; initialQuery: string; priority: number }>;
       const queryTopic = addressLike && topicVariants.length > 0 ? topicVariants[0] : topic;
       const verticalSeeds = subtopicSectors.length > 0
         ? []
-        : buildVerticalSeedSectors(selectedVerticals, verticalLabels, queryTopic);
+        : buildVerticalSeedSectors(selectedVerticals, verticalLabels, queryTopic, priorityWeights.sector);
       let sectors = [
         ...subtopicSectors,
         ...verticalSeeds,
         ...rawSectors.map((sector: any, index: number) => {
-        const name = sector?.name || sector?.title || `Researcher ${index + 1}`;
-        const focus = sector?.focus || sector?.dimension || name || "General Research";
-        const initialQuery = sector?.initialQuery || sector?.initial_query || `${queryTopic} ${focus}`;
-        return { ...sector, name, focus, initialQuery };
+          const name = sector?.name || sector?.title || `Researcher ${index + 1}`;
+          const focus = sector?.focus || sector?.dimension || name || "General Research";
+          const initialQuery = sector?.initialQuery || sector?.initial_query || `${queryTopic} ${focus}`;
+          const rawPriority = typeof sector?.priority === 'number' ? sector.priority : priorityWeights.sector.rawSectorBase;
+          return { ...sector, name, focus, initialQuery, priority: clamp(rawPriority, 0, 1) };
         })
       ];
 
@@ -2510,7 +2635,8 @@ export const useOverseer = () => {
           sectors.push({
             name: buildAgentNameForQuery('Method Scout', fallbackQuery, i),
             focus: 'Method-based deep search',
-            initialQuery: fallbackQuery
+            initialQuery: fallbackQuery,
+            priority: priorityWeights.sector.fallback
           });
         }
       }
@@ -2594,9 +2720,47 @@ export const useOverseer = () => {
             'action'
           );
           roundSectors.forEach((s: any) => roundQueries.push(s.initialQuery));
-          const agentPromises = roundSectors.map(async (sector: any, index: number) => {
-            // Stagger starts slightly to avoid instant rate limit hits (though unlikely with client-side)
-            await wait(index * 1000, signal);
+          const sectorCandidates = roundSectors.map((sector: any) => ({
+            item: sector,
+            priority: typeof sector.priority === 'number' ? sector.priority : 0.3,
+            label: sector.initialQuery
+          }));
+          const sectorPlan = planBudgetedCalls({
+            candidates: sectorCandidates,
+            phase: `PHASE 2: DEEP DRILL (ROUND ${round}/${maxRounds})`,
+            minSpacingMs: 250,
+            maxSpacingMs: 1500
+          });
+          const runnableSectors = sectorPlan.allowed.map(entry => entry.item);
+          const overflowSectors = sectorPlan.skipped.map(entry => entry.item);
+
+          overflowSectors.forEach((sector: any) => {
+            const agentId = generateId();
+            const agent: Agent = {
+              id: agentId,
+              name: sector.name,
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: sector.focus,
+              reasoning: [`Starting Level 1 Search: ${sector.initialQuery}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            markAgentSkipped(
+              agentId,
+              agent.name,
+              (sectorPlan.limitingReason || 'latency_budget') as 'latency_budget' | 'external_call_budget',
+              `PHASE 2: DEEP DRILL (ROUND ${round}/${maxRounds})`,
+              sector.initialQuery
+            );
+          });
+
+          const agentPromises = runnableSectors.map(async (sector: any, index: number) => {
+            const delayMs = sectorPlan.spacingMs * index;
+            if (delayMs > 0) {
+              await wait(delayMs, signal);
+            }
             ensureActive();
 
             const agentId = generateId();
@@ -2672,8 +2836,47 @@ export const useOverseer = () => {
             `queries ${methodQueriesToRun.join(' | ')}`,
             'action'
           );
-          const methodAgentPromises = methodQueriesToRun.map(async (query: string, index: number) => {
-            await wait(index * 700, signal);
+          const methodCandidates = methodQueriesToRun.map((query) => ({
+            item: query,
+            priority: scoreMethodQuery(query),
+            label: query
+          }));
+          const methodPlan = planBudgetedCalls({
+            candidates: methodCandidates,
+            phase: `PHASE 2B: METHOD AUDIT (ROUND ${round}/${maxRounds})`,
+            minSpacingMs: 250,
+            maxSpacingMs: 1200
+          });
+          const runnableMethodQueries = methodPlan.allowed.map(entry => entry.item);
+          const overflowMethodQueries = methodPlan.skipped.map(entry => entry.item);
+
+          overflowMethodQueries.forEach((query: string, index: number) => {
+            const agentId = generateId();
+            const agent: Agent = {
+              id: agentId,
+              name: buildAgentNameForQuery(round === 1 ? 'Method Audit' : `Method Audit R${round}`, query, index),
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: 'Independent method audit',
+              reasoning: [`Independent query: ${query}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            markAgentSkipped(
+              agentId,
+              agent.name,
+              (methodPlan.limitingReason || 'latency_budget') as 'latency_budget' | 'external_call_budget',
+              `PHASE 2B: METHOD AUDIT (ROUND ${round}/${maxRounds})`,
+              query
+            );
+          });
+
+          const methodAgentPromises = runnableMethodQueries.map(async (query: string, index: number) => {
+            const delayMs = methodPlan.spacingMs * index;
+            if (delayMs > 0) {
+              await wait(delayMs, signal);
+            }
             ensureActive();
             const agentId = generateId();
             const agent: Agent = {
@@ -2828,63 +3031,98 @@ export const useOverseer = () => {
            critique.gapAnalysis || 'gap identified',
            'warning'
          );
-         
-         const gapAgentId = generateId();
-         const gapAgent: Agent = {
-            id: gapAgentId,
-            name: `Gap Hunter: ${critique.newMethod.name}`,
-            type: AgentType.RESEARCHER,
-            status: AgentStatus.SEARCHING,
-            task: critique.newMethod.task,
-            reasoning: [`Targeting Blindspot: ${critique.newMethod.query}`],
-            findings: [],
-            parentId: overseerId
-         };
-         addAgent(gapAgent);
-         
-         const gapSources: string[] = [];
-         // Use Deep Research even for the gap fill
-         const gapResult = await runDeepResearchWithGuards(
+
+         const gapQuery = critique.newMethod.query;
+         registerMethodQuery(gapQuery, { source: 'llm_method_discovery' });
+         const gapPlan = planBudgetedCalls({
+           candidates: [{ item: critique.newMethod, priority: scoreMethodQuery(gapQuery), label: gapQuery }],
+           phase: 'PHASE 3: RED TEAM',
+           minSpacingMs: 250,
+           maxSpacingMs: 1200
+         });
+
+         if (gapPlan.allowed.length === 0) {
+           const gapAgentId = generateId();
+           const gapAgent: Agent = {
+             id: gapAgentId,
+             name: `Gap Hunter: ${critique.newMethod.name}`,
+             type: AgentType.RESEARCHER,
+             status: AgentStatus.SEARCHING,
+             task: critique.newMethod.task,
+             reasoning: [`Targeting Blindspot: ${gapQuery}`],
+             findings: [],
+             parentId: overseerId
+           };
+           addAgent(gapAgent);
+           markAgentSkipped(
+             gapAgentId,
+             gapAgent.name,
+             (gapPlan.limitingReason || 'latency_budget') as 'latency_budget' | 'external_call_budget',
+             'PHASE 3: RED TEAM',
+             gapQuery
+           );
+           usedQueries.add(gapQuery);
+         } else {
+           const gapAgentId = generateId();
+           const gapAgent: Agent = {
+             id: gapAgentId,
+             name: `Gap Hunter: ${critique.newMethod.name}`,
+             type: AgentType.RESEARCHER,
+             status: AgentStatus.SEARCHING,
+             task: critique.newMethod.task,
+             reasoning: [`Targeting Blindspot: ${gapQuery}`],
+             findings: [],
+             parentId: overseerId
+           };
+           addAgent(gapAgent);
+
+           const gapSources: string[] = [];
+           if (gapPlan.spacingMs > 0) {
+             await wait(gapPlan.spacingMs, signal);
+           }
+           const gapResult = await runDeepResearchWithGuards(
              gapAgentId,
              gapAgent.name,
              'PHASE 3: RED TEAM',
              critique.newMethod.task,
-             critique.newMethod.query,
+             gapQuery,
              (msg) => addLog(gapAgentId, gapAgent.name, msg, 'info'),
              { modelOverrides, role: 'gap_hunter', signal }
-         );
-         if (gapResult.skipped) {
-           logOverseer(
-             'PHASE 3: RED TEAM',
-             'gap fill skipped',
-             'performance guardrail hit',
-             gapResult.skipReason || 'guardrail',
-             'warning'
            );
-         } else {
-           gapSources.push(...gapResult.sources.map(s => s.uri).filter(Boolean));
+           usedQueries.add(gapQuery);
+           if (gapResult.skipped) {
+             logOverseer(
+               'PHASE 3: RED TEAM',
+               'gap fill skipped',
+               'performance guardrail hit',
+               gapResult.skipReason || 'guardrail',
+               'warning'
+             );
+           } else {
+             gapSources.push(...gapResult.sources.map(s => s.uri).filter(Boolean));
 
-           enqueueTaxonomyGrowth({
-             agentId: gapAgentId,
-             agentName: gapAgent.name,
-             focus: critique.newMethod.task,
-             resultText: gapResult.text || ''
-           });
+             enqueueTaxonomyGrowth({
+               agentId: gapAgentId,
+               agentName: gapAgent.name,
+               focus: critique.newMethod.task,
+               resultText: gapResult.text || ''
+             });
 
-           const gapFinding = {
+             const gapFinding = {
                source: gapAgent.name,
                content: gapResult.text,
                confidence: 0.9,
                rawSources: gapResult.sources
-           };
-           updateAgent(gapAgentId, { status: AgentStatus.COMPLETE });
-           pushFinding(gapFinding as any);
-           recordExhaustionRound(
-             exhaustionTracker,
-             'gap_fill',
-             [critique.newMethod.query],
-             gapSources
-           );
+             };
+             updateAgent(gapAgentId, { status: AgentStatus.COMPLETE });
+             pushFinding(gapFinding as any);
+             recordExhaustionRound(
+               exhaustionTracker,
+               'gap_fill',
+               [gapQuery],
+               gapSources
+             );
+           }
          }
       } else if (critique.newMethod) {
         logOverseer(
@@ -2940,9 +3178,51 @@ export const useOverseer = () => {
             `queries ${exhaustQueries.join(' | ')}`,
             'action'
           );
+          const exhaustCandidates = exhaustQueries.map((query) => {
+            if (!methodQueryMeta.has(query)) {
+              registerMethodQuery(query, { source: 'method_template_fallback' });
+            }
+            return { item: query, priority: scoreMethodQuery(query), label: query };
+          });
+          const exhaustPlan = planBudgetedCalls({
+            candidates: exhaustCandidates,
+            phase: 'PHASE 3B: EXHAUSTION TEST',
+            minSpacingMs: 350,
+            maxSpacingMs: 1200
+          });
+          const runnableQueries = exhaustPlan.allowed.map(entry => entry.item);
+          const overflowQueries = exhaustPlan.skipped.map(entry => entry.item);
+          const executedQueries: string[] = [];
           const phase3BSources: string[] = [];
-          const exhaustPromises = exhaustQueries.map(async (query: string, index: number) => {
-            await wait(index * 700, signal);
+
+          overflowQueries.forEach((query: string, index: number) => {
+            const agentId = generateId();
+            const agent: Agent = {
+              id: agentId,
+              name: buildAgentNameForQuery('Exhaustion Scout', query, index),
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: 'Exhaustion test',
+              reasoning: [`Independent query: ${query}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            markAgentSkipped(
+              agentId,
+              agent.name,
+              (exhaustPlan.limitingReason || 'latency_budget') as 'latency_budget' | 'external_call_budget',
+              'PHASE 3B: EXHAUSTION TEST',
+              query
+            );
+            usedQueries.add(query);
+          });
+
+          const exhaustPromises = runnableQueries.map(async (query: string, index: number) => {
+            const delayMs = exhaustPlan.spacingMs * index;
+            if (delayMs > 0) {
+              await wait(delayMs, signal);
+            }
             ensureActive();
             const agentId = generateId();
             const agent: Agent = {
@@ -2967,10 +3247,11 @@ export const useOverseer = () => {
               (msg) => addLog(agentId, agent.name, msg, 'info'),
               { modelOverrides, role: 'exhaustion_scout', signal }
             );
+            usedQueries.add(query);
             if (result.skipped) {
-              usedQueries.add(query);
               return;
             }
+            executedQueries.push(query);
             phase3BSources.push(...result.sources.map(s => s.uri).filter(Boolean));
             enqueueTaxonomyGrowth({
               agentId,
@@ -2995,11 +3276,12 @@ export const useOverseer = () => {
 
             addLog(agentId, agent.name, `Exhaustion Scout Complete. Sources Vetted: ${result.sources.length}`, 'success');
             pushFinding({ ...newFinding, ...{ rawSources: result.sources } } as any);
-            usedQueries.add(query);
           });
 
           await runSafely(Promise.all(exhaustPromises));
-          recordExhaustionRound(exhaustionTracker, 'exhaustion_test', exhaustQueries, phase3BSources);
+          if (executedQueries.length > 0) {
+            recordExhaustionRound(exhaustionTracker, 'exhaustion_test', executedQueries, phase3BSources);
+          }
         } else {
           logOverseer(
             'PHASE 3B: EXHAUSTION TEST',
@@ -3122,11 +3404,26 @@ export const useOverseer = () => {
           const queriesToRun = [...priorityQueries, ...fallbackQueries]
             .slice(0, targetQueries)
             .map(item => item.query);
+          const recoveryDeadline = Date.now() + EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS;
+          const recoveryCandidates = queriesToRun.map(query => ({
+            item: query,
+            priority: queryScoreMap.get(query) ?? 0,
+            label: query
+          }));
+          const recoveryPlan = planBudgetedCalls({
+            candidates: recoveryCandidates,
+            phase: 'PHASE 3C: EVIDENCE RECOVERY',
+            minSpacingMs: 350,
+            maxSpacingMs: 1500,
+            deadlineMs: recoveryDeadline
+          });
+          const runnableQueries = recoveryPlan.allowed.map(entry => entry.item);
+          const skippedQueries = recoveryPlan.skipped.map(entry => entry.item);
 
-          evidenceRecoveryMetrics.totalQueries = queriesToRun.length;
-          evidenceRecoveryMetrics.attempted = queriesToRun.length > 0;
+          evidenceRecoveryMetrics.totalQueries = runnableQueries.length + skippedQueries.length;
+          evidenceRecoveryMetrics.attempted = runnableQueries.length > 0;
 
-          if (queriesToRun.length === 0) {
+          if (runnableQueries.length === 0 && skippedQueries.length === 0) {
             logOverseer(
               'PHASE 3C: EVIDENCE RECOVERY',
               'no recovery queries available',
@@ -3135,14 +3432,47 @@ export const useOverseer = () => {
               'warning'
             );
           } else {
-            const recoveryDeadline = Date.now() + EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS;
             let recoveryTimedOut = false;
             const recoverySources: string[] = [];
-            for (const [index, query] of queriesToRun.entries()) {
+            const executedRecoveryQueries: string[] = [];
+
+            skippedQueries.forEach((query: string, index: number) => {
+              const agentId = generateId();
+              const agentName = buildAgentNameForQuery('Evidence Recovery', query, index);
+              const agent: Agent = {
+                id: agentId,
+                name: agentName,
+                type: AgentType.RESEARCHER,
+                status: AgentStatus.SEARCHING,
+                task: 'Evidence recovery',
+                reasoning: [`Recovery query: ${query}`],
+                findings: [],
+                parentId: overseerId
+              };
+              addAgent(agent);
+              markAgentSkipped(
+                agentId,
+                agentName,
+                (recoveryPlan.limitingReason || 'latency_budget') as 'latency_budget' | 'external_call_budget',
+                'PHASE 3C: EVIDENCE RECOVERY',
+                query
+              );
+              usedQueries.add(query);
+            });
+
+            for (const [index, query] of runnableQueries.entries()) {
               ensureActive();
               if (Date.now() >= recoveryDeadline) {
                 recoveryTimedOut = true;
                 break;
+              }
+              const spacingDelay = recoveryPlan.spacingMs * index;
+              if (spacingDelay > 0) {
+                if (Date.now() + spacingDelay >= recoveryDeadline) {
+                  recoveryTimedOut = true;
+                  break;
+                }
+                await wait(spacingDelay, signal);
               }
 
               const queryScore = queryScoreMap.get(query) ?? 0;
@@ -3161,6 +3491,7 @@ export const useOverseer = () => {
 
               usedQueries.add(query);
               evidenceRecoveryMetrics.executedQueries += 1;
+              executedRecoveryQueries.push(query);
 
               const agentId = generateId();
               const agentName = buildAgentNameForQuery('Evidence Recovery', query, index);
@@ -3328,7 +3659,7 @@ export const useOverseer = () => {
               recordExhaustionRound(
                 exhaustionTracker,
                 'evidence_recovery',
-                queriesToRun,
+                executedRecoveryQueries,
                 recoverySources
               );
             }

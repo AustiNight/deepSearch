@@ -209,15 +209,17 @@ const normalizeAddressForQuery = (value: string) =>
 const stripUnit = (value: string) => value.replace(/\s+(?:#|APT|APARTMENT|UNIT|SUITE|STE|BLDG|BUILDING|FL|FLOOR|LOT)\s*\w+\b/i, "").trim();
 
 export const buildDallasAddressVariants = (address: string): string[] => {
-  const baseVariants = normalizeAddressVariants(address).map(normalizeAddressForQuery);
+  const baseVariants = normalizeAddressVariants(address);
   const variants = new Set<string>();
 
   for (const raw of baseVariants) {
     if (!raw) continue;
-    const noUnit = stripUnit(raw.split(",")[0]);
-    const tokens = noUnit.split(" ").filter(Boolean);
+    const streetOnly = stripUnit(raw.split(",")[0]);
+    if (!streetOnly) continue;
+    const normalized = normalizeAddressForQuery(streetOnly);
+    const tokens = normalized.split(" ").filter(Boolean);
     if (tokens.length === 0) continue;
-    variants.add(noUnit);
+    variants.add(normalized);
 
     const hasPrefixDirection = tokens.length >= 2 && /^\d+$/.test(tokens[0]) && DIRECTION_TOKENS.has(tokens[1]);
     const hasSuffixDirection = tokens.length >= 2 && DIRECTION_TOKENS.has(tokens[tokens.length - 1]);

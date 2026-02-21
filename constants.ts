@@ -37,6 +37,23 @@ export const SLO_MEDIAN_LATENCY_MS = 60000;
 
 export const MAX_EXTERNAL_CALLS_PER_RUN = 60;
 export const RUN_TOTAL_TIME_BUDGET_MS = 1000 * 120;
+export const DEFAULT_ESTIMATED_CALL_LATENCY_MS = 4500;
+
+export const DEFAULT_PRIORITY_WEIGHTS = {
+  method: {
+    llm_method_discovery: 0.95,
+    address_direct: 0.9,
+    knowledge_base_method: 0.75,
+    knowledge_base_domain: 0.6,
+    method_template_fallback: 0.45
+  },
+  sector: {
+    subtopicBoost: 0.2,
+    verticalSeedBase: 0.3,
+    rawSectorBase: 0.25,
+    fallback: 0.15
+  }
+};
 export const OPEN_DATA_DISCOVERY_MAX_DATASETS = 25;
 export const OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES = 10;
 export const OPEN_DATA_INDEX_TTL_DAYS = 30;

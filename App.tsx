@@ -5,7 +5,7 @@ import { AgentGraph } from './components/AgentGraph';
 import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
 import { TransparencyPanel } from './components/TransparencyPanel';
-import { LLMProvider, ModelOverrides, ModelRole, OpenDataAuthConfig, RunConfig, UniversalSettingsPayload } from './types';
+import { AgentStatus, LLMProvider, ModelOverrides, ModelRole, OpenDataAuthConfig, RunConfig, UniversalSettingsPayload } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
 import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistService';
 import { fetchUniversalSettings, updateUniversalSettings } from './services/universalSettingsService';
@@ -32,6 +32,7 @@ import {
   readRunConfig,
   readSettingsMetadata,
   readSettingsMigrationComplete,
+  readUiPreferences,
   readUnlocked,
   consumeOptionalKeysPersistenceInvalidation,
   isOptionalKeysPersistenceSupported,
@@ -42,6 +43,7 @@ import {
   writeProviderKey,
   writeRunConfig,
   writeSettingsMigrationComplete,
+  writeUiPreferences,
   writeUnlocked
 } from './services/storagePolicy';
 import {
@@ -54,7 +56,9 @@ import {
   EARLY_STOP_DIMINISHING_SCORE,
   EARLY_STOP_NOVELTY_RATIO,
   EARLY_STOP_NEW_DOMAINS,
-  EARLY_STOP_NEW_SOURCES
+  EARLY_STOP_NEW_SOURCES,
+  DEFAULT_ESTIMATED_CALL_LATENCY_MS,
+  DEFAULT_PRIORITY_WEIGHTS
 } from './constants';
 
 const ENV_GEMINI_KEY = (process.env.GEMINI_API_KEY || '').trim();
@@ -84,6 +88,38 @@ const ENV_EARLY_STOP_DIMINISHING = parseEnvFloat(process.env.EARLY_STOP_DIMINISH
 const ENV_EARLY_STOP_NOVELTY = parseEnvFloat(process.env.EARLY_STOP_NOVELTY_RATIO, EARLY_STOP_NOVELTY_RATIO);
 const ENV_EARLY_STOP_NEW_DOMAINS = parseEnvNumber(process.env.EARLY_STOP_NEW_DOMAINS, EARLY_STOP_NEW_DOMAINS);
 const ENV_EARLY_STOP_NEW_SOURCES = parseEnvNumber(process.env.EARLY_STOP_NEW_SOURCES, EARLY_STOP_NEW_SOURCES);
+const ENV_ESTIMATED_CALL_LATENCY_MS = parseEnvNumber(process.env.ESTIMATED_CALL_LATENCY_MS, DEFAULT_ESTIMATED_CALL_LATENCY_MS);
+
+const clonePriorityWeights = (input = DEFAULT_PRIORITY_WEIGHTS) => ({
+  method: { ...input.method },
+  sector: { ...input.sector }
+});
+
+const normalizePriorityWeights = (raw?: RunConfig['priorityWeights']) => {
+  const defaults = DEFAULT_PRIORITY_WEIGHTS;
+  const methodRaw = raw?.method || {};
+  const sectorRaw = raw?.sector || {};
+  const clampWeight = (value: unknown, fallback: number) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0, Math.min(1, n));
+  };
+  return {
+    method: {
+      llm_method_discovery: clampWeight(methodRaw.llm_method_discovery, defaults.method.llm_method_discovery),
+      address_direct: clampWeight(methodRaw.address_direct, defaults.method.address_direct),
+      knowledge_base_method: clampWeight(methodRaw.knowledge_base_method, defaults.method.knowledge_base_method),
+      knowledge_base_domain: clampWeight(methodRaw.knowledge_base_domain, defaults.method.knowledge_base_domain),
+      method_template_fallback: clampWeight(methodRaw.method_template_fallback, defaults.method.method_template_fallback)
+    },
+    sector: {
+      subtopicBoost: clampWeight(sectorRaw.subtopicBoost, defaults.sector.subtopicBoost),
+      verticalSeedBase: clampWeight(sectorRaw.verticalSeedBase, defaults.sector.verticalSeedBase),
+      rawSectorBase: clampWeight(sectorRaw.rawSectorBase, defaults.sector.rawSectorBase),
+      fallback: clampWeight(sectorRaw.fallback, defaults.sector.fallback)
+    }
+  };
+};
 
 const DEFAULT_RUN_CONFIG: RunConfig = {
   minAgents: ENV_MIN_AGENTS,
@@ -95,7 +131,9 @@ const DEFAULT_RUN_CONFIG: RunConfig = {
   earlyStopDiminishingScore: ENV_EARLY_STOP_DIMINISHING,
   earlyStopNoveltyRatio: ENV_EARLY_STOP_NOVELTY,
   earlyStopNewDomains: ENV_EARLY_STOP_NEW_DOMAINS,
-  earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES
+  earlyStopNewSources: ENV_EARLY_STOP_NEW_SOURCES,
+  estimatedCallLatencyMs: ENV_ESTIMATED_CALL_LATENCY_MS,
+  priorityWeights: clonePriorityWeights()
 };
 
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
@@ -206,6 +244,7 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [showTransparency, setShowTransparency] = useState(false);
+  const [showGuardrailDebug, setShowGuardrailDebug] = useState<boolean>(() => readUiPreferences().showGuardrailDebug === true);
   const [isUnlocked, setIsUnlocked] = useState(!REQUIRES_PASSWORD);
   const [showAuth, setShowAuth] = useState(false);
   const [authInput, setAuthInput] = useState('');
@@ -228,6 +267,29 @@ const App: React.FC = () => {
     } catch (_) {
       // ignore
     }
+  };
+
+  const persistGuardrailDebug = (value: boolean) => {
+    setShowGuardrailDebug(value);
+    const current = readUiPreferences();
+    writeUiPreferences({ ...current, showGuardrailDebug: value });
+  };
+
+  const resolvedPriorityWeights = normalizePriorityWeights(draftRunConfig.priorityWeights);
+  const updatePriorityWeight = (
+    section: 'method' | 'sector',
+    key: string,
+    value: number
+  ) => {
+    const current = normalizePriorityWeights(draftRunConfig.priorityWeights);
+    const next = {
+      ...current,
+      [section]: {
+        ...current[section],
+        [key]: value
+      }
+    };
+    setDraftRunConfig(prev => ({ ...prev, priorityWeights: next }));
   };
 
   const findLatestRagContext = () => {
@@ -461,6 +523,8 @@ const App: React.FC = () => {
         const earlyStopNoveltyRatio = parseEnvFloat(parsed?.earlyStopNoveltyRatio?.toString(), ENV_EARLY_STOP_NOVELTY);
         const earlyStopNewDomains = parseEnvNumber(parsed?.earlyStopNewDomains?.toString(), ENV_EARLY_STOP_NEW_DOMAINS);
         const earlyStopNewSources = parseEnvNumber(parsed?.earlyStopNewSources?.toString(), ENV_EARLY_STOP_NEW_SOURCES);
+        const estimatedCallLatencyMs = parseEnvNumber(parsed?.estimatedCallLatencyMs?.toString(), ENV_ESTIMATED_CALL_LATENCY_MS);
+        const priorityWeights = normalizePriorityWeights(parsed?.priorityWeights);
         resolvedRunConfig = {
           minAgents,
           maxAgents: Math.max(minAgents, maxAgents),
@@ -471,7 +535,9 @@ const App: React.FC = () => {
           earlyStopDiminishingScore,
           earlyStopNoveltyRatio,
           earlyStopNewDomains,
-          earlyStopNewSources
+          earlyStopNewSources,
+          estimatedCallLatencyMs,
+          priorityWeights
         };
       }
     } catch (_) {
@@ -559,10 +625,13 @@ const App: React.FC = () => {
     const rawNovelty = Number(draftRunConfig.earlyStopNoveltyRatio);
     const rawNewDomains = Number(draftRunConfig.earlyStopNewDomains);
     const rawNewSources = Number(draftRunConfig.earlyStopNewSources);
+    const rawEstimatedLatency = Number(draftRunConfig.estimatedCallLatencyMs);
     const earlyStopDiminishingScore = Math.max(0, Math.min(1, Number.isFinite(rawDiminishing) ? rawDiminishing : ENV_EARLY_STOP_DIMINISHING));
     const earlyStopNoveltyRatio = Math.max(0, Math.min(1, Number.isFinite(rawNovelty) ? rawNovelty : ENV_EARLY_STOP_NOVELTY));
     const earlyStopNewDomains = Math.max(0, Math.floor(Number.isFinite(rawNewDomains) ? rawNewDomains : ENV_EARLY_STOP_NEW_DOMAINS));
     const earlyStopNewSources = Math.max(0, Math.floor(Number.isFinite(rawNewSources) ? rawNewSources : ENV_EARLY_STOP_NEW_SOURCES));
+    const estimatedCallLatencyMs = Math.max(500, Math.floor(Number.isFinite(rawEstimatedLatency) ? rawEstimatedLatency : ENV_ESTIMATED_CALL_LATENCY_MS));
+    const priorityWeights = normalizePriorityWeights(draftRunConfig.priorityWeights);
     const nextRunConfig = {
       minAgents,
       maxAgents,
@@ -573,7 +642,9 @@ const App: React.FC = () => {
       earlyStopDiminishingScore,
       earlyStopNoveltyRatio,
       earlyStopNewDomains,
-      earlyStopNewSources
+      earlyStopNewSources,
+      estimatedCallLatencyMs,
+      priorityWeights
     };
 
     setProvider(draftProvider);
@@ -825,6 +896,10 @@ const App: React.FC = () => {
   };
 
   const { agents, logs, report, isRunning, startResearch, resetRun, skills } = useOverseer();
+  const visibleAgents = showGuardrailDebug
+    ? agents
+    : agents.filter(agent => agent.status !== AgentStatus.SKIPPED);
+  const skippedAgents = agents.filter(agent => agent.status === AgentStatus.SKIPPED);
 
   const effectiveKeys = {
     google: keyOverrides.google || ENV_GEMINI_KEY,
@@ -1242,6 +1317,21 @@ const App: React.FC = () => {
               </div>
 
               <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-2">
+                <label className="block text-xs font-mono text-gray-400">PERF GUARDRAILS DEBUG</label>
+                <p className="text-[10px] text-gray-500">
+                  When enabled, show agents skipped due to latency or external-call guardrails in a hidden debug panel.
+                </p>
+                <label className="flex items-center gap-2 text-[10px] font-mono text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={showGuardrailDebug}
+                    onChange={(e) => persistGuardrailDebug(e.target.checked)}
+                  />
+                  SHOW SKIPPED AGENTS (HIDDEN BY DEFAULT)
+                </label>
+              </div>
+
+              <div className="border border-gray-800 rounded p-3 bg-black/30 space-y-2">
                 <label className="block text-xs font-mono text-gray-400">DEVELOPER REFERENCE (SOCRATA RAG)</label>
                 <p className="text-[10px] text-gray-500">
                   Read-only snippets from the local Socrata RAG bundle. No secrets, no external calls.
@@ -1520,6 +1610,130 @@ const App: React.FC = () => {
                 <p className="text-[10px] text-gray-500 mt-1">
                   Example: set NOVELTY 0.2 and NEW SOURCES 1 to stop sooner on well-trodden topics.
                 </p>
+                <label className="block text-xs font-mono text-gray-400 mt-4 mb-2">SCHEDULER</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-500 mb-1">EST. CALL LATENCY (MS)</label>
+                    <input
+                      type="number"
+                      min={500}
+                      value={draftRunConfig.estimatedCallLatencyMs ?? ENV_ESTIMATED_CALL_LATENCY_MS}
+                      onChange={(e) => setDraftRunConfig(prev => ({
+                        ...prev,
+                        estimatedCallLatencyMs: Number(e.target.value)
+                      }))}
+                      className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Used when recent call latency history is unavailable; runtime will override with median of recent calls.
+                </p>
+                <div className="mt-3 border border-gray-800 rounded p-2">
+                  <p className="text-[10px] font-mono text-gray-400 mb-2">PRIORITY WEIGHTS</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] font-mono text-gray-500 mb-2">METHOD QUERIES</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[10px] text-gray-500 font-mono">LLM DISCOVERY</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.method.llm_method_discovery}
+                          onChange={(e) => updatePriorityWeight('method', 'llm_method_discovery', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                        <label className="text-[10px] text-gray-500 font-mono">ADDRESS DIRECT</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.method.address_direct}
+                          onChange={(e) => updatePriorityWeight('method', 'address_direct', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                        <label className="text-[10px] text-gray-500 font-mono">KB METHOD</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.method.knowledge_base_method}
+                          onChange={(e) => updatePriorityWeight('method', 'knowledge_base_method', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                        <label className="text-[10px] text-gray-500 font-mono">KB DOMAIN</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.method.knowledge_base_domain}
+                          onChange={(e) => updatePriorityWeight('method', 'knowledge_base_domain', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                        <label className="text-[10px] text-gray-500 font-mono">TEMPLATE BASE</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.method.method_template_fallback}
+                          onChange={(e) => updatePriorityWeight('method', 'method_template_fallback', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-mono text-gray-500 mb-2">SECTOR SOURCES</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[10px] text-gray-500 font-mono">SUBTOPIC BOOST</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.sector.subtopicBoost}
+                          onChange={(e) => updatePriorityWeight('sector', 'subtopicBoost', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                        <label className="text-[10px] text-gray-500 font-mono">VERTICAL SEED</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.sector.verticalSeedBase}
+                          onChange={(e) => updatePriorityWeight('sector', 'verticalSeedBase', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                        <label className="text-[10px] text-gray-500 font-mono">RAW SECTOR BASE</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.sector.rawSectorBase}
+                          onChange={(e) => updatePriorityWeight('sector', 'rawSectorBase', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                        <label className="text-[10px] text-gray-500 font-mono">FALLBACK</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={resolvedPriorityWeights.sector.fallback}
+                          onChange={(e) => updatePriorityWeight('sector', 'fallback', Number(e.target.value))}
+                          className="w-full bg-black border border-gray-700 rounded p-1 text-[10px] focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {settingsSyncStatus && (
@@ -1689,12 +1903,37 @@ const App: React.FC = () => {
                      AGENT ORCHESTRATION GRAPH
                    </h3>
                 </div>
-                <AgentGraph agents={agents} />
+                <AgentGraph agents={visibleAgents} />
              </div>
 
              {/* Right: Logs */}
-             <div className="lg:col-span-1 h-full min-h-0 flex flex-col">
+             <div className="lg:col-span-1 h-full min-h-0 flex flex-col gap-3">
                 <LogTerminal logs={logs} />
+                {showGuardrailDebug && (
+                  <div className="border border-gray-800 rounded-lg bg-black/40 p-3 text-xs font-mono text-gray-300">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] text-gray-400">PERF GUARDRAILS (SKIPPED)</span>
+                      <span className="text-[10px] text-gray-600">{skippedAgents.length} skipped</span>
+                    </div>
+                    {skippedAgents.length === 0 ? (
+                      <p className="text-[10px] text-gray-500">No agents skipped due to guardrails.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {skippedAgents.map(agent => (
+                          <div key={agent.id} className="border border-gray-800 rounded p-2 bg-black/30">
+                            <div className="text-[11px] text-gray-200">{agent.name}</div>
+                            <div className="text-[10px] text-gray-500">{agent.task}</div>
+                            {agent.reasoning?.length > 0 && (
+                              <div className="text-[10px] text-gray-600 mt-1">
+                                {agent.reasoning.slice(0, 2).join(' | ')}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
              </div>
           </div>
         )}
