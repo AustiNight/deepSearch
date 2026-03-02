@@ -623,23 +623,36 @@ const normalizeStateCode = (value: string) => {
 };
 
 const extractLocationHint = (topic: string) => {
-  const match = topic.match(/\\b(?:of|in|from|near|around|outside|outside of)\\s+([^,]+(?:,\\s*[^,]+)?)$/i);
+  const match = topic.match(/\b(?:of|in|from|near|around|outside|outside of)\s+([^,]+(?:,\s*[^,]+)?)$/i);
   return match ? match[1].trim() : topic.trim();
 };
 
+const stripZipFromStateToken = (value: string) => {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  const tokens = cleaned.split(' ').filter(Boolean);
+  if (tokens.length === 0) return cleaned;
+  const last = tokens[tokens.length - 1];
+  if (/^\d{5}(?:-\d{4})?$/.test(last)) {
+    return tokens.slice(0, -1).join(' ');
+  }
+  return cleaned;
+};
+
 const parseCityState = (value: string): { city: string; state: string } => {
-  const cleaned = value.replace(/\\s+/g, ' ').trim();
+  const cleaned = value.replace(/\s+/g, ' ').trim();
   if (!cleaned) return { city: '', state: '' };
 
   const commaParts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
   if (commaParts.length >= 2) {
-    const stateCandidate = normalizeStateCode(commaParts[commaParts.length - 1]);
+    const stateToken = stripZipFromStateToken(commaParts[commaParts.length - 1]);
+    const stateCandidate = normalizeStateCode(stateToken);
     if (stateCandidate) {
       return { city: commaParts.slice(0, -1).join(', '), state: stateCandidate };
     }
   }
 
-  const abbrMatch = cleaned.match(/^(.*)\\s+([A-Za-z]{2})$/);
+  const abbrMatch = cleaned.match(/^(.*)\s+([A-Za-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$/);
   if (abbrMatch) {
     const stateCandidate = normalizeStateCode(abbrMatch[2]);
     if (stateCandidate) {
@@ -647,7 +660,7 @@ const parseCityState = (value: string): { city: string; state: string } => {
     }
   }
 
-  const nameMatch = cleaned.match(new RegExp(`^(.*)\\s+${STATE_NAME_REGEX.source}$`, 'i'));
+  const nameMatch = cleaned.match(new RegExp(`^(.*)\\s+${STATE_NAME_REGEX.source}(?:\\s+\\d{5}(?:-\\d{4})?)?$`, 'i'));
   if (nameMatch) {
     const stateCandidate = normalizeStateCode(nameMatch[2]);
     if (stateCandidate) {
@@ -1227,7 +1240,7 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
   const propertyAuthorityTerms = buildPropertyAuthorityTerms(state);
   const handle = normalizeHandle(cleaned);
   const names = nameVariants.length > 0 ? nameVariants : [cleaned];
-  const countyValue = county ? [formatCountyWithState(county, state)] : (addressLike ? [city || cleaned] : []);
+  const countyValue = county ? [formatCountyWithState(county, state)] : [];
   const countyPrimary = geoExpansion.primaryCounty ? [geoExpansion.primaryCounty] : countyValue;
   const countyMetro = geoExpansion.metroCounties.length > 0 ? geoExpansion.metroCounties : countyPrimary;
   const countyRegion = geoExpansion.regionCounties.length > 0 ? geoExpansion.regionCounties : countyMetro;
@@ -1243,7 +1256,7 @@ const buildSlotValues = (topic: string, nameVariants: string[], addressLike: boo
     companyDomain: domain ? [domain] : [],
     product: [cleaned],
     brandDomain: domain ? [domain] : [],
-    city: city ? [city] : [cleaned],
+    city: city ? [city] : [],
     cityExpanded,
     cityMetro,
     county: countyPrimary,
@@ -3759,6 +3772,39 @@ export const useOverseer = () => {
       }
       const rankedSources = rankSourcesByAuthorityAndRecency(complianceResult.allowedSources);
       const allowedSources = rankedSources.map((entry) => entry.source.uri);
+      if (allowedSources.length === 0) {
+        const totalFindings = findingsRef.current.length;
+        const totalRawSources = allRawSources.length;
+        const blockedCount = complianceResult.blockedSources.length;
+        const guardrailFlags: string[] = [];
+        if (performanceState.latencyBudgetExceeded) guardrailFlags.push('latency_budget');
+        if (performanceState.externalCallBudgetExceeded) guardrailFlags.push('external_call_budget');
+
+        let reason = 'unknown';
+        if (totalFindings === 0) {
+          reason = 'no findings recorded';
+        } else if (totalRawSources === 0) {
+          reason = 'findings produced without sources';
+        } else if (blockedCount > 0) {
+          reason = 'all sources blocked by compliance';
+        } else if (guardrailFlags.length > 0) {
+          reason = 'performance guardrails hit';
+        }
+
+        const detailParts = [
+          `findings ${totalFindings}`,
+          `rawSources ${totalRawSources}`,
+          blockedCount ? `blocked ${blockedCount}` : null,
+          guardrailFlags.length > 0 ? `guardrails ${guardrailFlags.join('+')}` : null
+        ].filter(Boolean);
+        logOverseer(
+          'PHASE 4: EVIDENCE',
+          'no allowed sources',
+          reason,
+          detailParts.join(' | '),
+          'warning'
+        );
+      }
       const finalReportData = await runSafely(synthesizeGrandReport(
         topic,
         findingsRef.current,

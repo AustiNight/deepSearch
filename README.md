@@ -46,17 +46,51 @@ See `CHANGELOG.md` for UI/search release notes.
 
 To keep API keys off the client, deploy the included Worker and point the frontend at it.
 
-1. Install and login to Wrangler:
-   `npm i -g wrangler`
-   `wrangler login`
-2. Set Worker secrets:
-   `wrangler secret put OPENAI_API_KEY`
-   `wrangler secret put GEMINI_API_KEY`
-3. Deploy the Worker:
-   `wrangler deploy`
-4. Set the Worker URL in `.env.local`:
-   `PROXY_BASE_URL=https://<your-worker>.<your-subdomain>.workers.dev`
-5. Rebuild or restart the frontend dev server.
+### Routine Operations (Default: API Token + Terminal Workflow)
+
+Use delegated API-token auth for all day-to-day deployment/secret operations. Do not use `wrangler login` for routine rotation.
+
+1. Pin a Wrangler version for the session:
+   `export WRANGLER_VERSION=<approved-version>`
+2. Export required Cloudflare auth context:
+   `export CLOUDFLARE_API_TOKEN=<delegated-token>`
+   `export CLOUDFLARE_ACCOUNT_ID=<production-account-id>`
+3. Deploy and inspect from terminal:
+   `npx wrangler@${WRANGLER_VERSION} deploy --name deepsearch`
+   `npx wrangler@${WRANGLER_VERSION} deployments list --name deepsearch`
+4. Rotate Worker secrets from terminal:
+   `npx wrangler@${WRANGLER_VERSION} secret put OPENAI_API_KEY --name deepsearch`
+   `npx wrangler@${WRANGLER_VERSION} secret put GEMINI_API_KEY --name deepsearch`
+
+### Canonical Secret Ownership Model
+
+- Production `OPENAI_API_KEY` is a single shared secret stored only in the family/designated-proxy password manager vault.
+- One primary operator owns the routine rotation schedule.
+- At least one backup operator has the same vault and API-token permissions for continuity and incident response.
+- The previous production key is retained in vault history until post-rotation verification passes, then handled per vault retention policy.
+
+### Delegated Cloudflare API-Token Policy (No Dashboard Login)
+
+- Required environment variables: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+- Scope: production account, constrained to Worker `deepsearch`.
+- Minimum permissions for routine operations:
+  - `wrangler secret put`: Workers Scripts write/edit permission.
+  - `wrangler secret list`: Workers Scripts read permission.
+  - `wrangler deployments list`: Workers Deployments read permission.
+- Token expiry: maximum 90 days.
+- Revocation + replacement procedure:
+  1. Revoke current delegated token immediately (scheduled expiry, role change, or suspected compromise).
+  2. Issue a replacement token with the same scoped permissions and a new expiry (<= 90 days).
+  3. Update operator environment variables and verify terminal access with `npx wrangler@${WRANGLER_VERSION} whoami`.
+  4. Record revocation/replacement details in `.ralph/verification-log.md` without secret/token values.
+
+### Break-Glass Access (Cloudflare Dashboard)
+
+Dashboard login is break-glass only. Use it only when token-based terminal workflow is unavailable (for example, token issuance outage or identity provider disruption). Any dashboard use must be logged in `.ralph/verification-log.md` with reason, start/end timestamps, and follow-up actions to restore token-only operation.
+
+### OpenAI Key Rotation Runbook
+
+Use `.ralph/runbooks/openai-worker-secret-rotation.md` for the timed, terminal-only procedure and rollback path.
 
 Notes:
 - If `PROXY_BASE_URL` is set, the app will use the proxy and no client API keys are required.
