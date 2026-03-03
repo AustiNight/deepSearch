@@ -323,7 +323,7 @@ export const resolveParcelWorkflow = async (
 
   let gisCandidates: ParcelCandidate[] = [];
   let gisAttempted = false;
-  if (!resolvedCandidate && assessorCandidates.length === 0 && subject.geo && providers.gisParcelLayer) {
+  if (!resolvedCandidate && subject.geo && providers.gisParcelLayer) {
     gisAttempted = true;
     const features = await providers.gisParcelLayer({
       point: subject.geo,

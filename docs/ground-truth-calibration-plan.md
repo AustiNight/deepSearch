@@ -67,6 +67,8 @@ Confidence Calibration:
 
 ## Calibration Workflow
 1. Run the address pipeline on the calibration set and store outputs in `data/ground-truth/run-outputs/<date>/`.
+   - Command: `npm run calibration:open-data`
+   - Optional override: `GROUND_TRUTH_SAMPLES_PATH=/abs/path/to/address-samples.csv npm run calibration:open-data`
 2. Compare outputs to ground-truth labels and produce a results table with pass/fail per rubric item.
 3. Compute summary metrics:
    - Parcel resolution accuracy rate.

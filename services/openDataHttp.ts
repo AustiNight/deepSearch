@@ -1,6 +1,7 @@
 import type { OpenDataPortalType } from "../types";
 import { recordPortalError } from "./portalErrorTelemetry";
 import { apiFetch } from "./apiClient";
+import { OPEN_DATA_QUERY_CACHE_MAX_ENTRIES } from "../constants";
 
 export type PortalRequestContext = {
   portalType?: OpenDataPortalType;
@@ -13,6 +14,18 @@ export type FetchResult<T> =
   | { ok: false; status: number; data: null; error: string; headers: Headers };
 
 const rateLimitState = new Map<string, number>();
+const jsonResponseCache = new Map<string, {
+  expiresAt: number;
+  status: number;
+  headers: [string, string][];
+  data: unknown;
+}>();
+const textResponseCache = new Map<string, {
+  expiresAt: number;
+  status: number;
+  headers: [string, string][];
+  data: string;
+}>();
 
 export const enforceRateLimit = async (key: string, minIntervalMs: number) => {
   if (!minIntervalMs || minIntervalMs <= 0) return;
@@ -60,6 +73,41 @@ const buildHeaders = (headers?: Record<string, string>) => {
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 };
 
+const normalizeHeaderPairs = (headers?: Record<string, string>) => {
+  if (!headers) return "";
+  return Object.entries(headers)
+    .map(([key, value]) => [String(key || "").trim().toLowerCase(), String(value || "").trim()] as const)
+    .filter(([key, value]) => key.length > 0 && value.length > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${key}:${value}`)
+    .join("|");
+};
+
+const buildCacheKey = (
+  url: string,
+  headers?: Record<string, string>,
+  explicitCacheKey?: string
+) => {
+  if (explicitCacheKey && explicitCacheKey.trim()) {
+    return `${explicitCacheKey.trim()}|${normalizeHeaderPairs(headers)}`;
+  }
+  return `${url}|${normalizeHeaderPairs(headers)}`;
+};
+
+const cloneHeaders = (headers: Headers): [string, string][] => {
+  return Array.from(headers.entries());
+};
+
+const toHeaders = (headers: [string, string][]) => new Headers(headers);
+
+const evictCache = <T>(cache: Map<string, T>) => {
+  while (cache.size > OPEN_DATA_QUERY_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (!oldest) break;
+    cache.delete(oldest);
+  }
+};
+
 const proxyFetch = async (
   url: string,
   options: { headers?: Record<string, string>; signal?: AbortSignal },
@@ -81,12 +129,35 @@ const proxyFetch = async (
 
 export const fetchJsonWithRetry = async <T>(
   url: string,
-  options: { headers?: Record<string, string>; signal?: AbortSignal; retries?: number; minDelayMs?: number } = {},
+  options: {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    retries?: number;
+    minDelayMs?: number;
+    cacheTtlMs?: number;
+    cacheKey?: string;
+  } = {},
   context: PortalRequestContext = {}
 ): Promise<FetchResult<T>> => {
   const retries = Math.max(0, Math.floor(options.retries ?? 2));
   const minDelayMs = Math.max(0, options.minDelayMs ?? 200);
   const headers = buildHeaders(options.headers);
+  const cacheTtlMs = Math.max(0, Number(options.cacheTtlMs || 0));
+  const cacheKey = cacheTtlMs > 0 ? buildCacheKey(url, headers, options.cacheKey) : "";
+  if (cacheTtlMs > 0 && cacheKey) {
+    const cached = jsonResponseCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return {
+        ok: true,
+        status: cached.status,
+        data: cached.data as T,
+        headers: toHeaders(cached.headers)
+      };
+    }
+    if (cached) {
+      jsonResponseCache.delete(cacheKey);
+    }
+  }
   let attempt = 0;
 
   while (attempt <= retries) {
@@ -105,6 +176,15 @@ export const fetchJsonWithRetry = async <T>(
       }
       try {
         const data = await res.json();
+        if (cacheTtlMs > 0 && cacheKey) {
+          jsonResponseCache.set(cacheKey, {
+            expiresAt: Date.now() + cacheTtlMs,
+            status: res.status,
+            headers: cloneHeaders(res.headers),
+            data
+          });
+          evictCache(jsonResponseCache);
+        }
         return { ok: true, status: res.status, data: data as T, headers: res.headers };
       } catch (err) {
         recordError({ ...context, endpoint: url }, res.status, "invalid_json");
@@ -126,12 +206,35 @@ export const fetchJsonWithRetry = async <T>(
 
 export const fetchTextWithRetry = async (
   url: string,
-  options: { headers?: Record<string, string>; signal?: AbortSignal; retries?: number; minDelayMs?: number } = {},
+  options: {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    retries?: number;
+    minDelayMs?: number;
+    cacheTtlMs?: number;
+    cacheKey?: string;
+  } = {},
   context: PortalRequestContext = {}
 ): Promise<FetchResult<string>> => {
   const retries = Math.max(0, Math.floor(options.retries ?? 2));
   const minDelayMs = Math.max(0, options.minDelayMs ?? 200);
   const headers = buildHeaders(options.headers);
+  const cacheTtlMs = Math.max(0, Number(options.cacheTtlMs || 0));
+  const cacheKey = cacheTtlMs > 0 ? buildCacheKey(url, headers, options.cacheKey) : "";
+  if (cacheTtlMs > 0 && cacheKey) {
+    const cached = textResponseCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return {
+        ok: true,
+        status: cached.status,
+        data: cached.data,
+        headers: toHeaders(cached.headers)
+      };
+    }
+    if (cached) {
+      textResponseCache.delete(cacheKey);
+    }
+  }
   let attempt = 0;
 
   while (attempt <= retries) {
@@ -149,6 +252,15 @@ export const fetchTextWithRetry = async (
         return { ok: false, status: res.status, data: null, error: `HTTP ${res.status}`, headers: res.headers };
       }
       const data = await res.text();
+      if (cacheTtlMs > 0 && cacheKey) {
+        textResponseCache.set(cacheKey, {
+          expiresAt: Date.now() + cacheTtlMs,
+          status: res.status,
+          headers: cloneHeaders(res.headers),
+          data
+        });
+        evictCache(textResponseCache);
+      }
       return { ok: true, status: res.status, data, headers: res.headers };
     } catch (err) {
       recordError({ ...context, endpoint: url }, 0, "network");

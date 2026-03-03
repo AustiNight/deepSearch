@@ -39,9 +39,12 @@ import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals,
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
 import { normalizeAddressVariants } from '../services/addressNormalization';
 import { evaluatePrimaryRecordCoverage } from '../services/primaryRecordCoverage';
-import { getOpenDatasetHints } from '../services/openDataPortalService';
+import { findJurisdictionAvailability } from '../services/jurisdictionAvailability';
+import { getOpenDatasetHints, rankOpenDataPortalCandidates } from '../services/openDataPortalService';
 import { buildUnsupportedJurisdictionGap, classifyAddressScope, AddressScopeClassification } from '../services/addressScope';
 import { getOpenDataConfig } from '../services/openDataConfig';
+import { resolveParcelFromOpenDataPortal } from '../services/openDataParcelResolution';
+import { runOpenDataParcelResolutionPhase } from '../services/openDataPhase3C';
 import { runDallasEvidencePack, isDallasJurisdiction } from '../services/dallasEvidencePack';
 import { redactSensitiveTextWithPatterns } from '../services/redaction';
 import {
@@ -68,6 +71,66 @@ const normalizeDomain = (url: string) => {
 };
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const normalizePortalCandidate = (value: string) => {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, '');
+  return `https://${trimmed}`.replace(/\/$/, '');
+};
+
+const citationToNormalizedSource = (source: any): NormalizedSource | null => {
+  const url = typeof source?.url === 'string' ? source.url.trim() : '';
+  if (!url) return null;
+  return {
+    uri: url,
+    title: typeof source?.title === 'string' ? source.title : 'Open data source',
+    domain: normalizeDomain(url),
+    provider: 'system',
+    kind: 'citation'
+  };
+};
+
+const buildOpenDataPortalCandidates = (jurisdiction?: Jurisdiction) => {
+  const hints = getOpenDatasetHints(['parcel', 'assessor', 'appraiser', 'apn', 'pin', 'cadastre']).map((dataset) => dataset.portalUrl);
+  const availability = findJurisdictionAvailability(jurisdiction);
+  const availabilityPortals = Object.values(availability?.records || {})
+    .flatMap((record: any) => (record?.evidence?.portalUrl ? [record.evidence.portalUrl] : []));
+  const normalizeToken = (value?: string) => (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cityToken = normalizeToken(jurisdiction?.city);
+  const countyToken = normalizeToken(jurisdiction?.county);
+  const heuristicPortals = uniqueList([
+    cityToken ? `https://data.${cityToken}.gov` : '',
+    cityToken ? `https://opendata.${cityToken}.gov` : '',
+    countyToken ? `https://data.${countyToken}county.gov` : ''
+  ]).slice(0, 2);
+  const normalized = uniqueList(
+    [...availabilityPortals, ...hints, ...heuristicPortals]
+      .map((value) => normalizePortalCandidate(String(value || '')))
+      .filter(Boolean)
+  );
+  const baseWeights: Record<string, number> = {};
+  availabilityPortals.forEach((portal) => {
+    const normalizedPortal = normalizePortalCandidate(String(portal || ''));
+    if (!normalizedPortal) return;
+    baseWeights[normalizedPortal] = (baseWeights[normalizedPortal] || 0) + 40;
+  });
+  hints.forEach((portal) => {
+    const normalizedPortal = normalizePortalCandidate(String(portal || ''));
+    if (!normalizedPortal) return;
+    baseWeights[normalizedPortal] = (baseWeights[normalizedPortal] || 0) + 20;
+  });
+  heuristicPortals.forEach((portal) => {
+    const normalizedPortal = normalizePortalCandidate(String(portal || ''));
+    if (!normalizedPortal) return;
+    baseWeights[normalizedPortal] = (baseWeights[normalizedPortal] || 0) + 6;
+  });
+  return rankOpenDataPortalCandidates(normalized, {
+    jurisdiction,
+    limit: 4,
+    baseWeights
+  });
+};
 
 const ADDRESS_METHOD_DISCOVERY_PRIORITY = [
   {
@@ -1756,6 +1819,7 @@ export const useOverseer = () => {
       loggedExternalCallGuard: false,
       loggedLatencyGuard: false
     };
+    let openDataPortalDataGaps: DataGap[] = [];
     let dallasPackDataGaps: DataGap[] = [];
 
     const registerMethodQuery = (
@@ -3306,12 +3370,82 @@ export const useOverseer = () => {
         }
       }
 
-      // --- PHASE 3C: DALLAS OPEN DATA PACK (ADDRESS-LIKE) ---
+      // --- PHASE 3C: OPEN DATA PARCEL RESOLUTION (ADDRESS-LIKE) ---
+      if (addressLike && !enforceUsOnlyPolicy) {
+        const portalCandidates = buildOpenDataPortalCandidates(jurisdiction);
+        if (portalCandidates.length === 0) {
+          logOverseer(
+            'PHASE 3C: OPEN DATA PARCEL',
+            'no portal candidates',
+            'skip generic open data parcel resolution',
+            'index has no parcel portal hints',
+            'warning'
+          );
+        } else {
+          logOverseer(
+            'PHASE 3C: OPEN DATA PARCEL',
+            'attempt generic parcel resolution',
+            `try ${portalCandidates.length} open data portal candidates`,
+            portalCandidates.slice(0, 3).join(' | '),
+            'action'
+          );
+          const phase3cResult = await runSafely(runOpenDataParcelResolutionPhase(
+            {
+              topic,
+              jurisdiction,
+              portalCandidates,
+              phaseLabel: 'PHASE 3C: OPEN DATA PARCEL'
+            },
+            {
+              canUseExternalCall,
+              normalizeSource: citationToNormalizedSource,
+              resolvePortal: (args) => runSafely(resolveParcelFromOpenDataPortal(args))
+            }
+          ));
+          if (phase3cResult && typeof phase3cResult === 'object') {
+            const attempts = Array.isArray((phase3cResult as any).attempts) ? (phase3cResult as any).attempts : [];
+            attempts
+              .filter((attempt: any) => attempt?.skipped)
+              .forEach((attempt: any) => {
+                logOverseer(
+                  'PHASE 3C: OPEN DATA PARCEL',
+                  'performance guardrail',
+                  `skip portal ${attempt.portalUrl}`,
+                  attempt.skipReason || 'guardrail',
+                  'warning'
+                );
+              });
+            const phase3cDataGaps = Array.isArray((phase3cResult as any).dataGaps) ? (phase3cResult as any).dataGaps : [];
+            if (phase3cDataGaps.length > 0) {
+              openDataPortalDataGaps.push(...phase3cDataGaps);
+            }
+            const findingPayload = (phase3cResult as any).finding;
+            if (findingPayload && Array.isArray(findingPayload.sources) && findingPayload.sources.length > 0) {
+              const finding: Finding = {
+                source: 'Open Data Parcel Resolution',
+                content: `Portal ${findingPayload.portalUrl} resolved parcel reference ${findingPayload.parcelId || 'unknown'} using ${findingPayload.method || 'open_data'} workflow across ${findingPayload.datasetCount || 0} dataset(s).`,
+                confidence: 0.88,
+                url: findingPayload.sources.map((source: NormalizedSource) => source.uri).join(', ')
+              };
+              pushFinding({ ...finding, rawSources: findingPayload.sources } as any);
+              logOverseer(
+                'PHASE 3C: OPEN DATA PARCEL',
+                'parcel evidence recovered',
+                `capture ${findingPayload.sources.length} source(s)`,
+                `portal ${findingPayload.portalUrl}`,
+                'success'
+              );
+            }
+          }
+        }
+      }
+
+      // --- PHASE 3D: DALLAS OPEN DATA PACK (ADDRESS-LIKE) ---
       if (addressLike && !enforceUsOnlyPolicy && isDallasJurisdiction(jurisdiction)) {
-        const guard = canUseExternalCall('PHASE 3C: DALLAS PACK', topic);
+        const guard = canUseExternalCall('PHASE 3D: DALLAS PACK', topic);
         if (!guard.allowed) {
           logOverseer(
-            'PHASE 3C: DALLAS PACK',
+            'PHASE 3D: DALLAS PACK',
             'performance guardrail',
             'skip Dallas open data pack',
             guard.detail,
@@ -3319,7 +3453,7 @@ export const useOverseer = () => {
           );
         } else {
           logOverseer(
-            'PHASE 3C: DALLAS PACK',
+            'PHASE 3D: DALLAS PACK',
             'run Dallas open data evidence pack',
             'query Dallas Open Data (Socrata)',
             undefined,
@@ -3348,7 +3482,7 @@ export const useOverseer = () => {
                   .join(' | ')
                 : undefined;
               logOverseer(
-                'PHASE 3C: DALLAS PACK',
+                'PHASE 3D: DALLAS PACK',
                 'Dallas open data pack complete',
                 `sources ${packSources.length}`,
                 attemptSummary,
@@ -3362,7 +3496,7 @@ export const useOverseer = () => {
                   .join(' | ')
                 : undefined;
               logOverseer(
-                'PHASE 3C: DALLAS PACK',
+                'PHASE 3D: DALLAS PACK',
                 'no open data findings',
                 'Dallas open data pack returned no usable records',
                 attemptSummary,
@@ -4115,6 +4249,7 @@ export const useOverseer = () => {
       const policyDataGaps = [
         ...(unsupportedJurisdictionGap ? [unsupportedJurisdictionGap] : []),
         ...addressEvidencePolicy.dataGaps,
+        ...openDataPortalDataGaps,
         ...dallasPackDataGaps
       ];
       const propertyDossier = addressLike

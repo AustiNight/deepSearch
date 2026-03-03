@@ -10,7 +10,8 @@ import {
   OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES,
   OPEN_DATA_DCAT_MAX_DOWNLOAD_BYTES,
   OPEN_DATA_PROVIDER_MAX_PAGES,
-  OPEN_DATA_PROVIDER_MAX_RECORDS
+  OPEN_DATA_PROVIDER_MAX_RECORDS,
+  OPEN_DATA_QUERY_CACHE_TTL_MS
 } from "../constants";
 import { fetchJsonWithRetry, fetchTextWithRetry, enforceRateLimit } from "./openDataHttp";
 import { getOpenDataConfig } from "./openDataConfig";
@@ -100,6 +101,16 @@ const normalizePortalUrl = (value: string) => {
   if (!trimmed) return "";
   if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, "");
   return `https://${trimmed}`.replace(/\/$/, "");
+};
+
+const getPortalDomain = (portalUrl: string) => {
+  try {
+    const host = new URL(normalizePortalUrl(portalUrl)).hostname.toLowerCase();
+    return host.startsWith("www.") ? host.slice(4) : host;
+  } catch (_) {
+    const cleaned = portalUrl.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    return cleaned.startsWith("www.") ? cleaned.slice(4) : cleaned;
+  }
 };
 
 const asString = (value: unknown): string | undefined => {
@@ -288,30 +299,72 @@ const exceedsPageLimit = (offset: number, limit: number) => {
   return page >= OPEN_DATA_PROVIDER_MAX_PAGES;
 };
 
+const fetchJsonWithPortalCache = <T>(
+  url: string,
+  options: {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    retries?: number;
+    minDelayMs?: number;
+  } = {},
+  context: { portalType?: OpenDataPortalType; portalUrl?: string } = {}
+) => fetchJsonWithRetry<T>(
+  url,
+  { cacheTtlMs: OPEN_DATA_QUERY_CACHE_TTL_MS, ...options },
+  context
+);
+
+const fetchTextWithPortalCache = (
+  url: string,
+  options: {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    retries?: number;
+    minDelayMs?: number;
+  } = {},
+  context: { portalType?: OpenDataPortalType; portalUrl?: string } = {}
+) => fetchTextWithRetry(
+  url,
+  { cacheTtlMs: OPEN_DATA_QUERY_CACHE_TTL_MS, ...options },
+  context
+);
+
 export const detectPortalType = (portalUrl: string): OpenDataPortalType => {
-  const normalized = portalUrl.toLowerCase();
-  if (normalized.includes("arcgis") || normalized.includes("opendata.arcgis")) return "arcgis";
-  if (normalized.includes("socrata") || normalized.includes("data.") || normalized.includes("opendata")) return "socrata";
-  if (normalized.includes("data.json") || normalized.includes("catalog.json")) return "dcat";
+  const normalized = normalizePortalUrl(portalUrl).toLowerCase();
+  let hostname = "";
+  let pathname = "";
+  try {
+    const parsed = new URL(normalized);
+    hostname = parsed.hostname.toLowerCase();
+    pathname = parsed.pathname.toLowerCase();
+  } catch (_) {
+    hostname = normalized;
+    pathname = normalized;
+  }
+  if (pathname.endsWith("/data.json") || pathname.endsWith("/catalog.json")) return "dcat";
+  if (hostname.includes("arcgis") || hostname.includes("hub.arcgis") || hostname.includes("opendata.arcgis")) return "arcgis";
+  if (hostname.includes("socrata")) return "socrata";
+  if (hostname.startsWith("data.") || hostname.includes(".data.") || hostname.startsWith("opendata.") || hostname.includes(".opendata.")) return "socrata";
+  if (normalized.includes("/api/views/") || normalized.includes("/resource/")) return "socrata";
   return "unknown";
 };
 
 export const probePortalType = async (portalUrl: string): Promise<OpenDataPortalType> => {
   const base = normalizePortalUrl(portalUrl);
   const socrataPlan = planSocrataDiscoveryQuery({ portalUrl: base, query: "parcel", limit: 1 });
-  const socrataProbe = await fetchJsonWithRetry<any>(socrataPlan.endpoint, { retries: 0 }, { portalType: "unknown", portalUrl: base });
+  const socrataProbe = await fetchJsonWithPortalCache<any>(socrataPlan.endpoint, { retries: 0 }, { portalType: "unknown", portalUrl: base });
   if (socrataProbe.ok && socrataProbe.data && Array.isArray(socrataProbe.data?.results) && socrataProbe.data.results.length > 0) {
     return "socrata";
   }
 
   const arcgisUrl = `${base}/sharing/rest/search?f=json&q=type%3A%22Feature%20Service%22&num=1`;
-  const arcgisProbe = await fetchJsonWithRetry<any>(arcgisUrl, { retries: 0 }, { portalType: "unknown", portalUrl: base });
+  const arcgisProbe = await fetchJsonWithPortalCache<any>(arcgisUrl, { retries: 0 }, { portalType: "unknown", portalUrl: base });
   if (arcgisProbe.ok && arcgisProbe.data && Array.isArray(arcgisProbe.data?.results)) {
     return "arcgis";
   }
 
   const dcatUrl = `${base}/data.json`;
-  const dcatProbe = await fetchJsonWithRetry<any>(dcatUrl, { retries: 0 }, { portalType: "unknown", portalUrl: base });
+  const dcatProbe = await fetchJsonWithPortalCache<any>(dcatUrl, { retries: 0 }, { portalType: "unknown", portalUrl: base });
   if (dcatProbe.ok && dcatProbe.data && (Array.isArray(dcatProbe.data?.dataset) || Array.isArray(dcatProbe.data?.datasets))) {
     return "dcat";
   }
@@ -326,6 +379,36 @@ const buildSocrataHeaders = (config: OpenDataRuntimeConfig) => {
   return headers;
 };
 
+const SOCRATA_TEXT_FIELD_PATTERN = /address|situs|site|location|parcel|apn|pin|account|acct|taxroll|owner|legal/i;
+
+const escapeSocrataLiteral = (value: string) => value.replace(/\\/g, "\\\\").replace(/'/g, "''");
+
+const buildSocrataWhereForText = (searchText: string, fields: OpenDataField[]) => {
+  const trimmed = searchText.trim();
+  if (!trimmed) return null;
+  const searchableFields = fields
+    .filter((field) => field.name && !field.isGeometry && SOCRATA_TEXT_FIELD_PATTERN.test(field.name))
+    .slice(0, 6);
+  if (searchableFields.length === 0) return null;
+  const escaped = escapeSocrataLiteral(trimmed.toUpperCase());
+  const predicates = searchableFields.map((field) => `upper(${field.name}) like '%${escaped}%'`);
+  if (predicates.length === 1) {
+    return predicates[0];
+  }
+  return `(${predicates.join(" OR ")})`;
+};
+
+const pointToBufferedPolygon = (lon: number, lat: number, delta = 0.00005): GeoJsonGeometry => ({
+  type: "Polygon",
+  coordinates: [[
+    [lon - delta, lat - delta],
+    [lon + delta, lat - delta],
+    [lon + delta, lat + delta],
+    [lon - delta, lat + delta],
+    [lon - delta, lat - delta]
+  ]]
+});
+
 const parseSocrataGeometry = (value: any): GeoJsonGeometry | undefined => {
   if (!value || typeof value !== "object") return undefined;
   if (Array.isArray((value as any).coordinates) && (value as any).type) {
@@ -334,7 +417,7 @@ const parseSocrataGeometry = (value: any): GeoJsonGeometry | undefined => {
       const lon = Number(coords[0]);
       const lat = Number(coords[1]);
       if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        return { type: "Polygon", coordinates: [[[lon, lat], [lon, lat], [lon, lat], [lon, lat], [lon, lat]]] };
+        return pointToBufferedPolygon(lon, lat);
       }
     }
     return value as GeoJsonGeometry;
@@ -343,7 +426,7 @@ const parseSocrataGeometry = (value: any): GeoJsonGeometry | undefined => {
     const lat = Number(value.latitude);
     const lon = Number(value.longitude);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      return { type: "Polygon", coordinates: [[[lon, lat], [lon, lat], [lon, lat], [lon, lat], [lon, lat]]] };
+      return pointToBufferedPolygon(lon, lat);
     }
   }
   return undefined;
@@ -368,55 +451,89 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
   const socrataRateLimitMs = config.auth.socrataAppToken ? 100 : 500;
 
   const discoverDatasets = async (query: string, limit = OPEN_DATA_DISCOVERY_MAX_DATASETS) => {
-    const plan = planSocrataDiscoveryQuery({ portalUrl, query, limit });
-    const searchUrl = plan.endpoint;
-    await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(searchUrl, { headers }, { portalType: "socrata", portalUrl });
-    if (!response.ok || !response.data) return [];
-    const results = Array.isArray(response.data?.results) ? response.data.results : [];
-    const datasets: OpenDatasetMetadata[] = [];
-    for (const entry of results) {
-      const resource = entry?.resource || entry;
-      const metadata = entry?.metadata || {};
-      const title = asStringFrom(resource?.name, resource?.title, entry?.name, entry?.title);
-      const datasetId = asStringFrom(resource?.id, entry?.id);
-      const lastUpdated = toIsoDateString(resource?.updatedAt || resource?.updated_at || entry?.updatedAt || entry?.updated_at);
-      const source = asStringFrom(resource?.attribution, metadata?.publisher?.name, metadata?.attribution, entry?.attribution);
-      const licenseInfo = parseLicenseDetails(resource?.license || metadata?.license || entry?.license);
-      const termsInfo = parseTermsDetails(metadata?.termsOfService || entry?.termsOfService || entry?.terms);
-      const accessConstraints = collectAccessConstraints(metadata?.accessLevel, metadata?.accessLevelComment, metadata?.accessRights, metadata?.rights);
-      const dataUrl = asStringFrom(resource?.link, resource?.dataUrl, entry?.permalink);
-      const homepageUrl = asStringFrom(entry?.permalink, entry?.link);
-      const tags = Array.isArray(entry?.tags) ? entry.tags.filter((tag: unknown) => typeof tag === "string") : undefined;
-
-      const dataset = normalizeDataset({
-        portalType: "socrata",
+    const portalDomain = getPortalDomain(portalUrl);
+    const plans = [
+      planSocrataDiscoveryQuery({
         portalUrl,
-        datasetId,
-        title,
-        description: asStringFrom(resource?.description, entry?.description),
-        source: source || portalUrl,
-        lastUpdated,
-        license: licenseInfo.license,
-        licenseUrl: licenseInfo.licenseUrl,
-        termsOfService: termsInfo.termsOfService,
-        termsUrl: termsInfo.termsUrl,
-        accessConstraints,
-        dataUrl,
-        homepageUrl,
-        tags
-      });
-      if (dataset) datasets.push(dataset);
+        query,
+        limit,
+        filters: {
+          domains: portalDomain,
+          only: "datasets",
+          order: "updated_at desc"
+        }
+      }),
+      planSocrataDiscoveryQuery({
+        portalUrl,
+        query,
+        limit,
+        filters: {
+          only: "datasets",
+          order: "updated_at desc"
+        }
+      }),
+      planSocrataDiscoveryQuery({ portalUrl, query, limit })
+    ];
+
+    const merged = new Map<string, OpenDatasetMetadata>();
+    for (let i = 0; i < plans.length; i += 1) {
+      const plan = plans[i];
+      await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
+      const response = await fetchJsonWithPortalCache<any>(plan.endpoint, { headers }, { portalType: "socrata", portalUrl });
+      if (!response.ok || !response.data) {
+        if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, false);
+        continue;
+      }
+      const results = Array.isArray(response.data?.results) ? response.data.results : [];
+      for (const entry of results) {
+        const resource = entry?.resource || entry;
+        const metadata = entry?.metadata || {};
+        const title = asStringFrom(resource?.name, resource?.title, entry?.name, entry?.title);
+        const datasetId = asStringFrom(resource?.id, entry?.id);
+        const lastUpdated = toIsoDateString(resource?.updatedAt || resource?.updated_at || entry?.updatedAt || entry?.updated_at);
+        const source = asStringFrom(resource?.attribution, metadata?.publisher?.name, metadata?.attribution, entry?.attribution);
+        const licenseInfo = parseLicenseDetails(resource?.license || metadata?.license || entry?.license);
+        const termsInfo = parseTermsDetails(metadata?.termsOfService || entry?.termsOfService || entry?.terms);
+        const accessConstraints = collectAccessConstraints(metadata?.accessLevel, metadata?.accessLevelComment, metadata?.accessRights, metadata?.rights);
+        const dataUrl = asStringFrom(resource?.link, resource?.dataUrl, entry?.permalink);
+        const homepageUrl = asStringFrom(entry?.permalink, entry?.link);
+        const tags = Array.isArray(entry?.tags) ? entry.tags.filter((tag: unknown) => typeof tag === "string") : undefined;
+
+        const dataset = normalizeDataset({
+          portalType: "socrata",
+          portalUrl,
+          datasetId,
+          title,
+          description: asStringFrom(resource?.description, entry?.description),
+          source: source || portalUrl,
+          lastUpdated,
+          license: licenseInfo.license,
+          licenseUrl: licenseInfo.licenseUrl,
+          termsOfService: termsInfo.termsOfService,
+          termsUrl: termsInfo.termsUrl,
+          accessConstraints,
+          dataUrl,
+          homepageUrl,
+          tags
+        });
+        if (!dataset) continue;
+        const key = (dataset.datasetId || dataset.title).toLowerCase();
+        if (!merged.has(key)) {
+          merged.set(key, dataset);
+        }
+      }
+      if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, results.length > 0);
+      if (merged.size >= limit) break;
     }
-    if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, datasets.length > 0);
-    return datasets;
+
+    return Array.from(merged.values()).slice(0, limit);
   };
 
   const fetchMetadata = async (datasetId: string) => {
     if (!datasetId) return null;
     const metaUrl = `${portalUrl}/api/views/${datasetId}.json`;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(metaUrl, { headers }, { portalType: "socrata", portalUrl });
+    const response = await fetchJsonWithPortalCache<any>(metaUrl, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !response.data) return null;
     const data = response.data;
     const licenseInfo = parseLicenseDetails(data?.license);
@@ -446,7 +563,7 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
     if (!metadata) return [];
     const metaUrl = `${portalUrl}/api/views/${datasetId}.json`;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(metaUrl, { headers }, { portalType: "socrata", portalUrl });
+    const response = await fetchJsonWithPortalCache<any>(metaUrl, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !response.data) return [];
     const columns = Array.isArray(response.data?.columns) ? response.data.columns : [];
     return columns.map((col: any) => ({
@@ -477,7 +594,15 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       "$limit": String(limit),
       "$offset": String(offset)
     });
-    if (input.searchText) params.set("$q", input.searchText);
+    if (input.searchText) {
+      const fields = await listFields(input.datasetId);
+      const fieldScopedWhere = buildSocrataWhereForText(input.searchText, fields);
+      if (fieldScopedWhere) {
+        params.set("$where", fieldScopedWhere);
+      } else {
+        params.set("$q", input.searchText);
+      }
+    }
     const sodaPlan = buildSocrataSodaEndpoint({
       portalUrl,
       datasetId: input.datasetId,
@@ -487,7 +612,7 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
     const ragUsageId = sodaPlan.ragUsageId;
     const url = sodaPlan.url;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
+    const response = await fetchJsonWithPortalCache<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {
       if (ragUsageId) recordRagOutcome(ragUsageId, false);
       return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
@@ -538,7 +663,7 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
     const ragUsageId = sodaPlan.ragUsageId;
     const url = sodaPlan.url;
     await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithRetry<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
+    const response = await fetchJsonWithPortalCache<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
     if (!response.ok || !Array.isArray(response.data)) {
       if (ragUsageId) recordRagOutcome(ragUsageId, false);
       return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
@@ -574,6 +699,32 @@ type ArcGisLayerInfo = {
   geometryType?: string;
 };
 
+type ArcGisLayerPurpose = "fields" | "text" | "geometry";
+
+const ARC_GIS_LAYER_PRIMARY_PATTERN = /parcel|assessor|appraisal|cadastral|cadastre|property|tax|lot/i;
+const ARC_GIS_LAYER_SECONDARY_PATTERN = /address|site|situs|location|zoning|land use|permit/i;
+const ARC_GIS_TEXT_FIELD_PATTERN = /address|situs|site|location|parcel|apn|pin|account|acct|taxroll|owner/i;
+
+const scoreArcGisLayer = (layer: ArcGisLayerInfo, purpose: ArcGisLayerPurpose, searchText?: string) => {
+  const name = (layer.name || "").toLowerCase();
+  let score = 0;
+  if (ARC_GIS_LAYER_PRIMARY_PATTERN.test(name)) score += 8;
+  if (ARC_GIS_LAYER_SECONDARY_PATTERN.test(name)) score += 3;
+  if (purpose === "geometry" && /polygon/i.test(layer.geometryType || "")) score += 5;
+  if (purpose === "text" && searchText && name.includes(searchText.toLowerCase())) score += 4;
+  return score;
+};
+
+const selectArcGisLayer = (layers: ArcGisLayerInfo[], purpose: ArcGisLayerPurpose, searchText?: string) => {
+  if (layers.length === 0) return undefined;
+  const scored = layers
+    .map((layer, index) => ({ layer, score: scoreArcGisLayer(layer, purpose, searchText), index }))
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index));
+  return scored[0].layer;
+};
+
+const escapeArcGisWhereLiteral = (value: string) => value.replace(/'/g, "''");
+
 const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider => {
   const portalUrl = normalizePortalUrl(context.portalUrl);
   const config = context.config || getOpenDataConfig();
@@ -588,7 +739,7 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
   const discoverDatasets = async (query: string, limit = OPEN_DATA_DISCOVERY_MAX_DATASETS) => {
     const searchUrl = `${portalUrl}/sharing/rest/search?f=json&q=${encodeURIComponent(query)}+AND+type%3A%22Feature%20Service%22&num=${limit}`;
     await enforceRateLimit(`arcgis:${portalUrl}`, arcgisRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(withToken(searchUrl), {}, { portalType: "arcgis", portalUrl });
+    const response = await fetchJsonWithPortalCache<any>(withToken(searchUrl), {}, { portalType: "arcgis", portalUrl });
     if (!response.ok || !response.data) return [];
     const results = Array.isArray(response.data?.results) ? response.data.results : [];
     const datasets: OpenDatasetMetadata[] = [];
@@ -617,7 +768,7 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
       if (itemId && itemFetches < OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES) {
         itemFetches += 1;
         const itemUrl = `${portalUrl}/sharing/rest/content/items/${itemId}?f=json`;
-        const itemResponse = await fetchJsonWithRetry<any>(withToken(itemUrl), {}, { portalType: "arcgis", portalUrl });
+        const itemResponse = await fetchJsonWithPortalCache<any>(withToken(itemUrl), {}, { portalType: "arcgis", portalUrl });
         if (itemResponse.ok && itemResponse.data) {
           const itemLicenseInfo = parseLicenseDetails(itemResponse.data?.licenseInfo || itemResponse.data?.license);
           licenseInfo = {
@@ -673,7 +824,7 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     if (!datasetId) return null;
     const itemUrl = `${portalUrl}/sharing/rest/content/items/${datasetId}?f=json`;
     await enforceRateLimit(`arcgis:${portalUrl}`, arcgisRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(withToken(itemUrl), {}, { portalType: "arcgis", portalUrl });
+    const response = await fetchJsonWithPortalCache<any>(withToken(itemUrl), {}, { portalType: "arcgis", portalUrl });
     if (!response.ok || !response.data) return null;
     const licenseInfo = parseLicenseDetails(response.data?.licenseInfo || response.data?.license);
     const termsInfo = parseTermsDetails(response.data?.termsOfUse || response.data?.termsOfService || response.data?.terms);
@@ -702,7 +853,7 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     if (!baseUrl) return [];
     const layerUrl = `${baseUrl}?f=json`;
     await enforceRateLimit(`arcgis:${portalUrl}`, arcgisRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(withToken(layerUrl), {}, { portalType: "arcgis", portalUrl });
+    const response = await fetchJsonWithPortalCache<any>(withToken(layerUrl), {}, { portalType: "arcgis", portalUrl });
     if (!response.ok || !response.data) return [];
     const layers = Array.isArray(response.data?.layers) ? response.data.layers : [];
     return layers.map((layer: any) => ({
@@ -713,13 +864,10 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     })).filter((layer: ArcGisLayerInfo) => Number.isFinite(layer.id));
   };
 
-  const listFields = async (datasetId: string): Promise<OpenDataField[]> => {
-    const layers = await fetchLayers(datasetId);
-    if (layers.length === 0) return [];
-    const layer = layers[0];
+  const listLayerFields = async (layer: ArcGisLayerInfo): Promise<OpenDataField[]> => {
     const url = `${layer.url}?f=json`;
     await enforceRateLimit(`arcgis:${portalUrl}`, arcgisRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(withToken(url), {}, { portalType: "arcgis", portalUrl });
+    const response = await fetchJsonWithPortalCache<any>(withToken(url), {}, { portalType: "arcgis", portalUrl });
     if (!response.ok || !response.data) return [];
     const fields = Array.isArray(response.data?.fields) ? response.data.fields : [];
     return fields.map((field: any) => ({
@@ -728,6 +876,14 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
       description: asString(field?.alias) || undefined,
       isGeometry: field?.type?.includes("Geometry")
     })).filter((field: OpenDataField) => field.name);
+  };
+
+  const listFields = async (datasetId: string): Promise<OpenDataField[]> => {
+    const layers = await fetchLayers(datasetId);
+    if (layers.length === 0) return [];
+    const layer = selectArcGisLayer(layers, "fields");
+    if (!layer) return [];
+    return listLayerFields(layer);
   };
 
   const getDistributions = async (datasetId: string): Promise<OpenDataDistribution[]> => {
@@ -744,7 +900,7 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     if (typeof geom.x === "number" && typeof geom.y === "number") {
       const lon = geom.x;
       const lat = geom.y;
-      return { type: "Polygon", coordinates: [[[lon, lat], [lon, lat], [lon, lat], [lon, lat], [lon, lat]]] };
+      return pointToBufferedPolygon(lon, lat);
     }
     return undefined;
   };
@@ -756,7 +912,7 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     const query = new URLSearchParams({ f: "json", ...params });
     const url = `${layerUrl}/query?${query.toString()}`;
     await enforceRateLimit(`arcgis:${portalUrl}`, arcgisRateLimitMs);
-    const response = await fetchJsonWithRetry<any>(withToken(url), {}, { portalType: "arcgis", portalUrl });
+    const response = await fetchJsonWithPortalCache<any>(withToken(url), {}, { portalType: "arcgis", portalUrl });
     if (!response.ok || !response.data) {
       return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
     }
@@ -777,17 +933,29 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
   const queryByText = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
     const layers = await fetchLayers(input.datasetId);
     if (layers.length === 0) return { records: [], errors: [{ code: "no_layers", message: "No layers found." }] };
-    const layer = layers[0];
-    const fields = await listFields(input.datasetId);
-    const addressField = fields.find((field) => /address|situs|site|location/i.test(field.name));
+    const layer = selectArcGisLayer(layers, "text", input.searchText);
+    if (!layer) return { records: [], errors: [{ code: "no_layers", message: "No layers found." }] };
+    const fields = await listLayerFields(layer);
     const limit = Math.max(1, Math.min(input.limit ?? 50, OPEN_DATA_PROVIDER_MAX_RECORDS));
     const offset = Math.max(0, input.offset ?? 0);
     if (exceedsPageLimit(offset, limit)) {
       return { records: [], errors: [{ code: "page_limit", message: "Pagination limit reached." }] };
     }
-    const where = addressField && input.searchText
-      ? `UPPER(${addressField.name}) LIKE '%${input.searchText.toUpperCase().replace(/'/g, "''")}%'`
-      : "1=1";
+    const searchText = asString(input.searchText);
+    let where = "1=1";
+    if (searchText) {
+      const searchableFields = fields.filter((field) => ARC_GIS_TEXT_FIELD_PATTERN.test(field.name)).slice(0, 5);
+      if (searchableFields.length === 0) {
+        return { records: [], errors: [{ code: "no_text_field", message: "No searchable text field detected." }] };
+      }
+      const escaped = escapeArcGisWhereLiteral(searchText.toUpperCase());
+      where = searchableFields
+        .map((field) => `UPPER(${field.name}) LIKE '%${escaped}%'`)
+        .join(" OR ");
+      if (searchableFields.length > 1) {
+        where = `(${where})`;
+      }
+    }
     return queryLayer(layer.url, {
       where,
       outFields: "*",
@@ -800,7 +968,8 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
   const queryByGeometry = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
     const layers = await fetchLayers(input.datasetId);
     if (layers.length === 0) return { records: [], errors: [{ code: "no_layers", message: "No layers found." }] };
-    const layer = layers[0];
+    const layer = selectArcGisLayer(layers, "geometry");
+    if (!layer) return { records: [], errors: [{ code: "no_layers", message: "No layers found." }] };
     const limit = Math.max(1, Math.min(input.limit ?? 50, OPEN_DATA_PROVIDER_MAX_RECORDS));
     const offset = Math.max(0, input.offset ?? 0);
     if (exceedsPageLimit(offset, limit)) {
@@ -856,13 +1025,55 @@ const parseJsonMaybe = (text: string) => {
 };
 
 const parseCsv = (text: string) => {
-  const rows = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (rows.length === 0) return [];
-  const headers = rows[0].split(",").map((header) => header.replace(/^"|"$/g, "").trim());
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === "\"") {
+        if (text[i + 1] === "\"") {
+          cell += "\"";
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ",") {
+      row.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    if (ch === "\n") {
+      row.push(cell.trim());
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+    if (ch === "\r") continue;
+    cell += ch;
+  }
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell.trim());
+    rows.push(row);
+  }
+  const normalizedRows = rows.filter((cells) => cells.some((value) => value.trim().length > 0));
+  if (normalizedRows.length === 0) return [];
+  const headers = normalizedRows[0].map((header) => header.trim());
   const records: Record<string, string>[] = [];
-  for (let i = 1; i < rows.length; i += 1) {
-    const row = rows[i];
-    const values = row.split(",").map((value) => value.replace(/^"|"$/g, "").trim());
+  for (let i = 1; i < normalizedRows.length; i += 1) {
+    const values = normalizedRows[i];
     const record: Record<string, string> = {};
     headers.forEach((header, idx) => {
       record[header] = values[idx] ?? "";
@@ -879,7 +1090,7 @@ const inferPointGeometry = (attributes: Record<string, unknown>): GeoJsonGeometr
   const lat = Number(attributes[latKey]);
   const lon = Number(attributes[lonKey]);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
-  return { type: "Polygon", coordinates: [[[lon, lat], [lon, lat], [lon, lat], [lon, lat], [lon, lat]]] };
+  return pointToBufferedPolygon(lon, lat);
 };
 
 const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider => {
@@ -889,7 +1100,7 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
     const candidates = getDcatCatalogUrlCandidates(portalUrl);
     for (const candidate of candidates) {
       await enforceRateLimit(`dcat:${portalUrl}`, 200);
-      const response = await fetchJsonWithRetry<any>(candidate, {}, { portalType: "dcat", portalUrl });
+      const response = await fetchJsonWithPortalCache<any>(candidate, {}, { portalType: "dcat", portalUrl });
       if (response.ok && response.data) {
         return response.data;
       }
@@ -988,7 +1199,7 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
     const meta = await fetchMetadata(datasetId);
     if (!meta?.dataUrl) return null;
     await enforceRateLimit(`dcat:${portalUrl}`, 200);
-    const response = await fetchTextWithRetry(meta.dataUrl, {}, { portalType: "dcat", portalUrl });
+    const response = await fetchTextWithPortalCache(meta.dataUrl, {}, { portalType: "dcat", portalUrl });
     if (!response.ok || !response.data) return null;
     const sizeHeader = response.headers.get("content-length");
     if (sizeHeader) {

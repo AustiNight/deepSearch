@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-03-03T01:00:30.873Z",
+  "samplesTotal": 26,
+  "attempted": 26,
+  "passed": 2,
+  "accuracy": 0.0769,
+  "byExpectedStatus": {
+    "resolved": 24,
+    "ambiguous": 0,
+    "not_found": 2
+  },
+  "byPredictedStatus": {
+    "resolved": 0,
+    "ambiguous": 0,
+    "not_found": 26,
+    "skipped": 0,
+    "error": 0
+  }
+}

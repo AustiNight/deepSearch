@@ -1,4 +1,4 @@
-import type { OpenDataPortalType, OpenDatasetMetadata } from "../types";
+import type { Jurisdiction, OpenDataPortalType, OpenDatasetMetadata } from "../types";
 import { getOpenDatasetIndex, discoverOpenDataDatasets, persistOpenDatasetMetadata } from "./openDataDiscovery";
 import { createOpenDataProvider, detectPortalType, probePortalType } from "./openDataProviders";
 import { getOpenDataConfig } from "./openDataConfig";
@@ -22,6 +22,87 @@ const parseIso = (value?: string) => {
   if (!value) return null;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? null : parsed;
+};
+
+const normalizeDomain = (value: string) => {
+  try {
+    const host = new URL(normalizePortalUrl(value)).hostname.toLowerCase();
+    return host.startsWith("www.") ? host.slice(4) : host;
+  } catch (_) {
+    return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  }
+};
+
+const normalizeToken = (value?: string) => (value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const computeRecencyScore = (updatedAt?: string) => {
+  if (!updatedAt) return 0;
+  const parsed = parseIso(updatedAt);
+  if (!parsed) return 0;
+  const ageDays = Math.max(0, (Date.now() - parsed) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 30) return 8;
+  if (ageDays <= 180) return 5;
+  if (ageDays <= 730) return 2;
+  return 0;
+};
+
+const getParcelHintDatasets = () =>
+  getOpenDatasetHints(["parcel", "assessor", "appraiser", "apn", "pin", "cadastre"]);
+
+export const rankOpenDataPortalCandidates = (
+  candidates: string[],
+  options: {
+    jurisdiction?: Jurisdiction;
+    limit?: number;
+    baseWeights?: Record<string, number>;
+  } = {}
+) => {
+  const normalizedCandidates = Array.from(new Set(
+    candidates
+      .map((candidate) => normalizePortalUrl(String(candidate || "")))
+      .filter(Boolean)
+  ));
+  if (normalizedCandidates.length <= 1) {
+    return normalizedCandidates.slice(0, options.limit ?? normalizedCandidates.length);
+  }
+
+  const index = getOpenDatasetIndex();
+  const datasets = Array.isArray(index.datasets) ? index.datasets : [];
+  const parcelHints = getParcelHintDatasets();
+  const parcelHintByPortal = new Map<string, number>();
+  parcelHints.forEach((dataset) => {
+    const portal = normalizePortalUrl(dataset.portalUrl);
+    if (!portal) return;
+    parcelHintByPortal.set(portal, (parcelHintByPortal.get(portal) || 0) + 1);
+  });
+
+  const cityToken = normalizeToken(options.jurisdiction?.city);
+  const countyToken = normalizeToken(options.jurisdiction?.county);
+
+  const scored = normalizedCandidates.map((portalUrl, indexOrder) => {
+    const domain = normalizeDomain(portalUrl);
+    const portalDatasets = datasets.filter((dataset) => normalizePortalUrl(dataset.portalUrl) === portalUrl);
+    const latestDataset = portalDatasets
+      .map((dataset) => dataset.lastUpdated || dataset.retrievedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort((a, b) => (parseIso(b) || 0) - (parseIso(a) || 0))[0];
+    const baseWeight = options.baseWeights?.[portalUrl] || 0;
+    const hintCount = parcelHintByPortal.get(portalUrl) || 0;
+    const knownTypeBoost = detectPortalType(portalUrl) === "unknown" ? 0 : 8;
+    const govBoost = domain.endsWith(".gov") ? 4 : 0;
+    const cityBoost = cityToken && domain.includes(cityToken) ? 4 : 0;
+    const countyBoost = countyToken && domain.includes(countyToken) ? 3 : 0;
+    const datasetBoost = Math.min(12, portalDatasets.length * 2);
+    const recencyBoost = computeRecencyScore(latestDataset);
+    const score = baseWeight + hintCount * 6 + knownTypeBoost + govBoost + cityBoost + countyBoost + datasetBoost + recencyBoost;
+    return { portalUrl, score, indexOrder };
+  });
+
+  const sorted = scored
+    .sort((a, b) => (b.score - a.score) || (a.indexOrder - b.indexOrder))
+    .map((entry) => entry.portalUrl);
+
+  return sorted.slice(0, options.limit ?? sorted.length);
 };
 
 export const shouldRecrawlPortal = (portalUrl: string) => {
@@ -86,12 +167,19 @@ export const getOpenDatasetHints = (tags: string[] = []) => {
   if (!config.featureFlags.evidenceRecovery) return [];
   const index = getOpenDatasetIndex();
   if (!index.datasets) return [];
-  const normalizedTags = tags.map((tag) => tag.toLowerCase());
+  const normalizedTags = tags.map((tag) => tag.toLowerCase()).filter(Boolean);
   return index.datasets.filter((dataset) => {
     if (dataset.doNotUse) return false;
-    if (!dataset.tags || dataset.tags.length === 0) return false;
-    const datasetTags = dataset.tags.map((tag) => tag.toLowerCase());
-    return normalizedTags.some((tag) => datasetTags.some((dtag) => dtag.includes(tag)));
+    if (normalizedTags.length === 0) return true;
+    const corpus = [
+      dataset.title || "",
+      dataset.description || "",
+      ...(dataset.tags || []),
+      ...(dataset.fields || [])
+    ]
+      .join(" ")
+      .toLowerCase();
+    return normalizedTags.some((tag) => corpus.includes(tag));
   });
 };
 

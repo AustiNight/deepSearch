@@ -3,13 +3,15 @@ import {
   OPEN_DATA_DISCOVERY_MAX_DATASETS,
   OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES,
   OPEN_DATA_PORTAL_RECRAWL_DAYS,
-  OPEN_DATA_INDEX_TTL_DAYS
+  OPEN_DATA_INDEX_TTL_DAYS,
+  OPEN_DATA_QUERY_CACHE_TTL_MS
 } from "../constants";
 import { applyDatasetUsageGates } from "./openDataUsage";
 import { fetchJsonWithRetry } from "./openDataHttp";
 import { OPEN_DATA_INDEX_SCHEMA_VERSION, readOpenDataIndex, writeOpenDataIndex } from "./storagePolicy";
 import { planSocrataDiscoveryQuery } from "./socrataRagPlanner";
 import { recordRagOutcome } from "./ragTelemetry";
+import { detectPortalType } from "./openDataProviders";
 const DEFAULT_LIMIT = Math.min(25, OPEN_DATA_DISCOVERY_MAX_DATASETS);
 
 
@@ -43,6 +45,11 @@ const getDomain = (value: string) => {
   } catch (_) {
     return value;
   }
+};
+
+const getPortalDomain = (portalUrl: string) => {
+  const host = getDomain(normalizePortalUrl(portalUrl)).toLowerCase();
+  return host.startsWith("www.") ? host.slice(4) : host;
 };
 
 const asString = (value: unknown): string | undefined => {
@@ -226,19 +233,11 @@ type PortalRequestContext = {
 };
 
 const safeFetchJson = async (url: string, context: PortalRequestContext = {}) => {
-  const response = await fetchJsonWithRetry<any>(url, { retries: 0 }, context);
+  const response = await fetchJsonWithRetry<any>(url, { retries: 0, cacheTtlMs: OPEN_DATA_QUERY_CACHE_TTL_MS }, context);
   if (!response.ok) {
     return { ok: false, status: response.status, data: null } as const;
   }
   return { ok: true, status: response.status, data: response.data } as const;
-};
-
-const detectPortalType = (portalUrl: string): OpenDataPortalType => {
-  const normalized = portalUrl.toLowerCase();
-  if (normalized.includes("arcgis")) return "arcgis";
-  if (normalized.includes("socrata")) return "socrata";
-  if (normalized.includes("data.json") || normalized.includes("catalog.json")) return "dcat";
-  return "unknown";
 };
 
 const normalizeDataset = (input: {
@@ -283,47 +282,80 @@ const normalizeDataset = (input: {
 
 const discoverSocrataDatasets = async (portalUrl: string, query: string, limit: number): Promise<OpenDatasetMetadata[]> => {
   const base = normalizePortalUrl(portalUrl);
-  const plan = planSocrataDiscoveryQuery({ portalUrl: base, query, limit });
-  const response = await safeFetchJson(plan.endpoint, { portalType: "socrata", portalUrl: base });
-  if (!response.ok || !response.data) return [];
-  const results = Array.isArray(response.data?.results) ? response.data.results : [];
-  const datasets: OpenDatasetMetadata[] = [];
-
-  for (const entry of results) {
-    const resource = entry?.resource || entry;
-    const metadata = entry?.metadata || {};
-    const title = asStringFrom(resource?.name, resource?.title, entry?.name, entry?.title);
-    const datasetId = asStringFrom(resource?.id, entry?.id);
-    const lastUpdated = toIsoDateString(resource?.updatedAt || resource?.updated_at || entry?.updatedAt || entry?.updated_at);
-    const source = asStringFrom(resource?.attribution, metadata?.publisher?.name, metadata?.attribution, entry?.attribution);
-    const licenseInfo = parseLicenseDetails(resource?.license || metadata?.license || entry?.license);
-    const termsInfo = parseTermsDetails(metadata?.termsOfService || entry?.termsOfService || entry?.terms);
-    const accessConstraints = collectAccessConstraints(metadata?.accessLevel, metadata?.accessLevelComment, metadata?.accessRights, metadata?.rights);
-    const dataUrl = asStringFrom(resource?.link, resource?.dataUrl, entry?.permalink);
-    const homepageUrl = asStringFrom(entry?.permalink, entry?.link);
-    const tags = Array.isArray(entry?.tags) ? entry.tags.filter((tag: unknown) => typeof tag === "string") : undefined;
-
-    const dataset = normalizeDataset({
-      portalType: "socrata",
+  const portalDomain = getPortalDomain(base);
+  const plans = [
+    planSocrataDiscoveryQuery({
       portalUrl: base,
-      datasetId,
-      title,
-      description: asStringFrom(resource?.description, entry?.description),
-      source: source || getDomain(base),
-      lastUpdated,
-      license: licenseInfo.license,
-      licenseUrl: licenseInfo.licenseUrl,
-      termsOfService: termsInfo.termsOfService,
-      termsUrl: termsInfo.termsUrl,
-      accessConstraints,
-      dataUrl,
-      homepageUrl,
-      tags
-    });
-    if (dataset) datasets.push(dataset);
+      query,
+      limit,
+      filters: {
+        domains: portalDomain,
+        only: "datasets",
+        order: "updated_at desc"
+      }
+    }),
+    planSocrataDiscoveryQuery({
+      portalUrl: base,
+      query,
+      limit,
+      filters: {
+        only: "datasets",
+        order: "updated_at desc"
+      }
+    }),
+    planSocrataDiscoveryQuery({ portalUrl: base, query, limit })
+  ];
+  const merged = new Map<string, OpenDatasetMetadata>();
+
+  for (const plan of plans) {
+    const response = await safeFetchJson(plan.endpoint, { portalType: "socrata", portalUrl: base });
+    if (!response.ok || !response.data) {
+      if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, false);
+      continue;
+    }
+    const results = Array.isArray(response.data?.results) ? response.data.results : [];
+    for (const entry of results) {
+      const resource = entry?.resource || entry;
+      const metadata = entry?.metadata || {};
+      const title = asStringFrom(resource?.name, resource?.title, entry?.name, entry?.title);
+      const datasetId = asStringFrom(resource?.id, entry?.id);
+      const lastUpdated = toIsoDateString(resource?.updatedAt || resource?.updated_at || entry?.updatedAt || entry?.updated_at);
+      const source = asStringFrom(resource?.attribution, metadata?.publisher?.name, metadata?.attribution, entry?.attribution);
+      const licenseInfo = parseLicenseDetails(resource?.license || metadata?.license || entry?.license);
+      const termsInfo = parseTermsDetails(metadata?.termsOfService || entry?.termsOfService || entry?.terms);
+      const accessConstraints = collectAccessConstraints(metadata?.accessLevel, metadata?.accessLevelComment, metadata?.accessRights, metadata?.rights);
+      const dataUrl = asStringFrom(resource?.link, resource?.dataUrl, entry?.permalink);
+      const homepageUrl = asStringFrom(entry?.permalink, entry?.link);
+      const tags = Array.isArray(entry?.tags) ? entry.tags.filter((tag: unknown) => typeof tag === "string") : undefined;
+
+      const dataset = normalizeDataset({
+        portalType: "socrata",
+        portalUrl: base,
+        datasetId,
+        title,
+        description: asStringFrom(resource?.description, entry?.description),
+        source: source || getDomain(base),
+        lastUpdated,
+        license: licenseInfo.license,
+        licenseUrl: licenseInfo.licenseUrl,
+        termsOfService: termsInfo.termsOfService,
+        termsUrl: termsInfo.termsUrl,
+        accessConstraints,
+        dataUrl,
+        homepageUrl,
+        tags
+      });
+      if (!dataset) continue;
+      const key = (dataset.datasetId || dataset.title).toLowerCase();
+      if (!merged.has(key)) {
+        merged.set(key, dataset);
+      }
+    }
+    if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, results.length > 0);
+    if (merged.size >= limit) break;
   }
-  if (plan.ragUsageId) recordRagOutcome(plan.ragUsageId, datasets.length > 0);
-  return datasets;
+
+  return Array.from(merged.values()).slice(0, limit);
 };
 
 const discoverArcGisDatasets = async (portalUrl: string, query: string, limit: number): Promise<OpenDatasetMetadata[]> => {
@@ -518,8 +550,9 @@ export const discoverOpenDataDatasets = async (input: OpenDataDiscoveryInput): P
   const nowIso = toIsoDateTimeString();
   const nextCrawlDate = new Date(Date.now() + OPEN_DATA_PORTAL_RECRAWL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   portalCrawls[portalUrl] = { lastCrawledAt: nowIso, nextCrawlAt: nextCrawlDate };
-  saveOpenDatasetIndex({ ...index, portalCrawls });
-  return { portalType, datasets, index };
+  const updatedIndex: OpenDatasetIndex = { ...index, portalCrawls };
+  writeOpenDataIndex(updatedIndex);
+  return { portalType, datasets, index: updatedIndex };
 };
 
 export const getOpenDatasetIndex = () => loadOpenDatasetIndex();

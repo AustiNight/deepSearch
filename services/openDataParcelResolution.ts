@@ -2,14 +2,19 @@ import type { ClaimCitation, CitationSource, DataGap, GeoPoint, Jurisdiction, Op
 import type { ParcelCandidate, ParcelGeometryFeature } from "./parcelResolution";
 import { resolveParcelWorkflow } from "./parcelResolution";
 import { addressToGeometry } from "./openDataGeocoding";
-import { getOpenDataProviderForPortal } from "./openDataPortalService";
-import { getOpenDatasetIndex } from "./openDataDiscovery";
+import { getOpenDataProviderForPortalAsync } from "./openDataPortalService";
+import { getOpenDatasetIndex, persistOpenDatasetMetadata } from "./openDataDiscovery";
 import { evaluateDatasetUsage } from "./openDataUsage";
 import { normalizeAddressVariants } from "./addressNormalization";
 import { validateDataSourceContracts } from "../data/dataSourceContracts";
 import { getOpenDataConfig } from "./openDataConfig";
 import { isNonUsJurisdiction } from "./addressScope";
 import { enforceRateLimit, fetchJsonWithRetry } from "./openDataHttp";
+import {
+  OPEN_DATA_PORTAL_MAX_GEOMETRY_DATASET_QUERIES,
+  OPEN_DATA_PORTAL_MAX_TEXT_DATASET_QUERIES,
+  OPEN_DATA_QUERY_CACHE_TTL_MS
+} from "../constants";
 
 const isoDateToday = () => new Date().toISOString().slice(0, 10);
 
@@ -24,6 +29,36 @@ const buildDataGap = (description: string, reason: string, status: DataGap["stat
   expectedSources
 });
 
+type CalibrationOptions = {
+  enabled?: boolean;
+  includeDiagnostics?: boolean;
+  relaxPublicAssessorReviewGates?: boolean;
+};
+
+type DatasetGateDiagnostic = {
+  datasetId?: string;
+  title: string;
+  complianceAction?: "allow" | "block" | "review";
+  complianceNotes?: string[];
+  freshnessStatus?: "fresh" | "stale" | "unknown";
+  doNotUse: boolean;
+  overrideApplied?: boolean;
+  blockReasons: string[];
+};
+
+type CalibrationDiagnostics = {
+  calibrationMode: boolean;
+  blockedDatasets: DatasetGateDiagnostic[];
+  relaxedDatasets: DatasetGateDiagnostic[];
+  evaluatedDatasets: DatasetGateDiagnostic[];
+  validationStats: {
+    restricted: number;
+    nonTabular: number;
+    metadata: number;
+  };
+  queryableDatasetCount: number;
+};
+
 const normalizePortalUrl = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -32,6 +67,91 @@ const normalizePortalUrl = (value: string) => {
 };
 
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const domainFromUrl = (value: string) => {
+  try {
+    const host = new URL(normalizePortalUrl(value)).hostname.toLowerCase();
+    return host.startsWith("www.") ? host.slice(4) : host;
+  } catch (_) {
+    const host = String(value || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    return host.startsWith("www.") ? host.slice(4) : host;
+  }
+};
+
+const VERIFIED_ASSESSOR_TEXT_PATTERN = /parcel|assessor|appraisal|apn|pin|cadastre|cadastral|property assessment|tax parcel|tax roll/i;
+const RESTRICTED_TEXT_PATTERN = /private|restricted|internal|confidential|paid|subscription|license required|non-public/i;
+
+const isVerifiedPublicAssessorDataset = (dataset: OpenDatasetMetadata) => {
+  const portalDomain = domainFromUrl(dataset.portalUrl);
+  const sourceText = `${dataset.source || ""} ${dataset.title || ""} ${dataset.description || ""} ${(dataset.tags || []).join(" ")} ${(dataset.fields || []).join(" ")}`.toLowerCase();
+  const constraintText = `${(dataset.accessConstraints || []).join(" ")} ${dataset.termsOfService || ""} ${dataset.license || ""}`.toLowerCase();
+  const assessorLike = VERIFIED_ASSESSOR_TEXT_PATTERN.test(sourceText);
+  if (!assessorLike) return false;
+  if (RESTRICTED_TEXT_PATTERN.test(constraintText)) return false;
+  const govLike = portalDomain.endsWith(".gov")
+    || portalDomain.endsWith(".us")
+    || /assessor|appraisal|cad|tax|county|city/.test(portalDomain)
+    || /county|city|state|department|district/.test(sourceText);
+  return govLike;
+};
+
+const buildBlockReasons = (dataset: OpenDatasetMetadata) => {
+  const reasons: string[] = [];
+  if (dataset.complianceAction === "block") {
+    reasons.push("compliance_block");
+  }
+  if (dataset.complianceAction === "review" && dataset.doNotUse) {
+    reasons.push("review_blocked_by_zero_cost");
+  }
+  if (dataset.freshnessStatus === "stale" && dataset.doNotUse) {
+    reasons.push("stale_blocked");
+  }
+  if ((dataset.complianceNotes || []).length > 0) {
+    reasons.push(...(dataset.complianceNotes || []).map((note) => `note:${note}`));
+  }
+  return Array.from(new Set(reasons));
+};
+
+const PARCEL_DATASET_PRIMARY_PATTERN = /parcel|assessor|appraiser|apn|pin|parcel id|tax roll|cad|cadastral|cadastre|property/i;
+const PARCEL_FIELD_PATTERN = /parcel|apn|pin|account|address|situs|site|owner|tax/i;
+
+const computeRecencyScore = (value?: string) => {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return 0;
+  const ageDays = Math.max(0, (Date.now() - parsed) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 180) return 8;
+  if (ageDays <= 730) return 5;
+  if (ageDays <= 1825) return 2;
+  return 0;
+};
+
+const scoreDatasetForParcelResolution = (dataset: OpenDatasetMetadata, normalizedAddress: string) => {
+  const textCorpus = `${dataset.title || ""} ${dataset.description || ""} ${(dataset.tags || []).join(" ")} ${(dataset.fields || []).join(" ")}`.toLowerCase();
+  const addressToken = normalizedAddress.toLowerCase().split(/[^a-z0-9]+/).find((token) => token.length >= 4);
+  let score = 0;
+  if (PARCEL_DATASET_PRIMARY_PATTERN.test(textCorpus)) score += 30;
+  if ((dataset.fields || []).some((field) => PARCEL_FIELD_PATTERN.test(field))) score += 18;
+  if (dataset.freshnessStatus === "fresh") score += 8;
+  if (dataset.freshnessStatus === "stale") score -= 8;
+  if (dataset.complianceAction === "allow") score += 6;
+  if (dataset.complianceAction === "review") score -= 2;
+  if (dataset.datasetId) score += 3;
+  if (addressToken && textCorpus.includes(addressToken)) score += 2;
+  score += computeRecencyScore(dataset.lastUpdated || dataset.retrievedAt);
+  return score;
+};
+
+const rankDatasetsForParcelResolution = (datasets: OpenDatasetMetadata[], normalizedAddress: string) => {
+  return datasets
+    .map((dataset, index) => ({
+      dataset,
+      index,
+      score: scoreDatasetForParcelResolution(dataset, normalizedAddress)
+    }))
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .map((entry) => entry.dataset);
+};
 
 const extractParcelFields = (attributes: Record<string, unknown>) => {
   const keys = Object.keys(attributes);
@@ -117,7 +237,7 @@ const validateSocrataDataset = async (
   const normalizedPortal = normalizePortalUrl(portalUrl);
   await enforceRateLimit(`socrata:${normalizedPortal}`, config.auth.socrataAppToken ? 100 : 500);
   const metaUrl = `${normalizedPortal}/api/views/${dataset.datasetId}.json`;
-  const response = await fetchJsonWithRetry<any>(metaUrl, { headers, retries: 0 }, {
+  const response = await fetchJsonWithRetry<any>(metaUrl, { headers, retries: 0, cacheTtlMs: OPEN_DATA_QUERY_CACHE_TTL_MS }, {
     portalType: "socrata",
     portalUrl: normalizedPortal
   });
@@ -180,9 +300,10 @@ const buildParcelClaims = (parcelId?: string, datasetSource?: CitationSource): C
 };
 
 const findParcelDatasets = (portalUrl: string) => {
+  const normalizedPortal = normalizePortalUrl(portalUrl);
   const index = getOpenDatasetIndex();
   const candidates = index.datasets.filter((dataset) => {
-    if (dataset.portalUrl !== portalUrl) return false;
+    if (normalizePortalUrl(dataset.portalUrl) !== normalizedPortal) return false;
     const text = normalizeKey(`${dataset.title} ${dataset.description || ""} ${(dataset.tags || []).join(" ")}`);
     return text.includes("parcel") || text.includes("assessor") || text.includes("cad") || text.includes("apn");
   });
@@ -194,8 +315,11 @@ export const resolveParcelFromOpenDataPortal = async (input: {
   portalUrl: string;
   portalType?: "socrata" | "arcgis" | "dcat" | "unknown";
   jurisdiction?: Jurisdiction;
+  calibration?: CalibrationOptions;
 }) => {
   const config = getOpenDataConfig();
+  const calibration = input.calibration || {};
+  const calibrationMode = Boolean(calibration.enabled || calibration.includeDiagnostics);
   const dataGaps: DataGap[] = [];
 
   if (config.featureFlags.usOnlyAddressPolicy && isNonUsJurisdiction(input.jurisdiction)) {
@@ -211,11 +335,21 @@ export const resolveParcelFromOpenDataPortal = async (input: {
       dataGaps,
       datasetsUsed: [],
       sources: [],
-      claims: []
+      claims: [],
+      diagnostics: calibrationMode
+        ? {
+            calibrationMode: true,
+            blockedDatasets: [],
+            relaxedDatasets: [],
+            evaluatedDatasets: [],
+            validationStats: { restricted: 0, nonTabular: 0, metadata: 0 },
+            queryableDatasetCount: 0
+          }
+        : undefined
     };
   }
 
-  const provider = getOpenDataProviderForPortal(input.portalUrl, input.portalType);
+  const provider = await getOpenDataProviderForPortalAsync(input.portalUrl, input.portalType);
   const normalizedAddress = normalizeAddressVariants(input.address)[0] || input.address;
 
   const contractValidation = validateDataSourceContracts();
@@ -240,10 +374,51 @@ export const resolveParcelFromOpenDataPortal = async (input: {
 
   let datasets = findParcelDatasets(input.portalUrl);
   if (datasets.length === 0) {
-    datasets = await provider.discoverDatasets("parcel");
+    datasets = await provider.discoverDatasets("parcel assessor apn pin property");
+    if (datasets.length === 0) {
+      datasets = await provider.discoverDatasets("parcel");
+    }
+    if (datasets.length > 0) {
+      persistOpenDatasetMetadata(datasets);
+    }
   }
 
-  const evaluatedDatasets = datasets.map((dataset) => evaluateDatasetUsage(dataset));
+  const evaluatedDatasets: OpenDatasetMetadata[] = [];
+  const gateDiagnostics: DatasetGateDiagnostic[] = [];
+  for (const dataset of datasets) {
+    const evaluated = evaluateDatasetUsage(dataset);
+    let adjusted = evaluated as OpenDatasetMetadata;
+    let overrideApplied = false;
+    if (
+      calibrationMode
+      && calibration.relaxPublicAssessorReviewGates
+      && evaluated.doNotUse
+      && evaluated.complianceAction === "review"
+      && isVerifiedPublicAssessorDataset(evaluated)
+    ) {
+      overrideApplied = true;
+      adjusted = {
+        ...evaluated,
+        doNotUse: false,
+        complianceNotes: Array.from(new Set([
+          ...(evaluated.complianceNotes || []),
+          "calibration_override_public_assessor_review"
+        ]))
+      };
+    }
+    const blockReasons = overrideApplied ? [] : buildBlockReasons(adjusted);
+    gateDiagnostics.push({
+      datasetId: adjusted.datasetId,
+      title: adjusted.title,
+      complianceAction: adjusted.complianceAction,
+      complianceNotes: adjusted.complianceNotes,
+      freshnessStatus: adjusted.freshnessStatus,
+      doNotUse: Boolean(adjusted.doNotUse),
+      overrideApplied: overrideApplied || undefined,
+      blockReasons
+    });
+    evaluatedDatasets.push(adjusted);
+  }
   const usableDatasets = evaluatedDatasets.filter((dataset) => !dataset.doNotUse);
   const validationStats = {
     restricted: 0,
@@ -268,9 +443,10 @@ export const resolveParcelFromOpenDataPortal = async (input: {
       if (provider.type === "socrata") {
         const validation = await validateSocrataDataset(dataset, input.portalUrl, dataGaps);
         if (!validation.ok) {
-          if (validation.reason === "restricted") validationStats.restricted += 1;
-          if (validation.reason === "non_tabular") validationStats.nonTabular += 1;
-          if (validation.reason === "metadata") validationStats.metadata += 1;
+          const reason = (validation as { reason?: string }).reason;
+          if (reason === "restricted") validationStats.restricted += 1;
+          if (reason === "non_tabular") validationStats.nonTabular += 1;
+          if (reason === "metadata") validationStats.metadata += 1;
           continue;
         }
       }
@@ -306,9 +482,30 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     ));
   }
 
+  const rankedQueryableDatasets = rankDatasetsForParcelResolution(queryableDatasets, normalizedAddress);
+  const textQueryDatasets = rankedQueryableDatasets.slice(0, OPEN_DATA_PORTAL_MAX_TEXT_DATASET_QUERIES);
+  const geometryQueryDatasets = rankedQueryableDatasets.slice(0, OPEN_DATA_PORTAL_MAX_GEOMETRY_DATASET_QUERIES);
+
+  const datasetPerformance = new Map<string, {
+    dataset: OpenDatasetMetadata;
+    score: number;
+    textHits: number;
+    geometryHits: number;
+    queryErrors: number;
+  }>();
+  rankedQueryableDatasets.forEach((dataset) => {
+    datasetPerformance.set(dataset.id, {
+      dataset,
+      score: scoreDatasetForParcelResolution(dataset, normalizedAddress),
+      textHits: 0,
+      geometryHits: 0,
+      queryErrors: 0
+    });
+  });
+
   const assessorLookup = async () => {
     const candidates: ParcelCandidate[] = [];
-    for (const dataset of queryableDatasets) {
+    for (const dataset of textQueryDatasets) {
       if (!dataset.datasetId) continue;
       const result = await provider.queryByText({
         datasetId: dataset.datasetId,
@@ -316,6 +513,8 @@ export const resolveParcelFromOpenDataPortal = async (input: {
         limit: 25
       });
       if (result.errors && result.errors.length > 0) {
+        const perf = datasetPerformance.get(dataset.id);
+        if (perf) perf.queryErrors += 1;
         const error = result.errors[0];
         const guidance = error.status === 401 || error.status === 403
           ? "Check optional API key or portal access policy."
@@ -330,14 +529,19 @@ export const resolveParcelFromOpenDataPortal = async (input: {
         ));
         continue;
       }
-      candidates.push(...buildCandidatesFromRecords(result.records, "assessor"));
+      const records = buildCandidatesFromRecords(result.records, "assessor");
+      if (records.length > 0) {
+        const perf = datasetPerformance.get(dataset.id);
+        if (perf) perf.textHits += records.length;
+      }
+      candidates.push(...records);
     }
     return candidates;
   };
 
   const gisParcelLayer = async (params: { point: GeoPoint }) => {
     const features: ParcelGeometryFeature[] = [];
-    for (const dataset of queryableDatasets) {
+    for (const dataset of geometryQueryDatasets) {
       if (!dataset.datasetId) continue;
       const result = await provider.queryByGeometry({
         datasetId: dataset.datasetId,
@@ -345,6 +549,8 @@ export const resolveParcelFromOpenDataPortal = async (input: {
         limit: 25
       });
       if (result.errors && result.errors.length > 0) {
+        const perf = datasetPerformance.get(dataset.id);
+        if (perf) perf.queryErrors += 1;
         const error = result.errors[0];
         const guidance = error.status === 401 || error.status === 403
           ? "Check optional API key or portal access policy."
@@ -359,9 +565,11 @@ export const resolveParcelFromOpenDataPortal = async (input: {
         ));
         continue;
       }
+      let geometryMatchCount = 0;
       result.records.forEach((record) => {
         const fields = extractParcelFields(record.attributes);
         if (!record.geometry) return;
+        geometryMatchCount += 1;
         features.push({
           geometry: record.geometry,
           parcelId: fields.parcelId,
@@ -370,6 +578,10 @@ export const resolveParcelFromOpenDataPortal = async (input: {
           attributes: record.attributes
         });
       });
+      if (geometryMatchCount > 0) {
+        const perf = datasetPerformance.get(dataset.id);
+        if (perf) perf.geometryHits += geometryMatchCount;
+      }
     }
     return features;
   };
@@ -387,17 +599,35 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     }
   );
 
-  const datasetForCitations = queryableDatasets[0];
+  const performanceEntries = Array.from(datasetPerformance.values())
+    .sort((a, b) =>
+      ((b.textHits + b.geometryHits) - (a.textHits + a.geometryHits))
+      || (a.queryErrors - b.queryErrors)
+      || (b.score - a.score)
+    );
+  const datasetForCitations = performanceEntries.find((entry) => (entry.textHits + entry.geometryHits) > 0)?.dataset
+    || rankedQueryableDatasets[0];
   const sources = datasetForCitations
     ? buildCitationSources(input.portalUrl, datasetForCitations.datasetId, datasetForCitations.title, datasetForCitations.lastUpdated)
     : [];
   const claims = buildParcelClaims(result.parcel?.parcelId, sources[0]);
+  const calibrationDiagnostics: CalibrationDiagnostics | undefined = calibrationMode
+    ? {
+        calibrationMode: true,
+        blockedDatasets: gateDiagnostics.filter((entry) => entry.doNotUse && !entry.overrideApplied),
+        relaxedDatasets: gateDiagnostics.filter((entry) => Boolean(entry.overrideApplied)),
+        evaluatedDatasets: gateDiagnostics,
+        validationStats,
+        queryableDatasetCount: rankedQueryableDatasets.length
+      }
+    : undefined;
 
   return {
     ...result,
     dataGaps: [...result.dataGaps, ...dataGaps],
-    datasetsUsed: queryableDatasets,
+    datasetsUsed: rankedQueryableDatasets,
     sources,
-    claims
+    claims,
+    diagnostics: calibrationDiagnostics
   };
 };

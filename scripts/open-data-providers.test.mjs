@@ -4,6 +4,8 @@ import { createOpenDataProvider } from "../services/openDataProviders.ts";
 import { getOpenDataConfig, updateOpenDataConfig, resetOpenDataConfig } from "../services/openDataConfig.ts";
 import { resolveParcelFromOpenDataPortal } from "../services/openDataParcelResolution.ts";
 import { buildDallasAddressVariants } from "../services/dallasEvidencePack.ts";
+import { resolveParcelWorkflow } from "../services/parcelResolution.ts";
+import { runOpenDataParcelResolutionPhase } from "../services/openDataPhase3C.ts";
 
 const buildResponse = (body, { status = 200, headers = {} } = {}) => {
   const ok = status >= 200 && status < 300;
@@ -50,7 +52,11 @@ const runSocrataTests = async () => {
     if (String(target).includes("/api/views/abcd.json")) {
       return buildResponse({
         name: "Parcel Dataset",
-        columns: [{ fieldName: "location", dataTypeName: "location" }]
+        columns: [
+          { fieldName: "parcel_id", dataTypeName: "text" },
+          { fieldName: "site_address", dataTypeName: "text" },
+          { fieldName: "location", dataTypeName: "location" }
+        ]
       });
     }
     if (String(target).includes("/resource/abcd.json")) {
@@ -70,10 +76,19 @@ const runSocrataTests = async () => {
   const result = await provider.queryByText({ datasetId: "abcd", searchText: "123" });
   assert.equal(result.records.length, 1);
   assert.equal(result.records[0].attributes.parcel_id, "P-123");
+  const textQueryCall = calls.find((call) => call.target.includes("/resource/abcd.json"));
+  assert.ok(textQueryCall, "Expected Socrata text query call.");
+  assert.ok(
+    textQueryCall.target.includes("%24where="),
+    "Expected field-aware Socrata text query ($where) when searchable fields are present."
+  );
 
   const searchCall = calls.find((call) => call.target.includes("/api/catalog/v1"));
   assert.ok(searchCall, "Expected Socrata discovery call.");
   assert.equal(searchCall.body.headers["X-App-Token"], "token-123");
+  assert.ok(searchCall.target.includes("domains=data.example.gov"), "Expected Socrata discovery domain filter.");
+  assert.ok(searchCall.target.includes("only=datasets"), "Expected Socrata discovery dataset-only filter.");
+  assert.ok(searchCall.target.includes("order=updated_at+desc"), "Expected Socrata discovery recency ordering.");
 };
 
 const runSocrataValidationTests = async () => {
@@ -257,7 +272,7 @@ const runSpatialJoinParcelTest = async () => {
             license: "Public Domain",
             termsOfUse: "Public use",
             distribution: [
-              { downloadURL: "https://data.example.org/parcel-geo.json" }
+              { downloadURL: "https://spatial.example.org/parcel-geo.json" }
             ]
           }
         ]
@@ -279,13 +294,166 @@ const runSpatialJoinParcelTest = async () => {
 
   const result = await resolveParcelFromOpenDataPortal({
     address: "123 Main St",
-    portalUrl: "https://data.example.org",
+    portalUrl: "https://spatial.example.org",
     portalType: "dcat"
   });
   assert.equal(result.parcel?.parcelId, "G-1");
   assert.equal(result.resolutionMethod, "gis");
   assert.ok(result.sources?.length > 0, "Expected citation sources from open data.");
   assert.ok(result.claims?.length > 0, "Expected parcel claims with citations.");
+};
+
+const runAssessorAmbiguityFallsBackToGisTest = async () => {
+  const result = await resolveParcelWorkflow(
+    {
+      address: "123 Main St",
+      normalizedAddress: "123 MAIN ST"
+    },
+    {
+      geocode: async () => ({
+        point: { lat: 0.5, lon: 0.5 }
+      }),
+      assessorLookup: async () => ([
+        { parcelId: "A-1", source: "assessor", situsAddress: "123 MAIN ST" },
+        { parcelId: "A-2", source: "assessor", situsAddress: "123 MAIN STREET" }
+      ]),
+      gisParcelLayer: async () => ([
+        {
+          parcelId: "GIS-1",
+          situsAddress: "123 MAIN ST",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]]
+          }
+        }
+      ])
+    }
+  );
+  assert.equal(result.parcel?.parcelId, "GIS-1");
+  assert.equal(result.resolutionMethod, "gis");
+};
+
+const runPhase3COrchestrationTest = async () => {
+  const attempts = [];
+  const result = await runOpenDataParcelResolutionPhase(
+    {
+      topic: "123 Main St, Plano, TX",
+      portalCandidates: [
+        "https://skip.example.gov",
+        "https://empty.example.gov",
+        "https://success.example.gov"
+      ],
+      phaseLabel: "PHASE 3C: OPEN DATA PARCEL"
+    },
+    {
+      canUseExternalCall: (_phase, portalUrl) => {
+        if (portalUrl.includes("skip.")) {
+          return { allowed: false, reason: "external_call_budget", detail: "cap reached" };
+        }
+        return { allowed: true, reason: null };
+      },
+      normalizeSource: (source) => {
+        if (!source?.url) return null;
+        return {
+          uri: source.url,
+          title: source.title || "Open data source",
+          domain: "example.gov",
+          provider: "system",
+          kind: "citation"
+        };
+      },
+      resolvePortal: async ({ portalUrl }) => {
+        attempts.push(portalUrl);
+        if (portalUrl.includes("empty.")) {
+          return {
+            parcel: undefined,
+            datasetsUsed: [],
+            sources: [],
+            dataGaps: [{ id: "gap-1", description: "No parcel", reason: "none", status: "missing" }]
+          };
+        }
+        return {
+          parcel: { parcelId: "P-777" },
+          resolutionMethod: "gis",
+          datasetsUsed: [{ datasetId: "d1" }],
+          sources: [{ url: `${portalUrl}/resource/d1`, title: "Parcel table" }],
+          dataGaps: [{ id: "gap-2", description: "Minor", reason: "partial", status: "missing" }]
+        };
+      }
+    }
+  );
+
+  assert.deepEqual(attempts, ["https://empty.example.gov", "https://success.example.gov"]);
+  assert.equal(result.attempts.length, 3);
+  assert.ok(result.attempts[0].skipped, "Expected first portal to be skipped by guardrail.");
+  assert.equal(result.finding?.portalUrl, "https://success.example.gov");
+  assert.equal(result.finding?.parcelId, "P-777");
+  assert.ok((result.dataGaps || []).length >= 2, "Expected data gaps to aggregate across attempts.");
+};
+
+const runCalibrationModePublicAssessorOverrideTest = async () => {
+  updateOpenDataConfig({
+    zeroCostMode: true,
+    allowPaidAccess: false,
+    auth: {}
+  });
+  global.fetch = buildProxyFetch((target) => {
+    if (String(target).includes("nominatim.openstreetmap.org/search")) {
+      return buildResponse([
+        { lat: "0.5", lon: "0.5", display_name: "120 Zinnia Ln" }
+      ]);
+    }
+    if (String(target).endsWith("/data.json")) {
+      return buildResponse({
+        dataset: [
+          {
+            identifier: "parcel-assessor-1",
+            title: "County Parcel Assessor Data",
+            description: "Official parcel dataset",
+            distribution: [
+              { downloadURL: "https://data.county.example.gov/parcel.json" }
+            ]
+          }
+        ]
+      });
+    }
+    if (String(target).includes("/parcel.json")) {
+      return buildResponse([
+        {
+          parcel_id: "CAL-1",
+          site_address: "120 ZINNIA LN",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]]
+          }
+        }
+      ]);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const withoutCalibration = await resolveParcelFromOpenDataPortal({
+    address: "120 ZINNIA LN, HUTTO, TX 78634",
+    portalUrl: "https://data.county.example.gov",
+    portalType: "dcat"
+  });
+  assert.equal(withoutCalibration.parcel?.parcelId, undefined);
+
+  const withCalibration = await resolveParcelFromOpenDataPortal({
+    address: "120 ZINNIA LN, HUTTO, TX 78634",
+    portalUrl: "https://data.county.example.gov",
+    portalType: "dcat",
+    calibration: {
+      enabled: true,
+      includeDiagnostics: true,
+      relaxPublicAssessorReviewGates: true
+    }
+  });
+  assert.equal(withCalibration.parcel?.parcelId, "CAL-1");
+  assert.ok(
+    Array.isArray(withCalibration.diagnostics?.relaxedDatasets) && withCalibration.diagnostics.relaxedDatasets.length > 0,
+    "Expected calibration mode to relax at least one review-blocked assessor dataset."
+  );
 };
 
 const runZeroCostGuardTests = () => {
@@ -311,6 +479,9 @@ await runSocrataValidationTests();
 await runArcGisTests();
 await runDcatTests();
 await runSpatialJoinParcelTest();
+await runAssessorAmbiguityFallsBackToGisTest();
+await runPhase3COrchestrationTest();
+await runCalibrationModePublicAssessorOverrideTest();
 await runZeroCostGuardTests();
 runDallasVariantTest();
 resetOpenDataConfig();
