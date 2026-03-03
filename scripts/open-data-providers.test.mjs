@@ -160,6 +160,50 @@ const runSocrataValidationTests = async () => {
   assert.ok(hasNonTabularGap, "Expected non-tabular dataset gap.");
 };
 
+const runNodeProxyFallbackTest = async () => {
+  const calls = [];
+  global.fetch = async (url) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes("/api/open-data/fetch")) {
+      throw new TypeError("Failed to parse URL from /api/open-data/fetch");
+    }
+    if (target.includes("/api/catalog/v1")) {
+      return buildResponse({
+        results: [
+          { resource: { id: "fall-1", name: "Parcel Dataset", updatedAt: "2024-01-01", description: "Parcel data" } }
+        ]
+      });
+    }
+    if (target.includes("/api/views/fall-1.json")) {
+      return buildResponse({
+        name: "Parcel Dataset",
+        columns: [
+          { fieldName: "parcel_id", dataTypeName: "text" },
+          { fieldName: "site_address", dataTypeName: "text" }
+        ]
+      });
+    }
+    if (target.includes("/resource/fall-1.json")) {
+      return buildResponse([
+        { parcel_id: "NF-1", site_address: "123 MAIN ST" }
+      ]);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  };
+
+  const provider = createOpenDataProvider({ portalUrl: "https://fallback.example.gov", portalType: "socrata" });
+  const datasets = await provider.discoverDatasets("parcel", 1);
+  assert.equal(datasets.length, 1);
+  const result = await provider.queryByText({ datasetId: "fall-1", searchText: "123 MAIN ST" });
+  assert.equal(result.records.length, 1);
+  assert.ok(calls.includes("/api/open-data/fetch"), "Expected initial proxy call attempt.");
+  assert.ok(
+    calls.some((call) => call.startsWith("https://") && (call.includes("/api/catalog/v1") || call.includes("/api/views/fall-1.json"))),
+    "Expected direct fetch fallback to target endpoint."
+  );
+};
+
 const runArcGisTests = async () => {
   const calls = [];
   global.fetch = buildProxyFetch((target, body) => {
@@ -456,6 +500,49 @@ const runCalibrationModePublicAssessorOverrideTest = async () => {
   );
 };
 
+const runAssessorQueryFanOutTest = async () => {
+  updateOpenDataConfig({
+    zeroCostMode: true,
+    allowPaidAccess: false,
+    auth: {}
+  });
+  global.fetch = buildProxyFetch((target) => {
+    if (String(target).includes("nominatim.openstreetmap.org/search")) {
+      return buildResponse([]);
+    }
+    if (String(target).endsWith("/data.json")) {
+      return buildResponse({
+        dataset: [
+          {
+            identifier: "parcel-fanout-1",
+            title: "County Parcel Assessor Data",
+            description: "Official parcel dataset",
+            distribution: [
+              { downloadURL: "https://fanout.example.gov/parcel.csv" }
+            ]
+          }
+        ]
+      });
+    }
+    if (String(target).includes("/parcel.csv")) {
+      return buildResponse("parcel_id,site_address\nFAN-1,120 ZINNIA LN");
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const result = await resolveParcelFromOpenDataPortal({
+    address: "120 ZINNIA LN, HUTTO, TX 78634",
+    portalUrl: "https://fanout.example.gov",
+    portalType: "dcat",
+    calibration: {
+      enabled: true,
+      relaxPublicAssessorReviewGates: true
+    }
+  });
+  assert.equal(result.parcel?.parcelId, "FAN-1");
+  assert.equal(result.resolutionMethod, "assessor");
+};
+
 const runZeroCostGuardTests = () => {
   updateOpenDataConfig({
     zeroCostMode: true,
@@ -476,12 +563,14 @@ const runDallasVariantTest = () => {
 
 await runSocrataTests();
 await runSocrataValidationTests();
+await runNodeProxyFallbackTest();
 await runArcGisTests();
 await runDcatTests();
 await runSpatialJoinParcelTest();
 await runAssessorAmbiguityFallsBackToGisTest();
 await runPhase3COrchestrationTest();
 await runCalibrationModePublicAssessorOverrideTest();
+await runAssessorQueryFanOutTest();
 await runZeroCostGuardTests();
 runDallasVariantTest();
 resetOpenDataConfig();

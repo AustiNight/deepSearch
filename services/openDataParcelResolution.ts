@@ -1,5 +1,5 @@
 import type { ClaimCitation, CitationSource, DataGap, GeoPoint, Jurisdiction, OpenDatasetMetadata, SourcePointer } from "../types";
-import type { ParcelCandidate, ParcelGeometryFeature } from "./parcelResolution";
+import type { ParcelCandidate, ParcelGeometryFeature, ParcelLookupInput } from "./parcelResolution";
 import { resolveParcelWorkflow } from "./parcelResolution";
 import { addressToGeometry } from "./openDataGeocoding";
 import { getOpenDataProviderForPortalAsync } from "./openDataPortalService";
@@ -151,6 +151,70 @@ const rankDatasetsForParcelResolution = (datasets: OpenDatasetMetadata[], normal
     }))
     .sort((a, b) => (b.score - a.score) || (a.index - b.index))
     .map((entry) => entry.dataset);
+};
+
+const MAX_ASSESSOR_QUERY_VARIANTS = 6;
+const ADDRESS_UNIT_PATTERN = /(?:^|\s|,)(?:#|apt|apartment|unit|suite|ste|bldg|building|fl|floor|lot|trlr|trailer)\.?\s*[a-z0-9-]+\b/gi;
+
+const normalizeAssessorSearchText = (value: string) =>
+  value
+    .replace(/\s+/g, " ")
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/\s+,/g, ",")
+    .replace(/,+$/g, "")
+    .trim();
+
+const stripAddressUnit = (value: string) => normalizeAssessorSearchText(value.replace(ADDRESS_UNIT_PATTERN, " "));
+
+const toStreetLine = (value: string) => {
+  const normalized = normalizeAssessorSearchText(value);
+  if (!normalized) return "";
+  const firstComma = normalized.indexOf(",");
+  if (firstComma < 0) return normalized;
+  return normalized.slice(0, firstComma).trim();
+};
+
+const searchVariantKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const buildAssessorSearchTexts = (input: {
+  address: string;
+  normalizedAddress: string;
+  addressVariants?: string[];
+}) => {
+  const baseCandidates = Array.from(new Set([
+    input.normalizedAddress,
+    ...(input.addressVariants || []),
+    ...normalizeAddressVariants(input.address),
+    input.address
+  ].map((value) => normalizeAssessorSearchText(value || "")).filter(Boolean)));
+
+  const variants: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string) => {
+    const normalized = normalizeAssessorSearchText(value);
+    if (!normalized) return;
+    const key = searchVariantKey(normalized);
+    if (key.length < 6 || seen.has(key)) return;
+    seen.add(key);
+    variants.push(normalized);
+  };
+
+  for (const candidate of baseCandidates) {
+    const withoutUnit = stripAddressUnit(candidate);
+    const streetLine = toStreetLine(candidate);
+    const streetNoUnit = stripAddressUnit(streetLine);
+    push(candidate);
+    push(withoutUnit);
+    push(streetLine);
+    push(streetNoUnit);
+    if (variants.length >= MAX_ASSESSOR_QUERY_VARIANTS) break;
+  }
+
+  if (variants.length > 0) {
+    return variants.slice(0, MAX_ASSESSOR_QUERY_VARIANTS);
+  }
+  const fallback = normalizeAssessorSearchText(input.normalizedAddress || input.address);
+  return fallback ? [fallback] : [];
 };
 
 const extractParcelFields = (attributes: Record<string, unknown>) => {
@@ -503,38 +567,46 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     });
   });
 
-  const assessorLookup = async () => {
+  const assessorLookup = async (lookupInput: ParcelLookupInput) => {
     const candidates: ParcelCandidate[] = [];
+    const searchTexts = buildAssessorSearchTexts({
+      address: lookupInput.address || input.address,
+      normalizedAddress: lookupInput.normalizedAddress || normalizedAddress,
+      addressVariants: lookupInput.addressVariants
+    });
     for (const dataset of textQueryDatasets) {
       if (!dataset.datasetId) continue;
-      const result = await provider.queryByText({
-        datasetId: dataset.datasetId,
-        searchText: normalizedAddress,
-        limit: 25
-      });
-      if (result.errors && result.errors.length > 0) {
-        const perf = datasetPerformance.get(dataset.id);
-        if (perf) perf.queryErrors += 1;
-        const error = result.errors[0];
-        const guidance = error.status === 401 || error.status === 403
-          ? "Check optional API key or portal access policy."
-          : error.status === 429
-            ? "Rate limited. Retry later or provide optional token."
-            : "Retry later or verify portal availability.";
-        dataGaps.push(buildDataGap(
-          "Parcel dataset query failed.",
-          `${error.message} (${error.code}). ${guidance}`,
-          "missing",
-          buildExpectedSources(input.portalUrl, dataset.datasetId)
-        ));
-        continue;
+      for (const searchText of searchTexts) {
+        const result = await provider.queryByText({
+          datasetId: dataset.datasetId,
+          searchText,
+          limit: 25
+        });
+        if (result.errors && result.errors.length > 0) {
+          const perf = datasetPerformance.get(dataset.id);
+          if (perf) perf.queryErrors += 1;
+          const error = result.errors[0];
+          const guidance = error.status === 401 || error.status === 403
+            ? "Check optional API key or portal access policy."
+            : error.status === 429
+              ? "Rate limited. Retry later or provide optional token."
+              : "Retry later or verify portal availability.";
+          dataGaps.push(buildDataGap(
+            "Parcel dataset query failed.",
+            `${error.message} (${error.code}). ${guidance}`,
+            "missing",
+            buildExpectedSources(input.portalUrl, dataset.datasetId)
+          ));
+          break;
+        }
+        const records = buildCandidatesFromRecords(result.records, "assessor");
+        if (records.length > 0) {
+          const perf = datasetPerformance.get(dataset.id);
+          if (perf) perf.textHits += records.length;
+          candidates.push(...records);
+          break;
+        }
       }
-      const records = buildCandidatesFromRecords(result.records, "assessor");
-      if (records.length > 0) {
-        const perf = datasetPerformance.get(dataset.id);
-        if (perf) perf.textHits += records.length;
-      }
-      candidates.push(...records);
     }
     return candidates;
   };

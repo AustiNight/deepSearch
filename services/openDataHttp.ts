@@ -1,6 +1,6 @@
 import type { OpenDataPortalType } from "../types";
 import { recordPortalError } from "./portalErrorTelemetry";
-import { apiFetch } from "./apiClient";
+import { apiFetch, directFetch } from "./apiClient";
 import { OPEN_DATA_QUERY_CACHE_MAX_ENTRIES } from "../constants";
 
 export type PortalRequestContext = {
@@ -119,12 +119,23 @@ const proxyFetch = async (
     portalType: context.portalType,
     portalUrl: context.portalUrl
   };
-  return apiFetch("/api/open-data/fetch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: options.signal
-  });
+  try {
+    return await apiFetch("/api/open-data/fetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: options.signal
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    const canDirectFetchFallback = typeof window === "undefined"
+      && /failed to parse url|invalid url|only absolute urls/i.test(message.toLowerCase());
+    if (!canDirectFetchFallback) throw error;
+    return directFetch(url, {
+      headers: options.headers,
+      signal: options.signal
+    });
+  }
 };
 
 export const fetchJsonWithRetry = async <T>(
