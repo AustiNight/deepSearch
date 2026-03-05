@@ -142,7 +142,14 @@ export const JURISDICTION_AVAILABILITY_MATRIX: JurisdictionAvailability[] = [
     },
     records: buildSeededRecords([
       'https://www.dallasopendata.com',
-      'https://www.dallascityhall.com'
+      'https://www.dallascityhall.com',
+      'https://www.dallascad.org',
+      'https://www.dallascounty.org/government/county-clerk/',
+      'https://www.dallascounty.org/departments/tax/',
+      'https://dallascityhall.com/departments/pnv/Pages/default.aspx',
+      'https://dallascityhall.com/departments/codecompliance/Pages/default.aspx',
+      'https://msc.fema.gov/portal/home',
+      'https://geocoding.geo.census.gov/geocoder/'
     ])
   },
   {

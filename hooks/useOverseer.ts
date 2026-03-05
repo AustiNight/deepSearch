@@ -46,6 +46,7 @@ import { getOpenDataConfig } from '../services/openDataConfig';
 import { resolveParcelFromOpenDataPortal } from '../services/openDataParcelResolution';
 import { runOpenDataParcelResolutionPhase } from '../services/openDataPhase3C';
 import { resolveCityOpenDataProfile } from '../services/cityOpenDataProfiles';
+import { normalizeSourcesFromText } from '../services/sourceNormalization';
 import { redactSensitiveTextWithPatterns } from '../services/redaction';
 import {
   EVIDENCE_RECOVERY_CACHE_TTL_MS,
@@ -164,6 +165,86 @@ const buildDiagnosticsSection = (input: {
 };
 
 const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+
+const URL_TOKEN_PATTERN = /(?:https?:\/\/|www\.)[^\s<>")\]]+/gi;
+
+const extractUrlTokens = (value: string): string[] => {
+  if (!value) return [];
+  const tokens = String(value).match(URL_TOKEN_PATTERN) || [];
+  return tokens
+    .map((token) => token.replace(/[)\].,;:!?]+$/g, '').trim())
+    .map((token) => /^www\./i.test(token) ? `https://${token}` : token)
+    .filter(Boolean);
+};
+
+const toNormalizedSourceCandidate = (uri: string, title?: string): NormalizedSource | null => {
+  const trimmed = String(uri || '').trim();
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  return {
+    uri: trimmed,
+    title: title || normalizeDomain(trimmed) || 'Official source',
+    domain: normalizeDomain(trimmed),
+    provider: 'system',
+    kind: 'citation'
+  };
+};
+
+const buildFallbackAllowedSources = (input: {
+  topic: string;
+  findings: Finding[];
+  dataGaps: DataGap[];
+  jurisdiction?: Jurisdiction;
+  addressLike?: boolean;
+}) => {
+  const urls: string[] = [];
+  const textFragments: string[] = [input.topic];
+  for (const finding of input.findings || []) {
+    if (typeof (finding as any)?.url === 'string') {
+      urls.push(...extractUrlTokens((finding as any).url));
+    }
+    if (typeof (finding as any)?.content === 'string') {
+      textFragments.push((finding as any).content);
+    }
+  }
+  for (const gap of input.dataGaps || []) {
+    if (typeof gap?.description === 'string') textFragments.push(gap.description);
+    if (typeof gap?.reason === 'string') textFragments.push(gap.reason);
+    const expected = Array.isArray(gap?.expectedSources) ? gap.expectedSources : [];
+    for (const sourcePointer of expected) {
+      if (sourcePointer?.endpoint) urls.push(sourcePointer.endpoint);
+      if (sourcePointer?.portalUrl) urls.push(sourcePointer.portalUrl);
+      if (typeof sourcePointer?.query === 'string') textFragments.push(sourcePointer.query);
+      if (typeof sourcePointer?.notes === 'string') textFragments.push(sourcePointer.notes);
+    }
+  }
+  buildOpenDataPortalCandidates(input.jurisdiction).slice(0, 6).forEach((portal) => {
+    urls.push(portal);
+  });
+  if (input.addressLike) {
+    urls.push(
+      'https://geocoding.geo.census.gov/geocoder/',
+      'https://msc.fema.gov/portal/home'
+    );
+  }
+
+  const fallbackText = textFragments.filter(Boolean).join('\n');
+  if (fallbackText) {
+    const normalized = normalizeSourcesFromText(fallbackText, 'system');
+    normalized.sources.forEach((source) => {
+      if (source?.uri) urls.push(source.uri);
+    });
+  }
+
+  const deduped = new Map<string, NormalizedSource>();
+  for (const uri of urls) {
+    const normalized = toNormalizedSourceCandidate(uri);
+    if (!normalized) continue;
+    const key = normalizeSourceUriForMatch(normalized.uri);
+    if (!key || deduped.has(key)) continue;
+    deduped.set(key, normalized);
+  }
+  return Array.from(deduped.values());
+};
 
 const citationToNormalizedSource = (source: any): NormalizedSource | null => {
   const url = typeof source?.url === 'string' ? source.url.trim() : '';
@@ -757,7 +838,10 @@ const parseCityState = (value: string): { city: string; state: string } => {
     const stateToken = stripZipFromStateToken(commaParts[commaParts.length - 1]);
     const stateCandidate = normalizeStateCode(stateToken);
     if (stateCandidate) {
-      return { city: commaParts.slice(0, -1).join(', '), state: stateCandidate };
+      const cityCandidate = commaParts.length >= 3
+        ? commaParts[commaParts.length - 2]
+        : commaParts[0];
+      return { city: cityCandidate.trim(), state: stateCandidate };
     }
   }
 
@@ -3976,7 +4060,29 @@ export const useOverseer = () => {
       );
 
       const allRawSources = findingsRef.current.flatMap((f: any) => f.rawSources || []);
-      const complianceResult = enforceCompliance(allRawSources);
+      let complianceResult = enforceCompliance(allRawSources);
+      if (complianceResult.allowedSources.length === 0) {
+        const fallbackSources = buildFallbackAllowedSources({
+          topic,
+          findings: findingsRef.current as Finding[],
+          dataGaps: [...openDataPortalDataGaps, ...cityProfileDataGaps],
+          jurisdiction,
+          addressLike
+        });
+        if (fallbackSources.length > 0) {
+          const fallbackCompliance = enforceCompliance(fallbackSources);
+          if (fallbackCompliance.allowedSources.length > 0) {
+            complianceResult = fallbackCompliance;
+            logOverseer(
+              'PHASE 4: EVIDENCE',
+              'recovered fallback allowed sources',
+              `recovered ${fallbackCompliance.allowedSources.length} sources`,
+              fallbackCompliance.allowedSources.slice(0, 3).map((source) => source.uri).join(' | '),
+              'warning'
+            );
+          }
+        }
+      }
       if (complianceResult.blockedSources.length > 0) {
         logOverseer(
           'PHASE 4: COMPLIANCE',

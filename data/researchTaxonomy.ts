@@ -1186,14 +1186,70 @@ const slugify = (value: string): string => {
     .slice(0, 64);
 };
 
-const isTemplateValid = (template: string) => {
-  if (!template) return false;
-  if (template.length < 4 || template.length > 200) return false;
-  if (template.includes('\n')) return false;
+type TemplateValidationResult =
+  | { valid: true }
+  | { valid: false; code: 'empty' | 'too_short' | 'too_long' | 'multiline' | 'unsafe_scheme' | 'insufficient_alnum' };
+
+const validateTemplate = (template: string): TemplateValidationResult => {
+  if (!template) return { valid: false, code: 'empty' };
+  if (template.length < 4) return { valid: false, code: 'too_short' };
+  if (template.length > 200) return { valid: false, code: 'too_long' };
+  if (template.includes('\n')) return { valid: false, code: 'multiline' };
   const unsafe = template.toLowerCase();
-  if (unsafe.includes('javascript:') || unsafe.includes('data:')) return false;
+  if (unsafe.includes('javascript:') || unsafe.includes('data:')) return { valid: false, code: 'unsafe_scheme' };
   const cleaned = template.replace(SLOT_REGEX, '').replace(/[^a-zA-Z0-9]+/g, '');
-  return cleaned.length >= 3;
+  if (cleaned.length < 3) return { valid: false, code: 'insufficient_alnum' };
+  return { valid: true };
+};
+
+const formatTemplateValidationCode = (code: TemplateValidationResult extends { valid: false; code: infer C } ? C : never) => {
+  if (code === 'empty') return 'empty';
+  if (code === 'too_short') return 'too_short';
+  if (code === 'too_long') return 'too_long';
+  if (code === 'multiline') return 'multiline';
+  if (code === 'unsafe_scheme') return 'unsafe_scheme';
+  return 'insufficient_alnum';
+};
+
+const normalizeTemplateAndNotes = (template: string, notes?: string) => {
+  const lines = String(template || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let compact = (lines[0] || String(template || '').trim()).replace(/\s+/g, ' ').trim();
+  const overflowLines = lines.slice(1);
+
+  // Move verbose placeholders/notes prose out of template and into notes.
+  const markerMatch = compact.match(/\b(?:placeholders?|notes?)\s*:/i);
+  let markerChunk = '';
+  if (markerMatch?.index !== undefined && markerMatch.index > 0) {
+    markerChunk = compact.slice(markerMatch.index).trim();
+    compact = compact.slice(0, markerMatch.index).trim();
+  }
+
+  const noteParts = [
+    typeof notes === 'string' ? notes.trim() : '',
+    markerChunk,
+    overflowLines.join('\n').trim()
+  ].filter(Boolean);
+
+  // If still long, prefer preserving the main URL token when available.
+  if (compact.length > 200) {
+    const urlMatch = compact.match(/https?:\/\/[^\s)]+/i)?.[0];
+    if (urlMatch) {
+      const prefix = compact.slice(0, compact.indexOf(urlMatch)).replace(/[:\-\s]+$/g, '').trim();
+      const candidate = prefix ? `${prefix}: ${urlMatch}` : urlMatch;
+      compact = candidate.length <= 200 ? candidate : urlMatch.slice(0, 200);
+    } else {
+      compact = compact.slice(0, 200).trim();
+    }
+    noteParts.push(`Original template truncated from ${String(template || '').length} chars.`);
+  }
+
+  return {
+    template: compact,
+    notes: noteParts.length > 0 ? noteParts.join('\n\n') : undefined
+  };
 };
 
 const ensureProvenance = (existing: TaxonomyProvenance[] | undefined, added: TaxonomyProvenance): TaxonomyProvenance[] => {
@@ -1261,23 +1317,38 @@ export const vetAndPersistTaxonomyProposals = (
 
   const templateSet = existingTemplateSet();
 
-  const buildProposedTactic = (verticalId: string, subtopicId: string, template: string, notes?: string): ResearchTacticTemplate => ({
-    id: `${verticalId}-${subtopicId}-${slugify(template)}`,
-    template,
-    notes,
-    provenance: ensureProvenance(undefined, provenanceTag)
-  });
+  const buildProposedTactic = (
+    verticalId: string,
+    subtopicId: string,
+    template: string,
+    notes?: string
+  ): ResearchTacticTemplate | null => {
+    const normalized = normalizeTemplateAndNotes(template, notes);
+    const validation = validateTemplate(normalized.template);
+    if (!validation.valid) return null;
+    return {
+      id: `${verticalId}-${subtopicId}-${slugify(normalized.template)}`,
+      template: normalized.template,
+      notes: normalized.notes,
+      provenance: ensureProvenance(undefined, provenanceTag)
+    };
+  };
 
   const addTactic = (verticalId: string, subtopicId: string, methodId: string, template: string, notes?: string) => {
-    if (!isTemplateValid(template)) {
+    const normalized = normalizeTemplateAndNotes(template, notes);
+    const validation = validateTemplate(normalized.template);
+    if (!validation.valid) {
       rejected += 1;
-      rejectedItems.push({ item: template, reason: 'Invalid template.' });
+      rejectedItems.push({
+        item: template,
+        reason: `Invalid template (${formatTemplateValidationCode(validation.code)}).`
+      });
       return;
     }
-    const key = template.trim().toLowerCase();
+    const key = normalized.template.trim().toLowerCase();
     if (templateSet.has(key)) {
       rejected += 1;
-      rejectedItems.push({ item: template, reason: 'Duplicate template.' });
+      rejectedItems.push({ item: normalized.template, reason: 'Duplicate template.' });
       return;
     }
 
@@ -1295,11 +1366,11 @@ export const vetAndPersistTaxonomyProposals = (
       return;
     }
 
-    const tacticId = `${verticalId}-${subtopicId}-${slugify(template)}`;
+    const tacticId = `${verticalId}-${subtopicId}-${slugify(normalized.template)}`;
     const tacticItem: ResearchTacticTemplate = {
       id: tacticId,
-      template,
-      notes,
+      template: normalized.template,
+      notes: normalized.notes,
       provenance: ensureProvenance(undefined, provenanceTag)
     };
 
@@ -1308,7 +1379,7 @@ export const vetAndPersistTaxonomyProposals = (
     ensureTacticInStore(verticalId, subtopicId, tacticItem);
     templateSet.add(key);
     accepted += 1;
-    acceptedItems.push(template);
+    acceptedItems.push(normalized.template);
   };
 
   if (Array.isArray(proposals?.verticals)) {
@@ -1345,10 +1416,14 @@ export const vetAndPersistTaxonomyProposals = (
           if (!subId) continue;
           const tactics = (sub.tactics || [])
             .filter(t => t?.template)
-            .map((t) => buildProposedTactic(id, subId, t.template, t.notes));
+            .map((t) => buildProposedTactic(id, subId, t.template, t.notes))
+            .filter((t): t is ResearchTacticTemplate => Boolean(t));
           const methods = Array.isArray(sub.methods) && sub.methods.length > 0
             ? sub.methods.map((m) => method(slugify(m.id || m.label || 'search'), m.label || 'Search Queries',
-              (m.tactics || []).filter(t => t?.template).map(t => buildProposedTactic(id, subId, t.template, t.notes)),
+              (m.tactics || [])
+                .filter(t => t?.template)
+                .map(t => buildProposedTactic(id, subId, t.template, t.notes))
+                .filter((t): t is ResearchTacticTemplate => Boolean(t)),
               m.description
             ))
             : undefined;
@@ -1394,10 +1469,14 @@ export const vetAndPersistTaxonomyProposals = (
 
       const tactics = (proposed.tactics || [])
         .filter(t => t?.template)
-        .map(t => buildProposedTactic(proposed.verticalId, subId, t.template, t.notes));
+        .map(t => buildProposedTactic(proposed.verticalId, subId, t.template, t.notes))
+        .filter((t): t is ResearchTacticTemplate => Boolean(t));
       const methods = Array.isArray(proposed.methods) && proposed.methods.length > 0
         ? proposed.methods.map((m) => method(slugify(m.id || m.label || 'search'), m.label || 'Search Queries',
-          (m.tactics || []).filter(t => t?.template).map(t => buildProposedTactic(proposed.verticalId, subId, t.template, t.notes)),
+          (m.tactics || [])
+            .filter(t => t?.template)
+            .map(t => buildProposedTactic(proposed.verticalId, subId, t.template, t.notes))
+            .filter((t): t is ResearchTacticTemplate => Boolean(t)),
           m.description
         ))
         : undefined;
