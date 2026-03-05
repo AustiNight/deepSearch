@@ -22,7 +22,7 @@ export const clearOpenDataPersistentConfig = () => {
 };
 
 const defaultFlags: OpenDataFeatureFlags = {
-  autoIngestion: false,
+  autoIngestion: true,
   evidenceRecovery: true,
   gatingEnforcement: true,
   usOnlyAddressPolicy: true

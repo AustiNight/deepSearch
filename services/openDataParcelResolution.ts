@@ -80,6 +80,19 @@ const domainFromUrl = (value: string) => {
 
 const VERIFIED_ASSESSOR_TEXT_PATTERN = /parcel|assessor|appraisal|apn|pin|cadastre|cadastral|property assessment|tax parcel|tax roll/i;
 const RESTRICTED_TEXT_PATTERN = /private|restricted|internal|confidential|paid|subscription|license required|non-public/i;
+const OPEN_DATA_DISCOVERY_QUERY_PLAN = [
+  "parcel",
+  "assessor parcel",
+  "apn pin cadastre",
+  "property appraiser situs",
+  "tax roll tax collector property",
+  "deed recorder register clerk",
+  "zoning land use planning",
+  "permit inspection code enforcement",
+  "flood hazard fema environmental",
+  "gis parcel layer"
+];
+const OPEN_DATA_DISCOVERY_TARGET_DATASETS = 18;
 
 const isVerifiedPublicAssessorDataset = (dataset: OpenDatasetMetadata) => {
   const portalDomain = domainFromUrl(dataset.portalUrl);
@@ -114,6 +127,74 @@ const buildBlockReasons = (dataset: OpenDatasetMetadata) => {
 
 const PARCEL_DATASET_PRIMARY_PATTERN = /parcel|assessor|appraiser|apn|pin|parcel id|tax roll|cad|cadastral|cadastre|property/i;
 const PARCEL_FIELD_PATTERN = /parcel|apn|pin|account|address|situs|site|owner|tax/i;
+const SECONDARY_RECORD_QUERY_TOKEN_MAX = 3;
+const SECONDARY_RECORD_DATASET_LIMIT = 2;
+const SECONDARY_RECORD_TEXT_MATCH_LIMIT = 25;
+const SECONDARY_RECORD_CITATION_LIMIT = 4;
+
+type SecondaryRecordType =
+  | "tax_collector"
+  | "deed_recorder"
+  | "zoning_gis"
+  | "permits"
+  | "code_enforcement"
+  | "hazards_environmental";
+
+type SecondaryRecordDefinition = {
+  recordType: SecondaryRecordType;
+  label: string;
+  fieldPath: string;
+  keywords: RegExp;
+  supportsGeometry?: boolean;
+  claimTemplate: (anchor: string) => string;
+};
+
+const SECONDARY_RECORD_DEFINITIONS: SecondaryRecordDefinition[] = [
+  {
+    recordType: "tax_collector",
+    label: "Tax Collector",
+    fieldPath: "/taxAppraisal",
+    keywords: /tax collector|tax roll|treasurer|tax bill|assessed value|taxable value|millage/i,
+    claimTemplate: (anchor) => `Tax collector records were located for ${anchor}.`
+  },
+  {
+    recordType: "deed_recorder",
+    label: "Deed Recorder",
+    fieldPath: "/ownership",
+    keywords: /deed|recorder|register of deeds|clerk|instrument|grantor|grantee|conveyance/i,
+    claimTemplate: (anchor) => `Deed/ownership transfer records were located for ${anchor}.`
+  },
+  {
+    recordType: "zoning_gis",
+    label: "Zoning GIS",
+    fieldPath: "/zoningLandUse",
+    keywords: /zoning|land use|future land use|overlay|planning|district|feature server/i,
+    supportsGeometry: true,
+    claimTemplate: (anchor) => `Zoning or land-use records were located for ${anchor}.`
+  },
+  {
+    recordType: "permits",
+    label: "Permits",
+    fieldPath: "/permitsAndCode/permits",
+    keywords: /permit|inspection|construction|building permit|permit status|certificate of occupancy/i,
+    claimTemplate: (anchor) => `Permit records were located for ${anchor}.`
+  },
+  {
+    recordType: "code_enforcement",
+    label: "Code Enforcement",
+    fieldPath: "/permitsAndCode/codeViolations",
+    keywords: /code enforcement|code violation|violation|complaint|citation|abatement|311/i,
+    claimTemplate: (anchor) => `Code enforcement records were located for ${anchor}.`
+  },
+  {
+    recordType: "hazards_environmental",
+    label: "Hazards/Environmental",
+    fieldPath: "/hazardsEnvironmental",
+    keywords: /flood|fema|hazard|environment|contamination|brownfield|superfund|wildfire|seismic/i,
+    supportsGeometry: true,
+    claimTemplate: (anchor) => `Hazard/environmental records were located for ${anchor}.`
+  }
+];
 
 const computeRecencyScore = (value?: string) => {
   if (!value) return 0;
@@ -300,6 +381,182 @@ const buildExpectedSources = (portalUrl: string, datasetId?: string): SourcePoin
   endpoint: datasetId ? `${portalUrl}/resource/${datasetId}` : portalUrl
 }];
 
+const buildDatasetTextCorpus = (dataset: OpenDatasetMetadata) => {
+  return [
+    dataset.title || "",
+    dataset.description || "",
+    dataset.source || "",
+    ...(dataset.tags || []),
+    ...(dataset.fields || [])
+  ].join(" ").toLowerCase();
+};
+
+const datasetMatchesSecondaryRecordType = (dataset: OpenDatasetMetadata, definition: SecondaryRecordDefinition) => {
+  const text = buildDatasetTextCorpus(dataset);
+  return definition.keywords.test(text);
+};
+
+const buildRecordLookupTokens = (input: {
+  address: string;
+  normalizedAddress: string;
+  parcelId?: string;
+  accountId?: string;
+  situsAddress?: string;
+}) => {
+  const tokens = [
+    input.parcelId,
+    input.accountId,
+    input.situsAddress,
+    input.normalizedAddress,
+    ...normalizeAddressVariants(input.address)
+  ]
+    .map((value) => normalizeAssessorSearchText(String(value || "")))
+    .filter((value) => value.length >= 4);
+  return Array.from(new Set(tokens)).slice(0, SECONDARY_RECORD_QUERY_TOKEN_MAX);
+};
+
+const mergeCitationSources = (sources: CitationSource[]) => {
+  const byKey = new Map<string, CitationSource>();
+  for (const source of sources) {
+    const key = normalizeKey(source.url || "");
+    if (!key || byKey.has(key)) continue;
+    byKey.set(key, source);
+  }
+  return Array.from(byKey.values());
+};
+
+const mapCitationSourceByUrl = (sources: CitationSource[]) => {
+  const byUrl = new Map<string, CitationSource>();
+  for (const source of sources) {
+    const key = normalizeKey(source.url || "");
+    if (!key || byUrl.has(key)) continue;
+    byUrl.set(key, source);
+  }
+  return byUrl;
+};
+
+const buildSecondaryRecordClaim = (
+  definition: SecondaryRecordDefinition,
+  anchor: string,
+  sources: CitationSource[]
+): ClaimCitation => ({
+  id: `claim-${Math.random().toString(36).slice(2, 10)}`,
+  fieldPath: definition.fieldPath,
+  claim: definition.claimTemplate(anchor),
+  value: anchor,
+  citations: sources.slice(0, SECONDARY_RECORD_CITATION_LIMIT).map((source) => ({ sourceId: source.id })),
+  createdAt: isoDateToday()
+});
+
+const remapClaimCitations = (
+  claims: ClaimCitation[],
+  oldSources: CitationSource[],
+  mergedSourcesByUrl: Map<string, CitationSource>
+) => {
+  const oldSourceById = new Map(oldSources.map((source) => [source.id, source]));
+  return claims.map((claim) => {
+    const nextCitations = (claim.citations || [])
+      .map((citation) => {
+        const oldSource = oldSourceById.get(citation.sourceId);
+        if (!oldSource?.url) return null;
+        const mergedSource = mergedSourcesByUrl.get(normalizeKey(oldSource.url));
+        if (!mergedSource) return null;
+        return { sourceId: mergedSource.id };
+      })
+      .filter((citation): citation is { sourceId: string } => Boolean(citation));
+    return {
+      ...claim,
+      citations: nextCitations
+    };
+  }).filter((claim) => claim.citations.length > 0);
+};
+
+const resolveSecondaryRecordEvidence = async (input: {
+  provider: any;
+  portalUrl: string;
+  datasets: OpenDatasetMetadata[];
+  geocodePoint?: GeoPoint;
+  lookupTokens: string[];
+  dataGaps: DataGap[];
+}) => {
+  const sources: CitationSource[] = [];
+  const claims: ClaimCitation[] = [];
+  const contributingDatasets: OpenDatasetMetadata[] = [];
+
+  for (const definition of SECONDARY_RECORD_DEFINITIONS) {
+    const candidateDatasets = input.datasets
+      .filter((dataset) => datasetMatchesSecondaryRecordType(dataset, definition))
+      .slice(0, SECONDARY_RECORD_DATASET_LIMIT);
+    if (candidateDatasets.length === 0) continue;
+
+    const matchedSources: CitationSource[] = [];
+    for (const dataset of candidateDatasets) {
+      if (!dataset.datasetId) continue;
+      let datasetMatched = false;
+
+      for (const token of input.lookupTokens) {
+        const textResult = await input.provider.queryByText({
+          datasetId: dataset.datasetId,
+          searchText: token,
+          limit: SECONDARY_RECORD_TEXT_MATCH_LIMIT
+        });
+        if (Array.isArray(textResult?.errors) && textResult.errors.length > 0) {
+          const error = textResult.errors[0];
+          input.dataGaps.push(buildDataGap(
+            `${definition.label} dataset query failed.`,
+            `${error.message || "query failed"} (${error.code || "unknown"}).`,
+            "missing",
+            buildExpectedSources(input.portalUrl, dataset.datasetId)
+          ));
+          break;
+        }
+        if (Array.isArray(textResult?.records) && textResult.records.length > 0) {
+          datasetMatched = true;
+          break;
+        }
+      }
+
+      if (!datasetMatched && definition.supportsGeometry && input.geocodePoint) {
+        const geometryResult = await input.provider.queryByGeometry({
+          datasetId: dataset.datasetId,
+          point: input.geocodePoint,
+          limit: SECONDARY_RECORD_TEXT_MATCH_LIMIT
+        });
+        if (Array.isArray(geometryResult?.errors) && geometryResult.errors.length > 0) {
+          const error = geometryResult.errors[0];
+          input.dataGaps.push(buildDataGap(
+            `${definition.label} geometry query failed.`,
+            `${error.message || "query failed"} (${error.code || "unknown"}).`,
+            "missing",
+            buildExpectedSources(input.portalUrl, dataset.datasetId)
+          ));
+        } else if (Array.isArray(geometryResult?.records) && geometryResult.records.length > 0) {
+          datasetMatched = true;
+        }
+      }
+
+      if (datasetMatched) {
+        const source = buildCitationSource(input.portalUrl, dataset.datasetId, dataset.title, dataset.lastUpdated);
+        matchedSources.push(source);
+        contributingDatasets.push(dataset);
+      }
+    }
+
+    const dedupedMatchedSources = mergeCitationSources(matchedSources);
+    if (dedupedMatchedSources.length > 0) {
+      const anchor = input.lookupTokens[0] || "subject property";
+      claims.push(buildSecondaryRecordClaim(definition, anchor, dedupedMatchedSources));
+      sources.push(...dedupedMatchedSources);
+    }
+  }
+
+  return {
+    sources: mergeCitationSources(sources),
+    claims,
+    contributingDatasets
+  };
+};
+
 const isTabularSocrataMeta = (meta: any) => {
   const viewType = String(meta?.viewType || meta?.view_type || "").toLowerCase();
   const displayType = String(meta?.displayType || meta?.display_type || "").toLowerCase();
@@ -379,10 +636,10 @@ const validateSocrataDataset = async (
   return { ok: true };
 };
 
-const buildCitationSources = (portalUrl: string, datasetId?: string, datasetTitle?: string, updatedAt?: string) => {
+const buildCitationSource = (portalUrl: string, datasetId?: string, datasetTitle?: string, updatedAt?: string): CitationSource => {
   const now = new Date().toISOString();
   const url = datasetId ? `${portalUrl}/resource/${datasetId}` : portalUrl;
-  const source: CitationSource = {
+  return {
     id: `source-${Math.random().toString(36).slice(2, 10)}`,
     url,
     title: datasetTitle || "Open data parcel dataset",
@@ -391,17 +648,30 @@ const buildCitationSources = (portalUrl: string, datasetId?: string, datasetTitl
     retrievedAt: now,
     sourceUpdatedAt: updatedAt
   };
-  return [source];
 };
 
-const buildParcelClaims = (parcelId?: string, datasetSource?: CitationSource): ClaimCitation[] => {
-  if (!parcelId || !datasetSource) return [];
+const buildCitationSourcesFromDatasets = (portalUrl: string, datasets: OpenDatasetMetadata[]) => {
+  const seen = new Set<string>();
+  const sources: CitationSource[] = [];
+  for (const dataset of datasets) {
+    const source = buildCitationSource(portalUrl, dataset.datasetId, dataset.title, dataset.lastUpdated);
+    const key = normalizeKey(source.url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    sources.push(source);
+  }
+  return sources;
+};
+
+const buildParcelClaims = (parcelId?: string, datasetSources: CitationSource[] = []): ClaimCitation[] => {
+  if (!parcelId || datasetSources.length === 0) return [];
+  const citations = datasetSources.slice(0, 6).map((source) => ({ sourceId: source.id }));
   return [{
     id: `claim-${Math.random().toString(36).slice(2, 10)}`,
     fieldPath: "/parcel/parcelId",
     claim: `Parcel ID ${parcelId} recorded in open data parcel dataset.`,
     value: parcelId,
-    citations: [{ sourceId: datasetSource.id }],
+    citations,
     createdAt: isoDateToday()
   }];
 };
@@ -415,6 +685,31 @@ const findParcelDatasets = (portalUrl: string) => {
     return text.includes("parcel") || text.includes("assessor") || text.includes("cad") || text.includes("apn");
   });
   return candidates;
+};
+
+const buildDatasetDiscoveryKey = (dataset: OpenDatasetMetadata) => {
+  const portal = normalizePortalUrl(dataset.portalUrl || "");
+  const identifier = dataset.datasetId || dataset.id || dataset.title || "";
+  return normalizeKey(`${portal}|${identifier}`);
+};
+
+const discoverParcelCandidateDatasets = async (provider: any) => {
+  const discovered: OpenDatasetMetadata[] = [];
+  const seen = new Set<string>();
+  for (const query of OPEN_DATA_DISCOVERY_QUERY_PLAN) {
+    const batch = await provider.discoverDatasets(query);
+    if (!Array.isArray(batch) || batch.length === 0) continue;
+    for (const dataset of batch) {
+      const key = buildDatasetDiscoveryKey(dataset);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      discovered.push(dataset);
+    }
+    if (discovered.length >= OPEN_DATA_DISCOVERY_TARGET_DATASETS) {
+      break;
+    }
+  }
+  return discovered;
 };
 
 export const resolveParcelFromOpenDataPortal = async (input: {
@@ -481,10 +776,7 @@ export const resolveParcelFromOpenDataPortal = async (input: {
 
   let datasets = findParcelDatasets(input.portalUrl);
   if (datasets.length === 0) {
-    datasets = await provider.discoverDatasets("parcel assessor apn pin property");
-    if (datasets.length === 0) {
-      datasets = await provider.discoverDatasets("parcel");
-    }
+    datasets = await discoverParcelCandidateDatasets(provider);
     if (datasets.length > 0) {
       persistOpenDatasetMetadata(datasets);
     }
@@ -734,12 +1026,47 @@ export const resolveParcelFromOpenDataPortal = async (input: {
       || (a.queryErrors - b.queryErrors)
       || (b.score - a.score)
     );
-  const datasetForCitations = performanceEntries.find((entry) => (entry.textHits + entry.geometryHits) > 0)?.dataset
-    || rankedQueryableDatasets[0];
-  const sources = datasetForCitations
-    ? buildCitationSources(input.portalUrl, datasetForCitations.datasetId, datasetForCitations.title, datasetForCitations.lastUpdated)
-    : [];
-  const claims = buildParcelClaims(result.parcel?.parcelId, sources[0]);
+  const contributingDatasets = performanceEntries
+    .filter((entry) => (entry.textHits + entry.geometryHits) > 0)
+    .map((entry) => entry.dataset);
+  const lookupTokens = buildRecordLookupTokens({
+    address: input.address,
+    normalizedAddress,
+    parcelId: result.parcel?.parcelId,
+    accountId: result.parcel?.accountId,
+    situsAddress: result.parcel?.situsAddress
+  });
+  const secondaryEvidence = lookupTokens.length > 0
+    ? await resolveSecondaryRecordEvidence({
+        provider,
+        portalUrl: input.portalUrl,
+        datasets: rankedQueryableDatasets,
+        geocodePoint: geocode?.point,
+        lookupTokens,
+        dataGaps
+      })
+    : {
+        sources: [] as CitationSource[],
+        claims: [] as ClaimCitation[],
+        contributingDatasets: [] as OpenDatasetMetadata[]
+      };
+  const citationDatasets = [
+    ...contributingDatasets,
+    ...secondaryEvidence.contributingDatasets
+  ];
+  const selectedCitationDatasets = citationDatasets.length > 0
+    ? rankDatasetsForParcelResolution(citationDatasets, normalizedAddress)
+    : rankedQueryableDatasets.slice(0, 1);
+  const parcelSources = buildCitationSourcesFromDatasets(input.portalUrl, selectedCitationDatasets);
+  const mergedSources = mergeCitationSources([...parcelSources, ...secondaryEvidence.sources]);
+  const mergedSourcesByUrl = mapCitationSourceByUrl(mergedSources);
+  const parcelClaims = buildParcelClaims(result.parcel?.parcelId || result.parcel?.accountId, mergedSources);
+  const secondaryClaims = remapClaimCitations(
+    secondaryEvidence.claims,
+    secondaryEvidence.sources,
+    mergedSourcesByUrl
+  );
+  const claims = [...parcelClaims, ...secondaryClaims];
   const calibrationDiagnostics: CalibrationDiagnostics | undefined = calibrationMode
     ? {
         calibrationMode: true,
@@ -754,8 +1081,8 @@ export const resolveParcelFromOpenDataPortal = async (input: {
   return {
     ...result,
     dataGaps: [...result.dataGaps, ...dataGaps],
-    datasetsUsed: rankedQueryableDatasets,
-    sources,
+    datasetsUsed: selectedCitationDatasets.length > 0 ? selectedCitationDatasets : rankedQueryableDatasets,
+    sources: mergedSources,
     claims,
     diagnostics: calibrationDiagnostics
   };

@@ -18,8 +18,8 @@ if (!/zeroCostMode:\s*true/.test(compliancePolicy)) {
 }
 
 const openDataConfig = readText("services/openDataConfig.ts");
-if (!/autoIngestion:\s*false/.test(openDataConfig)) {
-  errors.push("Open data auto-ingestion must default to false.");
+if (!/autoIngestion:\s*true/.test(openDataConfig)) {
+  errors.push("Open data auto-ingestion must default to true.");
 }
 if (!/allowPaidAccess:\s*false/.test(openDataConfig)) {
   errors.push("Open data allowPaidAccess must default to false.");

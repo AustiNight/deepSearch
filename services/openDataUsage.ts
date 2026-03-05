@@ -121,7 +121,6 @@ export const evaluateDatasetUsage = (dataset: OpenDatasetMetadata) => {
 
   const doNotUse = config.featureFlags.gatingEnforcement
     ? complianceAction === "block"
-      || (freshnessStatus === "stale" && !config.allowPaidAccess)
     : false;
 
   return {

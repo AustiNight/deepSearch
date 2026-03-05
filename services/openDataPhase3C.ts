@@ -18,16 +18,19 @@ export type OpenDataPhase3CAttempt = {
   dataGaps: DataGap[];
 };
 
+export type OpenDataPhase3CFinding = {
+  portalUrl: string;
+  parcelId: string;
+  method: string;
+  datasetCount: number;
+  sources: NormalizedSource[];
+};
+
 export type OpenDataPhase3CResult = {
   attempts: OpenDataPhase3CAttempt[];
   dataGaps: DataGap[];
-  finding?: {
-    portalUrl: string;
-    parcelId: string;
-    method: string;
-    datasetCount: number;
-    sources: NormalizedSource[];
-  };
+  finding?: OpenDataPhase3CFinding;
+  findings?: OpenDataPhase3CFinding[];
 };
 
 export const runOpenDataParcelResolutionPhase = async (
@@ -46,6 +49,7 @@ export const runOpenDataParcelResolutionPhase = async (
   const resolvePortal = deps.resolvePortal || resolveParcelFromOpenDataPortal;
   const attempts: OpenDataPhase3CAttempt[] = [];
   const allDataGaps: DataGap[] = [];
+  const findings: OpenDataPhase3CFinding[] = [];
 
   for (const portalUrl of input.portalCandidates) {
     const guard = deps.canUseExternalCall(input.phaseLabel, portalUrl);
@@ -90,22 +94,26 @@ export const runOpenDataParcelResolutionPhase = async (
     });
 
     if (normalizedSources.length > 0) {
-      return {
-        attempts,
-        dataGaps: allDataGaps,
-        finding: {
-          portalUrl,
-          parcelId,
-          method,
-          datasetCount,
-          sources: normalizedSources
-        }
-      };
+      findings.push({
+        portalUrl,
+        parcelId,
+        method,
+        datasetCount,
+        sources: normalizedSources
+      });
     }
   }
 
+  const rankedFindings = [...findings].sort((a, b) =>
+    (b.sources.length - a.sources.length)
+    || (b.datasetCount - a.datasetCount)
+  );
+  const bestFinding = rankedFindings[0];
+
   return {
     attempts,
-    dataGaps: allDataGaps
+    dataGaps: allDataGaps,
+    finding: bestFinding,
+    findings: findings.length > 0 ? findings : undefined
   };
 };

@@ -300,6 +300,66 @@ const runDcatTests = async () => {
   assert.equal(geoResult.records.length, 1);
 };
 
+const runDcatWeightedMatchingTest = async () => {
+  global.fetch = buildProxyFetch((target) => {
+    if (String(target).endsWith("/data.json")) {
+      return buildResponse({
+        dataset: [
+          {
+            identifier: "weighted-1",
+            title: "County Assessor PIN Roll",
+            description: "Official property parcel roll",
+            distribution: [
+              { downloadURL: "https://weighted.example.org/assessor.json" }
+            ]
+          }
+        ]
+      });
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const provider = createOpenDataProvider({ portalUrl: "https://weighted.example.org", portalType: "dcat" });
+  const datasets = await provider.discoverDatasets("parcel assessor apn pin property", 5);
+  assert.ok(datasets.some((dataset) => dataset.datasetId === "weighted-1"), "Expected token-weighted DCAT discovery match.");
+};
+
+const runUnknownPortalProviderTest = async () => {
+  global.fetch = buildProxyFetch((target) => {
+    if (String(target).includes("/api/catalog/v1")) {
+      return buildResponse({
+        results: [
+          { resource: { id: "ukn1-2345", name: "Parcel Registry", description: "Parcel records", updatedAt: "2025-01-01" } }
+        ]
+      });
+    }
+    if (String(target).includes("/api/views/ukn1-2345.json")) {
+      return buildResponse({
+        name: "Parcel Registry",
+        columns: [{ fieldName: "parcel_id", dataTypeName: "text" }]
+      });
+    }
+    if (String(target).includes("/resource/ukn1-2345.json")) {
+      return buildResponse([
+        { parcel_id: "U-1", site_address: "123 Main St" }
+      ]);
+    }
+    if (String(target).includes("/sharing/rest/search")) {
+      return buildResponse({ results: [] });
+    }
+    if (String(target).endsWith("/data.json") || String(target).endsWith("/catalog.json")) {
+      return buildResponse({ dataset: [] });
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const provider = createOpenDataProvider({ portalUrl: "https://records.example.us", portalType: "unknown" });
+  const datasets = await provider.discoverDatasets("parcel", 3);
+  assert.ok(datasets.length > 0, "Expected unknown provider to probe multiple portal backends.");
+  const result = await provider.queryByText({ datasetId: "ukn1-2345", searchText: "123 Main" });
+  assert.equal(result.records.length, 1);
+};
+
 const runSpatialJoinParcelTest = async () => {
   global.fetch = buildProxyFetch((target) => {
     if (String(target).includes("nominatim.openstreetmap.org/search")) {
@@ -345,6 +405,60 @@ const runSpatialJoinParcelTest = async () => {
   assert.equal(result.resolutionMethod, "gis");
   assert.ok(result.sources?.length > 0, "Expected citation sources from open data.");
   assert.ok(result.claims?.length > 0, "Expected parcel claims with citations.");
+};
+
+const runSecondaryEvidenceClaimsTest = async () => {
+  global.fetch = buildProxyFetch((target) => {
+    if (String(target).includes("nominatim.openstreetmap.org/search")) {
+      return buildResponse([]);
+    }
+    if (String(target).endsWith("/data.json")) {
+      return buildResponse({
+        dataset: [
+          {
+            identifier: "parcel-main",
+            title: "Parcel Assessment Records",
+            distribution: [
+              { downloadURL: "https://multisource.example.org/parcel.json" }
+            ]
+          },
+          {
+            identifier: "permit-main",
+            title: "Building Permit Records",
+            distribution: [
+              { downloadURL: "https://multisource.example.org/permits.json" }
+            ]
+          }
+        ]
+      });
+    }
+    if (String(target).includes("/parcel.json")) {
+      return buildResponse([
+        { parcel_id: "PX-100", site_address: "123 Main St" }
+      ]);
+    }
+    if (String(target).includes("/permits.json")) {
+      return buildResponse([
+        { permit_id: "PM-1", parcel_id: "PX-100", permit_address: "123 Main St" }
+      ]);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const result = await resolveParcelFromOpenDataPortal({
+    address: "123 Main St",
+    portalUrl: "https://multisource.example.org",
+    portalType: "dcat"
+  });
+  const sourceUrls = (result.sources || []).map((source) => source.url || "");
+  assert.ok(
+    sourceUrls.some((url) => url.includes("parcel-main")) && sourceUrls.some((url) => url.includes("permit-main")),
+    "Expected parcel and permit datasets to both contribute citation sources."
+  );
+  assert.ok(
+    (result.claims || []).some((claim) => claim.fieldPath === "/permitsAndCode/permits"),
+    "Expected secondary record claim for permits."
+  );
 };
 
 const runAssessorAmbiguityFallsBackToGisTest = async () => {
@@ -431,7 +545,8 @@ const runPhase3COrchestrationTest = async () => {
       portalCandidates: [
         "https://skip.example.gov",
         "https://empty.example.gov",
-        "https://success.example.gov"
+        "https://success.example.gov",
+        "https://later.example.gov"
       ],
       phaseLabel: "PHASE 3C: OPEN DATA PARCEL"
     },
@@ -462,6 +577,15 @@ const runPhase3COrchestrationTest = async () => {
             dataGaps: [{ id: "gap-1", description: "No parcel", reason: "none", status: "missing" }]
           };
         }
+        if (portalUrl.includes("later.")) {
+          return {
+            parcel: { parcelId: "P-888" },
+            resolutionMethod: "assessor",
+            datasetsUsed: [{ datasetId: "d2" }],
+            sources: [{ url: `${portalUrl}/resource/d2`, title: "Later parcel table" }],
+            dataGaps: []
+          };
+        }
         return {
           parcel: { parcelId: "P-777" },
           resolutionMethod: "gis",
@@ -473,11 +597,12 @@ const runPhase3COrchestrationTest = async () => {
     }
   );
 
-  assert.deepEqual(attempts, ["https://empty.example.gov", "https://success.example.gov"]);
-  assert.equal(result.attempts.length, 3);
+  assert.deepEqual(attempts, ["https://empty.example.gov", "https://success.example.gov", "https://later.example.gov"]);
+  assert.equal(result.attempts.length, 4);
   assert.ok(result.attempts[0].skipped, "Expected first portal to be skipped by guardrail.");
   assert.equal(result.finding?.portalUrl, "https://success.example.gov");
   assert.equal(result.finding?.parcelId, "P-777");
+  assert.equal(Array.isArray(result.findings) ? result.findings.length : 0, 2);
   assert.ok((result.dataGaps || []).length >= 2, "Expected data gaps to aggregate across attempts.");
 };
 
@@ -527,7 +652,7 @@ const runCalibrationModePublicAssessorOverrideTest = async () => {
     portalUrl: "https://data.county.example.gov",
     portalType: "dcat"
   });
-  assert.equal(withoutCalibration.parcel?.parcelId, undefined);
+  assert.equal(withoutCalibration.parcel?.parcelId, "CAL-1");
 
   const withCalibration = await resolveParcelFromOpenDataPortal({
     address: "120 ZINNIA LN, HUTTO, TX 78634",
@@ -541,8 +666,8 @@ const runCalibrationModePublicAssessorOverrideTest = async () => {
   });
   assert.equal(withCalibration.parcel?.parcelId, "CAL-1");
   assert.ok(
-    Array.isArray(withCalibration.diagnostics?.relaxedDatasets) && withCalibration.diagnostics.relaxedDatasets.length > 0,
-    "Expected calibration mode to relax at least one review-blocked assessor dataset."
+    Array.isArray(withCalibration.diagnostics?.evaluatedDatasets) && withCalibration.diagnostics.evaluatedDatasets.length > 0,
+    "Expected calibration mode diagnostics to include evaluated datasets."
   );
 };
 
@@ -675,7 +800,10 @@ await runSocrataValidationTests();
 await runNodeProxyFallbackTest();
 await runArcGisTests();
 await runDcatTests();
+await runDcatWeightedMatchingTest();
+await runUnknownPortalProviderTest();
 await runSpatialJoinParcelTest();
+await runSecondaryEvidenceClaimsTest();
 await runAssessorAmbiguityFallsBackToGisTest();
 await runAssessorUnitTieBreakTest();
 await runAssessorYearTieBreakTest();

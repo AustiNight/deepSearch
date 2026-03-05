@@ -1093,6 +1093,53 @@ const inferPointGeometry = (attributes: Record<string, unknown>): GeoJsonGeometr
   return pointToBufferedPolygon(lon, lat);
 };
 
+const DCAT_QUERY_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "or",
+  "the",
+  "for",
+  "to",
+  "of",
+  "in",
+  "on",
+  "with",
+  "data",
+  "dataset",
+  "records",
+  "record"
+]);
+
+const tokenizeSearchQuery = (value: string) => {
+  return Array.from(new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2 && !DCAT_QUERY_STOPWORDS.has(token))
+  ));
+};
+
+const computeDcatMatchScore = (haystack: string, query: string) => {
+  const normalizedHaystack = haystack.toLowerCase();
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return 1;
+  let score = 0;
+  if (normalizedHaystack.includes(normalizedQuery)) {
+    score += 10;
+  }
+  const tokens = tokenizeSearchQuery(normalizedQuery);
+  for (const token of tokens) {
+    if (!normalizedHaystack.includes(token)) continue;
+    score += 2;
+    if (/(parcel|assessor|tax|deed|zoning|permit|code|hazard|flood|gis|arcgis)/.test(token)) {
+      score += 2;
+    }
+  }
+  return score;
+};
+
 const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider => {
   const portalUrl = normalizePortalUrl(context.portalUrl);
 
@@ -1113,17 +1160,19 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
     if (!catalog) return [];
     const datasets = Array.isArray(catalog?.dataset) ? catalog.dataset : (Array.isArray(catalog?.datasets) ? catalog.datasets : []);
     if (!Array.isArray(datasets)) return [];
+    const scoredDatasets: Array<{ dataset: OpenDatasetMetadata; score: number; index: number }> = [];
     const lowerQuery = query.toLowerCase();
-    const output: OpenDatasetMetadata[] = [];
 
-    for (const entry of datasets) {
+    for (let index = 0; index < datasets.length; index += 1) {
+      const entry = datasets[index];
       if (!entry || typeof entry !== "object") continue;
       const title = asStringFrom(entry?.title, entry?.name);
       const description = asStringFrom(entry?.description, entry?.notes);
       const keywords = Array.isArray(entry?.keyword) ? entry.keyword : [];
       const tags = Array.isArray(keywords) ? keywords.filter((tag: unknown) => typeof tag === "string") : undefined;
       const haystack = `${title || ""} ${description || ""} ${(tags || []).join(" ")}`.toLowerCase();
-      if (lowerQuery && !haystack.includes(lowerQuery)) continue;
+      const score = computeDcatMatchScore(haystack, lowerQuery);
+      if (lowerQuery && score <= 0) continue;
 
       const distribution = Array.isArray(entry?.distribution) ? entry.distribution : [];
       const distributionEntry = distribution.find((item: any) => item?.downloadURL || item?.accessURL) || distribution[0];
@@ -1155,11 +1204,18 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
         homepageUrl: asStringFrom(entry?.landingPage, entry?.homepage, portalUrl),
         tags
       });
-      if (dataset) output.push(dataset);
-      if (output.length >= limit) break;
+      if (!dataset) continue;
+      scoredDatasets.push({ dataset, score, index });
     }
 
-    return output;
+    return scoredDatasets
+      .sort((a, b) =>
+        (b.score - a.score)
+        || ((Date.parse(b.dataset.lastUpdated || "") || 0) - (Date.parse(a.dataset.lastUpdated || "") || 0))
+        || (a.index - b.index)
+      )
+      .slice(0, limit)
+      .map((entry) => entry.dataset);
   };
 
   const fetchMetadata = async (datasetId: string) => {
@@ -1300,10 +1356,113 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
   };
 };
 
+const UNKNOWN_PROVIDER_ORDER: OpenDataPortalType[] = ["socrata", "arcgis", "dcat"];
+
+const orderUnknownProviders = (portalUrl: string) => {
+  const detected = detectPortalType(portalUrl);
+  if (detected === "unknown") return UNKNOWN_PROVIDER_ORDER;
+  const rest = UNKNOWN_PROVIDER_ORDER.filter((type) => type !== detected);
+  return [detected, ...rest];
+};
+
+const buildUnknownProvider = (context: OpenDataProviderContext): OpenDataProvider => {
+  const portalUrl = normalizePortalUrl(context.portalUrl);
+  const providersByType: Record<Exclude<OpenDataPortalType, "unknown">, OpenDataProvider> = {
+    socrata: buildSocrataProvider({ ...context, portalType: "socrata", portalUrl }),
+    arcgis: buildArcGisProvider({ ...context, portalType: "arcgis", portalUrl }),
+    dcat: buildDcatProvider({ ...context, portalType: "dcat", portalUrl })
+  };
+  const providerOrder = orderUnknownProviders(portalUrl);
+  const orderedProviders = providerOrder.map((type) => providersByType[type as Exclude<OpenDataPortalType, "unknown">]);
+
+  const providerOrderForDatasetId = (datasetId: string) => {
+    const normalized = String(datasetId || "").trim().toLowerCase();
+    if (/^[a-z0-9]{4}-[a-z0-9]{4}$/.test(normalized)) {
+      return [providersByType.socrata, providersByType.arcgis, providersByType.dcat];
+    }
+    if (/^[a-f0-9]{32}$/.test(normalized)) {
+      return [providersByType.arcgis, providersByType.socrata, providersByType.dcat];
+    }
+    return orderedProviders;
+  };
+
+  const discoverDatasets = async (query: string, limit = OPEN_DATA_DISCOVERY_MAX_DATASETS) => {
+    const merged = new Map<string, OpenDatasetMetadata>();
+    for (const provider of orderedProviders) {
+      const batch = await provider.discoverDatasets(query, limit);
+      for (const dataset of batch) {
+        const key = `${dataset.portalType}|${dataset.datasetId || dataset.title}`.toLowerCase();
+        if (!key || merged.has(key)) continue;
+        merged.set(key, dataset);
+      }
+    }
+    return Array.from(merged.values()).slice(0, limit);
+  };
+
+  const fetchMetadata = async (datasetId: string) => {
+    for (const provider of providerOrderForDatasetId(datasetId)) {
+      const metadata = await provider.fetchMetadata(datasetId);
+      if (metadata) return metadata;
+    }
+    return null;
+  };
+
+  const listFields = async (datasetId: string) => {
+    for (const provider of providerOrderForDatasetId(datasetId)) {
+      const fields = await provider.listFields(datasetId);
+      if (Array.isArray(fields) && fields.length > 0) return fields;
+    }
+    return [];
+  };
+
+  const getDistributions = async (datasetId: string) => {
+    for (const provider of providerOrderForDatasetId(datasetId)) {
+      const distributions = await provider.getDistributions(datasetId);
+      if (Array.isArray(distributions) && distributions.length > 0) return distributions;
+    }
+    return [];
+  };
+
+  const queryByText = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
+    const errors: OpenDataProviderError[] = [];
+    for (const provider of providerOrderForDatasetId(input.datasetId)) {
+      const result = await provider.queryByText(input);
+      if (Array.isArray(result.records) && result.records.length > 0) return result;
+      if (Array.isArray(result.errors) && result.errors.length > 0) {
+        errors.push(...result.errors);
+      }
+    }
+    return { records: [], errors: errors.length > 0 ? errors : [{ code: "query_failed", message: "No provider matched query." }] };
+  };
+
+  const queryByGeometry = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
+    const errors: OpenDataProviderError[] = [];
+    for (const provider of providerOrderForDatasetId(input.datasetId)) {
+      const result = await provider.queryByGeometry(input);
+      if (Array.isArray(result.records) && result.records.length > 0) return result;
+      if (Array.isArray(result.errors) && result.errors.length > 0) {
+        errors.push(...result.errors);
+      }
+    }
+    return { records: [], errors: errors.length > 0 ? errors : [{ code: "query_failed", message: "No provider matched geometry query." }] };
+  };
+
+  return {
+    type: "unknown",
+    portalUrl,
+    discoverDatasets,
+    fetchMetadata,
+    listFields,
+    getDistributions,
+    queryByText,
+    queryByGeometry
+  };
+};
+
 export const createOpenDataProvider = (context: OpenDataProviderContext): OpenDataProvider => {
   const portalType = context.portalType === "unknown" ? detectPortalType(context.portalUrl) : context.portalType;
   if (portalType === "socrata") return buildSocrataProvider({ ...context, portalType });
   if (portalType === "arcgis") return buildArcGisProvider({ ...context, portalType });
   if (portalType === "dcat") return buildDcatProvider({ ...context, portalType });
-  return buildDcatProvider({ ...context, portalType: "dcat" });
+  return buildUnknownProvider({ ...context, portalType: "unknown" });
 };

@@ -448,6 +448,53 @@ const getDcatCatalogUrlCandidates = (portalUrl: string) => {
   return [`${base}/data.json`, `${base}/catalog.json`];
 };
 
+const DCAT_QUERY_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "or",
+  "the",
+  "for",
+  "to",
+  "of",
+  "in",
+  "on",
+  "with",
+  "data",
+  "dataset",
+  "records",
+  "record"
+]);
+
+const tokenizeSearchQuery = (value: string) => {
+  return Array.from(new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2 && !DCAT_QUERY_STOPWORDS.has(token))
+  ));
+};
+
+const computeDcatMatchScore = (haystack: string, query: string) => {
+  const normalizedHaystack = haystack.toLowerCase();
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return 1;
+  let score = 0;
+  if (normalizedHaystack.includes(normalizedQuery)) {
+    score += 10;
+  }
+  const tokens = tokenizeSearchQuery(normalizedQuery);
+  for (const token of tokens) {
+    if (!normalizedHaystack.includes(token)) continue;
+    score += 2;
+    if (/(parcel|assessor|tax|deed|zoning|permit|code|hazard|flood|gis|arcgis)/.test(token)) {
+      score += 2;
+    }
+  }
+  return score;
+};
+
 const discoverDcatDatasets = async (portalUrl: string, query: string, limit: number): Promise<OpenDatasetMetadata[]> => {
   const candidates = getDcatCatalogUrlCandidates(portalUrl);
   let catalogData: any = null;
@@ -468,16 +515,18 @@ const discoverDcatDatasets = async (portalUrl: string, query: string, limit: num
 
   const normalizedPortal = normalizePortalUrl(portalUrl);
   const lowerQuery = query.toLowerCase();
-  const output: OpenDatasetMetadata[] = [];
+  const scoredDatasets: Array<{ dataset: OpenDatasetMetadata; score: number; index: number }> = [];
 
-  for (const entry of datasets) {
+  for (let index = 0; index < datasets.length; index += 1) {
+    const entry = datasets[index];
     if (!entry || typeof entry !== "object") continue;
     const title = asStringFrom(entry?.title, entry?.name);
     const description = asStringFrom(entry?.description, entry?.notes);
     const keywords = Array.isArray(entry?.keyword) ? entry.keyword : [];
     const tags = Array.isArray(keywords) ? keywords.filter((tag: unknown) => typeof tag === "string") : undefined;
     const haystack = `${title || ""} ${description || ""} ${(tags || []).join(" ")}`.toLowerCase();
-    if (lowerQuery && !haystack.includes(lowerQuery)) continue;
+    const score = computeDcatMatchScore(haystack, lowerQuery);
+    if (lowerQuery && score <= 0) continue;
 
     const distribution = Array.isArray(entry?.distribution) ? entry.distribution : [];
     const distributionEntry = distribution.find((item: any) => item?.downloadURL || item?.accessURL) || distribution[0];
@@ -510,11 +559,18 @@ const discoverDcatDatasets = async (portalUrl: string, query: string, limit: num
       tags
     });
 
-    if (dataset) output.push(dataset);
-    if (output.length >= limit) break;
+    if (!dataset) continue;
+    scoredDatasets.push({ dataset, score, index });
   }
 
-  return output;
+  return scoredDatasets
+    .sort((a, b) =>
+      (b.score - a.score)
+      || ((Date.parse(b.dataset.lastUpdated || "") || 0) - (Date.parse(a.dataset.lastUpdated || "") || 0))
+      || (a.index - b.index)
+    )
+    .slice(0, limit)
+    .map((entry) => entry.dataset);
 };
 
 export type OpenDataDiscoveryInput = {
@@ -532,7 +588,7 @@ export type OpenDataDiscoveryResult = {
 
 export const discoverOpenDataDatasets = async (input: OpenDataDiscoveryInput): Promise<OpenDataDiscoveryResult> => {
   const portalUrl = normalizePortalUrl(input.portalUrl);
-  const portalType = input.portalType && input.portalType !== "unknown" ? input.portalType : detectPortalType(portalUrl);
+  let portalType = input.portalType && input.portalType !== "unknown" ? input.portalType : detectPortalType(portalUrl);
   const requestedLimit = typeof input.limit === "number" && input.limit > 0 ? Math.floor(input.limit) : DEFAULT_LIMIT;
   const limit = Math.max(1, Math.min(requestedLimit, OPEN_DATA_DISCOVERY_MAX_DATASETS));
   let datasets: OpenDatasetMetadata[] = [];
@@ -543,6 +599,18 @@ export const discoverOpenDataDatasets = async (input: OpenDataDiscoveryInput): P
     datasets = await discoverArcGisDatasets(portalUrl, input.query, limit);
   } else if (portalType === "dcat") {
     datasets = await discoverDcatDatasets(portalUrl, input.query, limit);
+  } else {
+    const attempts: Array<{ type: OpenDataPortalType; datasets: OpenDatasetMetadata[] }> = [
+      { type: "socrata", datasets: await discoverSocrataDatasets(portalUrl, input.query, limit) },
+      { type: "arcgis", datasets: await discoverArcGisDatasets(portalUrl, input.query, limit) },
+      { type: "dcat", datasets: await discoverDcatDatasets(portalUrl, input.query, limit) }
+    ];
+    const best = attempts
+      .sort((a, b) => (b.datasets.length - a.datasets.length))[0];
+    datasets = best?.datasets || [];
+    if (best && best.datasets.length > 0) {
+      portalType = best.type;
+    }
   }
 
   const index = upsertOpenDatasets(datasets);

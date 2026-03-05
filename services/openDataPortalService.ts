@@ -9,12 +9,20 @@ export type PortalDiscoveryPlan = {
   portalType?: OpenDataPortalType;
 };
 
+export type PortalPrimeResult = {
+  attemptedPortals: string[];
+  primedPortals: string[];
+  datasetsDiscovered: number;
+};
+
 const normalizePortalUrl = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return "";
   if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, "");
   return `https://${trimmed}`.replace(/\/$/, "");
 };
+
+const uniqueList = <T>(items: T[]) => Array.from(new Set(items));
 
 const nowMs = () => Date.now();
 
@@ -34,6 +42,21 @@ const normalizeDomain = (value: string) => {
 };
 
 const normalizeToken = (value?: string) => (value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const buildPrimeQueries = (jurisdiction?: Jurisdiction) => {
+  const city = normalizeToken(jurisdiction?.city);
+  const county = normalizeToken(jurisdiction?.county);
+  const state = normalizeToken(jurisdiction?.state);
+  const location = [city, county, state].filter(Boolean).join(" ");
+  return uniqueList([
+    location ? `${location} parcel assessor` : "",
+    location ? `${location} tax roll` : "",
+    location ? `${location} zoning permit` : "",
+    "parcel assessor apn pin",
+    "tax collector deed recorder",
+    "zoning permit code enforcement"
+  ]).filter(Boolean);
+};
 
 const computeRecencyScore = (updatedAt?: string) => {
   if (!updatedAt) return 0;
@@ -148,6 +171,66 @@ export const autoIngestOpenDataPortals = async (plans: PortalDiscoveryPlan[]) =>
     }
   }
   return getOpenDatasetIndex();
+};
+
+export const primeOpenDataPortalHints = async (
+  input: {
+    portalCandidates: string[];
+    jurisdiction?: Jurisdiction;
+    maxPortals?: number;
+    queries?: string[];
+  }
+): Promise<PortalPrimeResult> => {
+  const config = getOpenDataConfig();
+  if (!config.featureFlags.evidenceRecovery) {
+    return { attemptedPortals: [], primedPortals: [], datasetsDiscovered: 0 };
+  }
+
+  const maxPortals = Math.max(1, Math.min(5, Math.floor(input.maxPortals ?? 2)));
+  const attemptedPortals: string[] = [];
+  const primedPortals: string[] = [];
+  let datasetsDiscovered = 0;
+  const normalizedCandidates = uniqueList(
+    (input.portalCandidates || [])
+      .map((value) => normalizePortalUrl(String(value || "")))
+      .filter(Boolean)
+  ).slice(0, maxPortals);
+  const queries = (input.queries && input.queries.length > 0
+    ? uniqueList(input.queries).filter(Boolean)
+    : buildPrimeQueries(input.jurisdiction)
+  ).slice(0, 3);
+
+  const index = getOpenDatasetIndex();
+  for (const portalUrl of normalizedCandidates) {
+    attemptedPortals.push(portalUrl);
+    const hasCachedDatasets = index.datasets.some((dataset) => normalizePortalUrl(dataset.portalUrl) === portalUrl);
+    if (!shouldRecrawlPortal(portalUrl) && hasCachedDatasets) continue;
+
+    let portalDiscovered = 0;
+    const portalType = await resolvePortalType(portalUrl, undefined);
+    for (const query of queries) {
+      try {
+        const result = await discoverOpenDataDatasets({
+          portalUrl,
+          query,
+          portalType,
+          limit: 12
+        });
+        const discovered = Array.isArray(result.datasets) ? result.datasets.length : 0;
+        if (discovered > 0) {
+          portalDiscovered += discovered;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    if (portalDiscovered > 0) {
+      primedPortals.push(portalUrl);
+      datasetsDiscovered += portalDiscovered;
+    }
+  }
+
+  return { attemptedPortals, primedPortals, datasetsDiscovered };
 };
 
 export const scheduleOpenDataAutoIngestion = (plans: PortalDiscoveryPlan[], intervalMs: number) => {

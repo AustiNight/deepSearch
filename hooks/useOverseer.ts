@@ -39,13 +39,13 @@ import { getResearchTaxonomy, summarizeTaxonomy, vetAndPersistTaxonomyProposals,
 import { inferVerticalHints, isAddressLike, isSystemTestTopic, VERTICAL_SEED_QUERIES } from '../data/verticalLogic';
 import { normalizeAddressVariants } from '../services/addressNormalization';
 import { evaluatePrimaryRecordCoverage } from '../services/primaryRecordCoverage';
-import { findJurisdictionAvailability } from '../services/jurisdictionAvailability';
-import { getOpenDatasetHints, rankOpenDataPortalCandidates } from '../services/openDataPortalService';
+import { getOpenDatasetHints, primeOpenDataPortalHints } from '../services/openDataPortalService';
+import { buildOpenDataPortalCandidates } from '../services/openDataPortalCandidates';
 import { buildUnsupportedJurisdictionGap, classifyAddressScope, AddressScopeClassification } from '../services/addressScope';
 import { getOpenDataConfig } from '../services/openDataConfig';
 import { resolveParcelFromOpenDataPortal } from '../services/openDataParcelResolution';
 import { runOpenDataParcelResolutionPhase } from '../services/openDataPhase3C';
-import { runDallasEvidencePack, isDallasJurisdiction } from '../services/dallasEvidencePack';
+import { resolveCityOpenDataProfile } from '../services/cityOpenDataProfiles';
 import { redactSensitiveTextWithPatterns } from '../services/redaction';
 import {
   EVIDENCE_RECOVERY_CACHE_TTL_MS,
@@ -70,14 +70,100 @@ const normalizeDomain = (url: string) => {
   }
 };
 
-const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
+const SOURCE_TRACKING_PARAMS = new Set([
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'gclid',
+  'fbclid',
+  'yclid',
+  'ref',
+  'ref_src'
+]);
 
-const normalizePortalCandidate = (value: string) => {
-  const trimmed = (value || '').trim();
-  if (!trimmed) return '';
-  if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, '');
-  return `https://${trimmed}`.replace(/\/$/, '');
+const normalizeSourceUriForMatch = (value: string) => {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  try {
+    const url = new URL(input);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const path = url.pathname.replace(/\/+$/, '');
+    url.hash = '';
+    for (const key of Array.from(url.searchParams.keys())) {
+      const lower = key.toLowerCase();
+      if (lower.startsWith('utm_') || SOURCE_TRACKING_PARAMS.has(lower)) {
+        url.searchParams.delete(key);
+      }
+    }
+    const query = url.searchParams.toString();
+    return `${url.protocol.toLowerCase()}//${host}${path}${query ? `?${query}` : ''}`;
+  } catch (_) {
+    return input.toLowerCase().replace(/\/+$/, '');
+  }
 };
+
+const buildAllowedSourceLookup = (allowedSources: string[]) => {
+  const exact = new Set(allowedSources);
+  const canonicalToAllowed = new Map<string, string>();
+  for (const source of allowedSources) {
+    const canonical = normalizeSourceUriForMatch(source);
+    if (!canonical || canonicalToAllowed.has(canonical)) continue;
+    canonicalToAllowed.set(canonical, source);
+  }
+  return { exact, canonicalToAllowed };
+};
+
+const resolveAllowedSourceUri = (
+  sourceUri: string,
+  lookup: { exact: Set<string>; canonicalToAllowed: Map<string, string> }
+) => {
+  if (lookup.exact.has(sourceUri)) return sourceUri;
+  const canonical = normalizeSourceUriForMatch(sourceUri);
+  if (!canonical) return null;
+  return lookup.canonicalToAllowed.get(canonical) || null;
+};
+
+const buildDiagnosticsSection = (input: {
+  rawSourceCount: number;
+  allowedSourceCount: number;
+  filteredOutCount: number;
+  canonicalMatchedCount: number;
+  blockedSourceCount: number;
+  datasetComplianceCount: number;
+  reviewRequired: boolean;
+  openDataGapCount: number;
+  primaryRecordCoverage?: PrimaryRecordCoverage;
+}): ReportSection => {
+  const coveredPrimary = input.primaryRecordCoverage?.entries?.filter((entry) => entry.status === 'covered').length || 0;
+  const missingPrimary = input.primaryRecordCoverage?.missing?.length || 0;
+  const coverageStatus = input.primaryRecordCoverage
+    ? input.primaryRecordCoverage.complete ? 'complete' : 'incomplete'
+    : 'n/a';
+  const lines = [
+    '| Metric | Value |',
+    '| --- | --- |',
+    `| Raw sources collected | ${input.rawSourceCount} |`,
+    `| Allowed sources after compliance | ${input.allowedSourceCount} |`,
+    `| Source links filtered out | ${input.filteredOutCount} |`,
+    `| Canonical URL remaps applied | ${input.canonicalMatchedCount} |`,
+    `| Compliance-blocked sources | ${input.blockedSourceCount} |`,
+    `| Dataset compliance entries | ${input.datasetComplianceCount} |`,
+    `| Compliance review required | ${input.reviewRequired ? 'yes' : 'no'} |`,
+    `| Open-data data gaps logged | ${input.openDataGapCount} |`,
+    `| Primary records covered | ${coveredPrimary} |`,
+    `| Primary records missing | ${missingPrimary} |`,
+    `| Primary coverage status | ${coverageStatus} |`
+  ];
+  return {
+    title: 'Diagnostics',
+    content: lines.join('\n'),
+    sources: []
+  };
+};
+
+const uniqueList = (items: string[]) => Array.from(new Set(items.filter(Boolean)));
 
 const citationToNormalizedSource = (source: any): NormalizedSource | null => {
   const url = typeof source?.url === 'string' ? source.url.trim() : '';
@@ -91,46 +177,6 @@ const citationToNormalizedSource = (source: any): NormalizedSource | null => {
   };
 };
 
-const buildOpenDataPortalCandidates = (jurisdiction?: Jurisdiction) => {
-  const hints = getOpenDatasetHints(['parcel', 'assessor', 'appraiser', 'apn', 'pin', 'cadastre']).map((dataset) => dataset.portalUrl);
-  const availability = findJurisdictionAvailability(jurisdiction);
-  const availabilityPortals = Object.values(availability?.records || {})
-    .flatMap((record: any) => (record?.evidence?.portalUrl ? [record.evidence.portalUrl] : []));
-  const normalizeToken = (value?: string) => (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const cityToken = normalizeToken(jurisdiction?.city);
-  const countyToken = normalizeToken(jurisdiction?.county);
-  const heuristicPortals = uniqueList([
-    cityToken ? `https://data.${cityToken}.gov` : '',
-    cityToken ? `https://opendata.${cityToken}.gov` : '',
-    countyToken ? `https://data.${countyToken}county.gov` : ''
-  ]).slice(0, 2);
-  const normalized = uniqueList(
-    [...availabilityPortals, ...hints, ...heuristicPortals]
-      .map((value) => normalizePortalCandidate(String(value || '')))
-      .filter(Boolean)
-  );
-  const baseWeights: Record<string, number> = {};
-  availabilityPortals.forEach((portal) => {
-    const normalizedPortal = normalizePortalCandidate(String(portal || ''));
-    if (!normalizedPortal) return;
-    baseWeights[normalizedPortal] = (baseWeights[normalizedPortal] || 0) + 40;
-  });
-  hints.forEach((portal) => {
-    const normalizedPortal = normalizePortalCandidate(String(portal || ''));
-    if (!normalizedPortal) return;
-    baseWeights[normalizedPortal] = (baseWeights[normalizedPortal] || 0) + 20;
-  });
-  heuristicPortals.forEach((portal) => {
-    const normalizedPortal = normalizePortalCandidate(String(portal || ''));
-    if (!normalizedPortal) return;
-    baseWeights[normalizedPortal] = (baseWeights[normalizedPortal] || 0) + 6;
-  });
-  return rankOpenDataPortalCandidates(normalized, {
-    jurisdiction,
-    limit: 4,
-    baseWeights
-  });
-};
 
 const ADDRESS_METHOD_DISCOVERY_PRIORITY = [
   {
@@ -1820,7 +1866,7 @@ export const useOverseer = () => {
       loggedLatencyGuard: false
     };
     let openDataPortalDataGaps: DataGap[] = [];
-    let dallasPackDataGaps: DataGap[] = [];
+    let cityProfileDataGaps: DataGap[] = [];
 
     const registerMethodQuery = (
       query: string,
@@ -3372,7 +3418,44 @@ export const useOverseer = () => {
 
       // --- PHASE 3C: OPEN DATA PARCEL RESOLUTION (ADDRESS-LIKE) ---
       if (addressLike && !enforceUsOnlyPolicy) {
-        const portalCandidates = buildOpenDataPortalCandidates(jurisdiction);
+        let portalCandidates = buildOpenDataPortalCandidates(jurisdiction);
+        if (portalCandidates.length > 0) {
+          const primingCandidates: string[] = [];
+          const primeBudget = Math.min(2, portalCandidates.length);
+          portalCandidates.slice(0, primeBudget).forEach((portalUrl) => {
+            const guard = canUseExternalCall('PHASE 3C: OPEN DATA PRIME', portalUrl);
+            if (!guard.allowed) {
+              logOverseer(
+                'PHASE 3C: OPEN DATA PRIME',
+                'performance guardrail',
+                `skip portal priming for ${portalUrl}`,
+                guard.reason || 'guardrail',
+                'warning'
+              );
+              return;
+            }
+            primingCandidates.push(portalUrl);
+          });
+          if (primingCandidates.length > 0) {
+            const primeResult = await runSafely(primeOpenDataPortalHints({
+              portalCandidates: primingCandidates,
+              jurisdiction,
+              maxPortals: primingCandidates.length
+            }));
+            if (primeResult && typeof primeResult === 'object' && (primeResult as any).datasetsDiscovered > 0) {
+              logOverseer(
+                'PHASE 3C: OPEN DATA PRIME',
+                'seeded dataset index',
+                `discovered ${(primeResult as any).datasetsDiscovered} dataset(s)`,
+                Array.isArray((primeResult as any).primedPortals)
+                  ? (primeResult as any).primedPortals.slice(0, 3).join(' | ')
+                  : undefined,
+                'info'
+              );
+            }
+          }
+          portalCandidates = buildOpenDataPortalCandidates(jurisdiction);
+        }
         if (portalCandidates.length === 0) {
           logOverseer(
             'PHASE 3C: OPEN DATA PARCEL',
@@ -3419,20 +3502,33 @@ export const useOverseer = () => {
             if (phase3cDataGaps.length > 0) {
               openDataPortalDataGaps.push(...phase3cDataGaps);
             }
-            const findingPayload = (phase3cResult as any).finding;
-            if (findingPayload && Array.isArray(findingPayload.sources) && findingPayload.sources.length > 0) {
-              const finding: Finding = {
-                source: 'Open Data Parcel Resolution',
-                content: `Portal ${findingPayload.portalUrl} resolved parcel reference ${findingPayload.parcelId || 'unknown'} using ${findingPayload.method || 'open_data'} workflow across ${findingPayload.datasetCount || 0} dataset(s).`,
-                confidence: 0.88,
-                url: findingPayload.sources.map((source: NormalizedSource) => source.uri).join(', ')
-              };
-              pushFinding({ ...finding, rawSources: findingPayload.sources } as any);
+            const findingPayloads = Array.isArray((phase3cResult as any).findings)
+              ? (phase3cResult as any).findings
+              : (phase3cResult as any).finding
+                ? [(phase3cResult as any).finding]
+                : [];
+            const successfulFindings = findingPayloads
+              .filter((entry: any) => entry && Array.isArray(entry.sources) && entry.sources.length > 0);
+
+            if (successfulFindings.length > 0) {
+              successfulFindings.forEach((findingPayload: any) => {
+                const finding: Finding = {
+                  source: 'Open Data Parcel Resolution',
+                  content: `Portal ${findingPayload.portalUrl} resolved parcel reference ${findingPayload.parcelId || 'unknown'} using ${findingPayload.method || 'open_data'} workflow across ${findingPayload.datasetCount || 0} dataset(s).`,
+                  confidence: 0.88,
+                  url: findingPayload.sources.map((source: NormalizedSource) => source.uri).join(', ')
+                };
+                pushFinding({ ...finding, rawSources: findingPayload.sources } as any);
+              });
+              const totalSources = successfulFindings.reduce((sum: number, entry: any) => {
+                const count = Array.isArray(entry?.sources) ? entry.sources.length : 0;
+                return sum + count;
+              }, 0);
               logOverseer(
                 'PHASE 3C: OPEN DATA PARCEL',
                 'parcel evidence recovered',
-                `capture ${findingPayload.sources.length} source(s)`,
-                `portal ${findingPayload.portalUrl}`,
+                `capture ${totalSources} source(s) from ${successfulFindings.length} portal(s)`,
+                successfulFindings.slice(0, 3).map((entry: any) => entry.portalUrl).join(' | '),
                 'success'
               );
             }
@@ -3440,65 +3536,69 @@ export const useOverseer = () => {
         }
       }
 
-      // --- PHASE 3D: DALLAS OPEN DATA PACK (ADDRESS-LIKE) ---
-      if (addressLike && !enforceUsOnlyPolicy && isDallasJurisdiction(jurisdiction)) {
-        const guard = canUseExternalCall('PHASE 3D: DALLAS PACK', topic);
+      // --- PHASE 3D: CITY OPEN DATA PROFILE (ADDRESS-LIKE) ---
+      const cityProfile = addressLike && !enforceUsOnlyPolicy
+        ? resolveCityOpenDataProfile(jurisdiction)
+        : undefined;
+      if (cityProfile) {
+        const phaseLabel = cityProfile.phaseLabel || `PHASE 3D: CITY PROFILE (${cityProfile.id.toUpperCase()})`;
+        const guard = canUseExternalCall(phaseLabel, topic);
         if (!guard.allowed) {
           logOverseer(
-            'PHASE 3D: DALLAS PACK',
+            phaseLabel,
             'performance guardrail',
-            'skip Dallas open data pack',
+            `skip ${cityProfile.label} city profile`,
             guard.detail,
             'warning'
           );
         } else {
           logOverseer(
-            'PHASE 3D: DALLAS PACK',
-            'run Dallas open data evidence pack',
-            'query Dallas Open Data (Socrata)',
+            phaseLabel,
+            `run ${cityProfile.label} city evidence profile`,
+            `query city-specific open data sources for ${cityProfile.label}`,
             undefined,
             'action'
           );
-          const packResult = await runSafely(runDallasEvidencePack({
+          const profileResult = await runSafely(cityProfile.run({
             address: topic,
             jurisdiction
           }));
-          if (packResult && typeof packResult === 'object') {
-            dallasPackDataGaps = Array.isArray((packResult as any).dataGaps) ? (packResult as any).dataGaps : [];
-            const packSources = Array.isArray((packResult as any).sources) ? (packResult as any).sources : [];
-            const findingsText = typeof (packResult as any).findingsText === 'string' ? (packResult as any).findingsText : '';
-            if (findingsText && packSources.length > 0) {
-              const packFinding: Finding = {
-                source: 'Dallas Open Data Pack',
+          if (profileResult && typeof profileResult === 'object') {
+            cityProfileDataGaps = Array.isArray((profileResult as any).dataGaps) ? (profileResult as any).dataGaps : [];
+            const profileSources = Array.isArray((profileResult as any).sources) ? (profileResult as any).sources : [];
+            const findingsText = typeof (profileResult as any).findingsText === 'string' ? (profileResult as any).findingsText : '';
+            if (findingsText && profileSources.length > 0) {
+              const profileFinding: Finding = {
+                source: `${cityProfile.label} Open Data Profile`,
                 content: findingsText,
                 confidence: 0.9,
-                url: packSources.map((s: any) => s.uri).filter(Boolean).join(', ')
+                url: profileSources.map((s: any) => s.uri).filter(Boolean).join(', ')
               };
-              pushFinding({ ...packFinding, rawSources: packSources } as any);
-              const attemptSummary = Array.isArray((packResult as any).queryAttempts)
-                ? (packResult as any).queryAttempts
+              pushFinding({ ...profileFinding, rawSources: profileSources } as any);
+              const attemptSummary = Array.isArray((profileResult as any).queryAttempts)
+                ? (profileResult as any).queryAttempts
                   .slice(0, 4)
-                  .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType}:${entry.matched}`)
+                  .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType || 'query'}:${entry.matched ?? 0}`)
                   .join(' | ')
                 : undefined;
               logOverseer(
-                'PHASE 3D: DALLAS PACK',
-                'Dallas open data pack complete',
-                `sources ${packSources.length}`,
+                phaseLabel,
+                `${cityProfile.label} profile complete`,
+                `sources ${profileSources.length}`,
                 attemptSummary,
                 'success'
               );
             } else {
-              const attemptSummary = Array.isArray((packResult as any).queryAttempts)
-                ? (packResult as any).queryAttempts
+              const attemptSummary = Array.isArray((profileResult as any).queryAttempts)
+                ? (profileResult as any).queryAttempts
                   .slice(0, 4)
-                  .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType}:${entry.matched}`)
+                  .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType || 'query'}:${entry.matched ?? 0}`)
                   .join(' | ')
                 : undefined;
               logOverseer(
-                'PHASE 3D: DALLAS PACK',
+                phaseLabel,
                 'no open data findings',
-                'Dallas open data pack returned no usable records',
+                `${cityProfile.label} profile returned no usable records`,
                 attemptSummary,
                 'warning'
               );
@@ -4019,11 +4119,20 @@ export const useOverseer = () => {
       };
 
       const parsedSections = Array.isArray(normalizedReport.sections) ? normalizedReport.sections : [];
-      const allowedSet = new Set(allowedSources);
+      const allowedLookup = buildAllowedSourceLookup(allowedSources);
       let filteredOutCount = 0;
+      let canonicalMatchedCount = 0;
       let sections = parsedSections.map((section: any) => {
-        const sources = Array.isArray(section?.sources) ? section.sources.filter((s: string) => allowedSet.has(s)) : [];
-        const removed = Array.isArray(section?.sources) ? section.sources.length - sources.length : 0;
+        const originalSources = Array.isArray(section?.sources) ? section.sources : [];
+        const resolvedSources = originalSources
+          .map((s: string) => {
+            const matched = resolveAllowedSourceUri(s, allowedLookup);
+            if (matched && matched !== s) canonicalMatchedCount += 1;
+            return matched;
+          })
+          .filter((s: string | null): s is string => typeof s === 'string' && s.length > 0);
+        const sources = uniqueList(resolvedSources);
+        const removed = originalSources.length - sources.length;
         filteredOutCount += Math.max(0, removed);
         return { ...section, sources };
       });
@@ -4031,8 +4140,16 @@ export const useOverseer = () => {
         ? (normalizedReport as any).visualizations
         : [];
       const visualizations = parsedVisualizations.map((viz: any) => {
-        const sources = Array.isArray(viz?.sources) ? viz.sources.filter((s: string) => allowedSet.has(s)) : [];
-        const removed = Array.isArray(viz?.sources) ? viz.sources.length - sources.length : 0;
+        const originalSources = Array.isArray(viz?.sources) ? viz.sources : [];
+        const resolvedSources = originalSources
+          .map((s: string) => {
+            const matched = resolveAllowedSourceUri(s, allowedLookup);
+            if (matched && matched !== s) canonicalMatchedCount += 1;
+            return matched;
+          })
+          .filter((s: string | null): s is string => typeof s === 'string' && s.length > 0);
+        const sources = uniqueList(resolvedSources);
+        const removed = originalSources.length - sources.length;
         filteredOutCount += Math.max(0, removed);
         return { ...viz, sources };
       });
@@ -4043,6 +4160,15 @@ export const useOverseer = () => {
           `filtered ${filteredOutCount} sources`,
           'bibliography pruned',
           'warning'
+        );
+      }
+      if (canonicalMatchedCount > 0) {
+        logOverseer(
+          'PHASE 4: SOURCE FILTER',
+          'canonical source matches applied',
+          `remapped ${canonicalMatchedCount} source link(s)`,
+          undefined,
+          'info'
         );
       }
       let summary = typeof normalizedReport.summary === 'string' && normalizedReport.summary.trim().length > 0
@@ -4250,7 +4376,7 @@ export const useOverseer = () => {
         ...(unsupportedJurisdictionGap ? [unsupportedJurisdictionGap] : []),
         ...addressEvidencePolicy.dataGaps,
         ...openDataPortalDataGaps,
-        ...dallasPackDataGaps
+        ...cityProfileDataGaps
       ];
       const propertyDossier = addressLike
         ? buildPropertyDossier({
@@ -4347,9 +4473,29 @@ export const useOverseer = () => {
           sloGate
         }
       };
+      const diagnosticsSection = buildDiagnosticsSection({
+        rawSourceCount: allRawSources.length,
+        allowedSourceCount: allowedSources.length,
+        filteredOutCount,
+        canonicalMatchedCount,
+        blockedSourceCount: complianceResult.blockedSources.length,
+        datasetComplianceCount: datasetCompliance.length,
+        reviewRequired: Boolean(complianceResult.summary?.reviewRequired),
+        openDataGapCount: openDataPortalDataGaps.length + cityProfileDataGaps.length,
+        primaryRecordCoverage
+      });
+      const hasDiagnosticsSection = reportWithMetrics.sections.some((section: any) =>
+        String(section?.title || '').trim().toLowerCase() === 'diagnostics'
+      );
+      const reportWithDiagnostics = hasDiagnosticsSection
+        ? reportWithMetrics
+        : {
+            ...reportWithMetrics,
+            sections: [...reportWithMetrics.sections, diagnosticsSection]
+          };
 
       setReportSafe({
-        ...reportWithMetrics,
+        ...reportWithDiagnostics,
         propertyDossier: propertyDossier ?? undefined
       });
       
