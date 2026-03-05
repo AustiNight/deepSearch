@@ -440,7 +440,6 @@ const formatValidationIssue = (issue: any) => {
 const EVIDENCE_RECOVERY_MAX_ATTEMPTS = 3;
 const EVIDENCE_RECOVERY_BASE_DELAY_MS = 700;
 const EVIDENCE_RECOVERY_MAX_QUERIES = 6;
-const EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS = 1000 * 45;
 const EVIDENCE_RECOVERY_PRIORITY_SCORE_MIN = 4;
 const EVIDENCE_RECOVERY_MAX_FALLBACK_QUERIES = 2;
 const EVIDENCE_RECOVERY_MAX_TEXT_CHARS = 12000;
@@ -456,8 +455,7 @@ type EvidenceRecoveryCache = Record<string, EvidenceRecoveryCacheEntry>;
 type EvidenceRecoveryErrorCode =
   | 'threshold_unmet'
   | 'recovery_failed'
-  | 'recovery_exhausted'
-  | 'recovery_timeout';
+  | 'recovery_exhausted';
 
 const EVIDENCE_RECOVERY_ERROR_TAXONOMY: Record<EvidenceRecoveryErrorCode, { severity: 'info' | 'warning' | 'error'; summary: string }> = {
   threshold_unmet: {
@@ -471,10 +469,6 @@ const EVIDENCE_RECOVERY_ERROR_TAXONOMY: Record<EvidenceRecoveryErrorCode, { seve
   recovery_exhausted: {
     severity: 'error',
     summary: 'Evidence recovery exhausted and thresholds remain unmet.'
-  },
-  recovery_timeout: {
-    severity: 'warning',
-    summary: 'Evidence recovery timed out or was interrupted.'
   }
 };
 
@@ -1941,13 +1935,10 @@ export const useOverseer = () => {
       maxExternalCalls: envMaxExternalCalls,
       latencyBudgetMs: envLatencyBudgetMs
     };
-    const runDeadline = runStartedAt + performanceBudget.latencyBudgetMs;
     const performanceState = {
       externalCallsUsed: 0,
       externalCallBudgetExceeded: false,
-      latencyBudgetExceeded: false,
-      loggedExternalCallGuard: false,
-      loggedLatencyGuard: false
+      latencyBudgetExceeded: false
     };
     let openDataPortalDataGaps: DataGap[] = [];
     let cityProfileDataGaps: DataGap[] = [];
@@ -1992,45 +1983,13 @@ export const useOverseer = () => {
       skipReason?: 'latency_budget' | 'external_call_budget';
     };
 
-    const recordPerformanceGuardrail = (reason: string, detail?: string) => {
-      logOverseer(
-        'PERF GUARDRAIL',
-        reason,
-        'skip external call',
-        detail,
-        'warning'
-      );
-    };
-
     const formatGuardDetail = (phase: string, query?: string) => {
       if (!query) return phase;
       const trimmed = query.length > 90 ? `${query.slice(0, 87)}...` : query;
       return `${phase} | ${trimmed}`;
     };
 
-    const canUseExternalCall = (phase: string, query?: string) => {
-      if (Date.now() >= runDeadline) {
-        performanceState.latencyBudgetExceeded = true;
-        if (!performanceState.loggedLatencyGuard) {
-          recordPerformanceGuardrail(
-            'latency budget exceeded',
-            `budget ${performanceBudget.latencyBudgetMs}ms`
-          );
-          performanceState.loggedLatencyGuard = true;
-        }
-        return { allowed: false, reason: 'latency_budget' as const, detail: formatGuardDetail(phase, query) };
-      }
-      if (performanceState.externalCallsUsed >= performanceBudget.maxExternalCalls) {
-        performanceState.externalCallBudgetExceeded = true;
-        if (!performanceState.loggedExternalCallGuard) {
-          recordPerformanceGuardrail(
-            'external call budget exceeded',
-            `cap ${performanceBudget.maxExternalCalls} calls`
-          );
-          performanceState.loggedExternalCallGuard = true;
-        }
-        return { allowed: false, reason: 'external_call_budget' as const, detail: formatGuardDetail(phase, query) };
-      }
+    const canUseExternalCall = (_phase: string, _query?: string) => {
       performanceState.externalCallsUsed += 1;
       return { allowed: true, reason: null, detail: undefined };
     };
@@ -2105,46 +2064,24 @@ export const useOverseer = () => {
       maxSpacingMs: number;
       deadlineMs?: number;
     }) => {
-      const deadline = typeof input.deadlineMs === 'number'
-        ? Math.min(runDeadline, input.deadlineMs)
-        : runDeadline;
-      const remainingMs = Math.max(0, deadline - Date.now());
       const estimatedMs = Math.max(750, estimateCallLatencyMs());
-      const maxByLatency = Math.floor(remainingMs / estimatedMs);
-      const remainingExternal = Math.max(0, performanceBudget.maxExternalCalls - performanceState.externalCallsUsed);
-      const allowedCount = Math.max(0, Math.min(input.candidates.length, maxByLatency, remainingExternal));
-      const limitingReason = allowedCount < input.candidates.length
-        ? (remainingExternal < maxByLatency ? 'external_call_budget' : 'latency_budget')
-        : null;
       const ordered = [...input.candidates].sort((a, b) => {
         if (b.priority !== a.priority) return b.priority - a.priority;
         return 0;
       });
-      const allowed = ordered.slice(0, allowedCount);
-      const skipped = ordered.slice(allowedCount);
-      const spacingMs = allowedCount > 1
-        ? clamp(Math.floor(remainingMs / allowedCount), input.minSpacingMs, input.maxSpacingMs)
+      const allowed = ordered;
+      const skipped: Array<{ item: T; priority: number; label?: string }> = [];
+      const spacingMs = allowed.length > 1
+        ? clamp(Math.floor(estimatedMs * 0.35), input.minSpacingMs, input.maxSpacingMs)
         : 0;
-      if (skipped.length > 0 && limitingReason) {
-        const shouldLog = limitingReason === 'latency_budget'
-          ? !performanceState.loggedLatencyGuard
-          : !performanceState.loggedExternalCallGuard;
-        if (shouldLog) {
-          logOverseer(
-            'PERF PLANNER',
-            limitingReason === 'latency_budget' ? 'latency budget constraint' : 'external call cap constraint',
-            `plan ${allowedCount}/${input.candidates.length} calls`,
-            `${input.phase} · est ${estimatedMs}ms/call · remaining ${Math.round(remainingMs / 1000)}s`,
-            'warning'
-          );
-          if (limitingReason === 'latency_budget') {
-            performanceState.loggedLatencyGuard = true;
-          } else {
-            performanceState.loggedExternalCallGuard = true;
-          }
-        }
-      }
-      return { allowed, skipped, spacingMs, remainingMs, estimatedMs, limitingReason };
+      return {
+        allowed,
+        skipped,
+        spacingMs,
+        remainingMs: Number.POSITIVE_INFINITY,
+        estimatedMs,
+        limitingReason: null
+      };
     };
 
     const recordEvidenceGate = (
@@ -3735,7 +3672,6 @@ export const useOverseer = () => {
           const queriesToRun = [...priorityQueries, ...fallbackQueries]
             .slice(0, targetQueries)
             .map(item => item.query);
-          const recoveryDeadline = Date.now() + EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS;
           const recoveryCandidates = queriesToRun.map(query => ({
             item: query,
             priority: queryScoreMap.get(query) ?? 0,
@@ -3745,8 +3681,7 @@ export const useOverseer = () => {
             candidates: recoveryCandidates,
             phase: 'PHASE 3C: EVIDENCE RECOVERY',
             minSpacingMs: 350,
-            maxSpacingMs: 1500,
-            deadlineMs: recoveryDeadline
+            maxSpacingMs: 1500
           });
           const runnableQueries = recoveryPlan.allowed.map(entry => entry.item);
           const skippedQueries = recoveryPlan.skipped.map(entry => entry.item);
@@ -3763,7 +3698,6 @@ export const useOverseer = () => {
               'warning'
             );
           } else {
-            let recoveryTimedOut = false;
             const recoverySources: string[] = [];
             const executedRecoveryQueries: string[] = [];
 
@@ -3793,17 +3727,8 @@ export const useOverseer = () => {
 
             for (const [index, query] of runnableQueries.entries()) {
               ensureActive();
-              if (Date.now() >= recoveryDeadline) {
-                recoveryTimedOut = true;
-                break;
-              }
-              const spacingDelay = recoveryPlan.spacingMs * index;
-              if (spacingDelay > 0) {
-                if (Date.now() + spacingDelay >= recoveryDeadline) {
-                  recoveryTimedOut = true;
-                  break;
-                }
-                await wait(spacingDelay, signal);
+              if (index > 0 && recoveryPlan.spacingMs > 0) {
+                await wait(recoveryPlan.spacingMs, signal);
               }
 
               const queryScore = queryScoreMap.get(query) ?? 0;
@@ -3870,10 +3795,6 @@ export const useOverseer = () => {
               let result: DeepResearchResult | null = null;
               while (attempt < EVIDENCE_RECOVERY_MAX_ATTEMPTS) {
                 ensureActive();
-                if (Date.now() >= recoveryDeadline) {
-                  recoveryTimedOut = true;
-                  break;
-                }
                 attempt += 1;
                 try {
                   result = await runDeepResearchWithGuards(
@@ -3904,26 +3825,11 @@ export const useOverseer = () => {
                 if (result && result.sources.length > 0) break;
                 if (attempt < EVIDENCE_RECOVERY_MAX_ATTEMPTS) {
                   const delay = EVIDENCE_RECOVERY_BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 250;
-                  if (Date.now() + delay >= recoveryDeadline) {
-                    recoveryTimedOut = true;
-                    break;
-                  }
                   await wait(delay, signal);
                 }
               }
 
               if (result?.skipped) {
-                if (result.skipReason === 'latency_budget') {
-                  recoveryTimedOut = true;
-                }
-                break;
-              }
-
-              if (recoveryTimedOut) {
-                updateAgent(agentId, {
-                  status: AgentStatus.FAILED,
-                  reasoning: ['time budget exceeded during evidence recovery']
-                });
                 break;
               }
 
@@ -3973,17 +3879,6 @@ export const useOverseer = () => {
               if (evidenceStatus.meetsAll) {
                 break;
               }
-            }
-
-            if (recoveryTimedOut) {
-              evidenceRecoveryMetrics.timedOut = true;
-              logOverseer(
-                'PHASE 3C: EVIDENCE RECOVERY',
-                EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_timeout.summary,
-                'time budget exceeded',
-                `budget ${EVIDENCE_RECOVERY_TOTAL_TIME_BUDGET_MS}ms`,
-                'warning'
-              );
             }
 
             if (recoverySources.length > 0) {
