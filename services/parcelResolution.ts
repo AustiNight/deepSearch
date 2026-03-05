@@ -95,6 +95,110 @@ const normalizeParcelId = (value?: string) => (value || "").replace(/[^a-zA-Z0-9
 
 const normalizeAddressKey = (value?: string) => (value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
+const normalizeUnitToken = (value?: string) => (value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const UNIT_DESIGNATOR_PATTERN = /(?:^|\s|,)(?:#|APT|APARTMENT|UNIT|SUITE|STE|BLDG|BUILDING|FL|FLOOR|LOT|RM|ROOM|PH)\s*[-#]*([A-Z0-9-]+)/gi;
+const STREET_SUFFIX_TOKENS = new Set([
+  "ALY", "AVE", "AV", "AVENUE", "BLVD", "BOULEVARD", "CIR", "CIRCLE", "CT", "COURT",
+  "DR", "DRIVE", "EXPY", "EXPRESSWAY", "FWY", "FREEWAY", "HWY", "HIGHWAY", "LN", "LANE",
+  "LOOP", "PKWY", "PARKWAY", "PL", "PLACE", "PLZ", "PLAZA", "RD", "ROAD", "SQ", "SQUARE",
+  "ST", "STREET", "TER", "TERRACE", "TRL", "TRAIL", "WAY"
+]);
+
+const toStreetLine = (value: string) => {
+  const head = String(value || "").split(",")[0] || "";
+  return head.replace(/\s+/g, " ").trim().toUpperCase();
+};
+
+const extractTrailingUnitToken = (value: string) => {
+  const line = toStreetLine(value);
+  if (!line) return null;
+  const tokens = line.split(" ").filter(Boolean);
+  if (tokens.length < 3 || !/^\d+[A-Z]?$/.test(tokens[0])) return null;
+  const last = tokens[tokens.length - 1];
+  const prev = tokens[tokens.length - 2];
+  const looksLikeUnit = /^(?:[A-Z]-\d+[A-Z]?|\d+[A-Z]?(?:-\d+[A-Z]?)?)$/.test(last);
+  const prevLooksLikeSuffix = STREET_SUFFIX_TOKENS.has(prev.replace(/\./g, ""));
+  if (looksLikeUnit && prevLooksLikeSuffix) {
+    return normalizeUnitToken(last);
+  }
+  return null;
+};
+
+const extractUnitTokensFromAddressText = (value?: string) => {
+  const out = new Set<string>();
+  const text = String(value || "").trim().toUpperCase();
+  if (!text) return out;
+  let match: RegExpExecArray | null;
+  UNIT_DESIGNATOR_PATTERN.lastIndex = 0;
+  while ((match = UNIT_DESIGNATOR_PATTERN.exec(text)) !== null) {
+    const token = normalizeUnitToken(match[1] || "");
+    if (token) out.add(token);
+  }
+  const trailing = extractTrailingUnitToken(text);
+  if (trailing) out.add(trailing);
+  return out;
+};
+
+const mergeUnitTokenSets = (...sets: Array<Set<string>>) => {
+  const merged = new Set<string>();
+  sets.forEach((set) => set.forEach((token) => merged.add(token)));
+  return merged;
+};
+
+const extractInputUnitTokens = (address: string, addressVariants: string[]) => {
+  const sets = [extractUnitTokensFromAddressText(address)];
+  addressVariants.forEach((variant) => sets.push(extractUnitTokensFromAddressText(variant)));
+  return mergeUnitTokenSets(...sets);
+};
+
+const ADDRESS_LIKE_ATTRIBUTE_KEY_PATTERN = /address|addr|situs|site|location|unit|apt|suite|ste|bldg|building|room|floor|line/i;
+
+const extractCandidateUnitTokens = (candidate: ParcelCandidate) => {
+  const sets: Array<Set<string>> = [extractUnitTokensFromAddressText(candidate.situsAddress)];
+  const attributes = candidate.attributes || {};
+  Object.entries(attributes).forEach(([key, value]) => {
+    if (!ADDRESS_LIKE_ATTRIBUTE_KEY_PATTERN.test(key)) return;
+    if (typeof value !== "string") return;
+    if (value.length > 140) return;
+    sets.push(extractUnitTokensFromAddressText(value));
+  });
+  return mergeUnitTokenSets(...sets);
+};
+
+const scoreUnitMatch = (inputUnitTokens: Set<string>, candidateUnitTokens: Set<string>) => {
+  if (inputUnitTokens.size === 0) return 0;
+  if (candidateUnitTokens.size === 0) return -6;
+  for (const inputUnit of inputUnitTokens) {
+    if (candidateUnitTokens.has(inputUnit)) return 55;
+  }
+  return -28;
+};
+
+const YEAR_FIELD_PATTERN = /(year|taxyear|tax_year|assessment_year|asmt_year|roll_year|current_year|valuation_year)$/i;
+
+const extractCandidateRecencyYear = (candidate: ParcelCandidate) => {
+  const attributes = candidate.attributes || {};
+  let newest = 0;
+  Object.entries(attributes).forEach(([key, value]) => {
+    if (!YEAR_FIELD_PATTERN.test(key)) return;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const year = Math.floor(parsed);
+    if (year < 1900 || year > 2100) return;
+    if (year > newest) newest = year;
+  });
+  return newest || undefined;
+};
+
+const scoreRecencyYear = (year?: number) => {
+  if (!year) return 0;
+  if (year >= 2023) return 12;
+  if (year >= 2018) return 8;
+  if (year >= 2010) return 4;
+  return 0;
+};
+
 const normalizeJurisdictionToken = (value?: string) => (value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const fillTemplate = (template: string, jurisdiction?: Jurisdiction) => {
@@ -192,7 +296,14 @@ const inferMatchType = (candidate: ParcelCandidate, addressVariants: string[]) =
   return "unknown";
 };
 
-const scoreCandidate = (candidate: ParcelCandidate, addressVariants: string[]) => {
+const scoreCandidate = (
+  candidate: ParcelCandidate,
+  context: {
+    addressVariants: string[];
+    inputUnitTokens: Set<string>;
+  }
+) => {
+  const { addressVariants, inputUnitTokens } = context;
   const matchType = inferMatchType(candidate, addressVariants);
   const matchScore = matchType === "exact"
     ? 60
@@ -205,23 +316,45 @@ const scoreCandidate = (candidate: ParcelCandidate, addressVariants: string[]) =
   const confidenceScore = typeof candidate.confidence === "number"
     ? Math.round(candidate.confidence * 10)
     : 0;
-  return matchScore + idScore + confidenceScore;
+  const unitScore = scoreUnitMatch(inputUnitTokens, extractCandidateUnitTokens(candidate));
+  const recencyScore = scoreRecencyYear(extractCandidateRecencyYear(candidate));
+  return matchScore + idScore + confidenceScore + unitScore + recencyScore;
 };
 
 const selectCandidateWithTieBreak = (
   candidates: ParcelCandidate[],
-  addressVariants: string[]
+  addressVariants: string[],
+  address: string
 ) => {
   if (candidates.length === 0) return { selected: undefined, topMatches: [] };
   if (candidates.length === 1) return { selected: candidates[0], topMatches: candidates };
+  const inputUnitTokens = extractInputUnitTokens(address, addressVariants);
   const scored = candidates.map(candidate => ({
     candidate,
-    score: scoreCandidate(candidate, addressVariants)
+    score: scoreCandidate(candidate, { addressVariants, inputUnitTokens })
   })).sort((a, b) => b.score - a.score);
   const topScore = scored[0].score;
   const topMatches = scored.filter(entry => entry.score === topScore).map(entry => entry.candidate);
   if (topMatches.length === 1) {
     return { selected: topMatches[0], topMatches };
+  }
+  const rankedBySignal = topMatches
+    .map((candidate) => {
+      const unitScore = scoreUnitMatch(inputUnitTokens, extractCandidateUnitTokens(candidate));
+      const recencyYear = extractCandidateRecencyYear(candidate) || 0;
+      return { candidate, unitScore, recencyYear };
+    })
+    .sort((a, b) =>
+      (b.unitScore - a.unitScore)
+      || (b.recencyYear - a.recencyYear)
+    );
+  if (rankedBySignal.length > 1) {
+    const first = rankedBySignal[0];
+    const second = rankedBySignal[1];
+    const signalSeparates = first.unitScore !== second.unitScore || first.recencyYear !== second.recencyYear;
+    if (signalSeparates) {
+      return { selected: first.candidate, topMatches };
+    }
   }
   return { selected: undefined, topMatches };
 };
@@ -314,7 +447,7 @@ export const resolveParcelWorkflow = async (
     }));
   }
 
-  const assessorSelection = selectCandidateWithTieBreak(assessorCandidates, addressVariants);
+  const assessorSelection = selectCandidateWithTieBreak(assessorCandidates, addressVariants, input.address);
   let resolvedCandidate = assessorSelection.selected;
   let resolutionMethod: ParcelResolutionMethod | undefined;
   if (resolvedCandidate) {
@@ -340,7 +473,7 @@ export const resolveParcelWorkflow = async (
         geometry: feature.geometry,
         attributes: feature.attributes
       })));
-    const gisSelection = selectCandidateWithTieBreak(gisCandidates, addressVariants);
+    const gisSelection = selectCandidateWithTieBreak(gisCandidates, addressVariants, input.address);
     resolvedCandidate = gisSelection.selected;
     if (resolvedCandidate) {
       resolutionMethod = "gis";

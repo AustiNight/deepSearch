@@ -127,6 +127,23 @@ const supportsJsonSchema = (model: string) => {
   return normalized.startsWith("gpt-4o") || normalized.startsWith("gpt-4.1");
 };
 
+const WEB_SEARCH_TOOL_PRIMARY = "web_search_preview";
+const WEB_SEARCH_TOOL_FALLBACK = "web_search";
+const WEB_SEARCH_TOOL_REJECTION_PATTERN = /(tools?\[\d+\]\.type|invalid.*tool|unknown.*tool|unsupported.*tool|web_search_preview|web_search)/i;
+
+const toSafeErrorMessage = (error: unknown) => {
+  const raw = error instanceof Error ? error.message : String(error ?? "Unknown error");
+  const scrubbed = raw
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]");
+  if (scrubbed.length <= 320) return scrubbed;
+  return `${scrubbed.slice(0, 317)}...`;
+};
+
+const shouldRetryWithLegacyWebSearch = (message: string) => {
+  return WEB_SEARCH_TOOL_REJECTION_PATTERN.test(message);
+};
+
 const REPORT_SCHEMA = {
   type: "object",
   properties: {
@@ -486,12 +503,27 @@ const singleSearch = async (
 ): Promise<{ text: string; sources: NormalizedSource[] }> => {
   ensureOpenAIReady();
   try {
-    const response = await requestOpenAI({
-      model,
-      input: `Context: ${context}\n\nTask: Search for "${query}".\nExtract hard data, dates, and specific names.`,
-      tools: [{ type: "web_search" }],
-      tool_choice: "auto",
-    }, options);
+    const input = `Context: ${context}\n\nTask: Search for "${query}".\nExtract hard data, dates, and specific names.`;
+    const requestSearch = (toolType: string) => {
+      return requestOpenAI({
+        model,
+        input,
+        tools: [{ type: toolType }],
+        tool_choice: "auto",
+      }, options);
+    };
+
+    let response: any;
+    try {
+      response = await requestSearch(WEB_SEARCH_TOOL_PRIMARY);
+    } catch (firstError) {
+      const firstMessage = toSafeErrorMessage(firstError);
+      if (!shouldRetryWithLegacyWebSearch(firstMessage)) {
+        throw firstError;
+      }
+      logCallback?.(`Web search tool "${WEB_SEARCH_TOOL_PRIMARY}" rejected. Retrying with "${WEB_SEARCH_TOOL_FALLBACK}".`);
+      response = await requestSearch(WEB_SEARCH_TOOL_FALLBACK);
+    }
 
     const text = extractOutputText(response);
     const normalization = normalizeOpenAIResponseSources(response);
@@ -538,6 +570,8 @@ const singleSearch = async (
     return { text, sources };
   } catch (e) {
     if ((e as any)?.name === 'AbortError') throw e;
+    const message = toSafeErrorMessage(e);
+    logCallback?.(`Search failed for "${query}": ${message}`);
     console.warn(`Search failed for ${query}`, e);
     return { text: "", sources: [] };
   }

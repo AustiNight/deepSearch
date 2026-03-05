@@ -14,6 +14,10 @@ export type FetchResult<T> =
   | { ok: false; status: number; data: null; error: string; headers: Headers };
 
 const rateLimitState = new Map<string, number>();
+const OPEN_DATA_FETCH_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.OPEN_DATA_FETCH_TIMEOUT_MS || 15_000)
+);
 const jsonResponseCache = new Map<string, {
   expiresAt: number;
   status: number;
@@ -108,6 +112,31 @@ const evictCache = <T>(cache: Map<string, T>) => {
   }
 };
 
+const createTimedSignal = (externalSignal?: AbortSignal, timeoutMs = OPEN_DATA_FETCH_TIMEOUT_MS) => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return { signal: externalSignal, cleanup: () => {} };
+  }
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", onAbort);
+      }
+    }
+  };
+};
+
 const proxyFetch = async (
   url: string,
   options: { headers?: Record<string, string>; signal?: AbortSignal },
@@ -119,12 +148,13 @@ const proxyFetch = async (
     portalType: context.portalType,
     portalUrl: context.portalUrl
   };
+  const timed = createTimedSignal(options.signal);
   try {
     return await apiFetch("/api/open-data/fetch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: options.signal
+      signal: timed.signal
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "");
@@ -133,8 +163,10 @@ const proxyFetch = async (
     if (!canDirectFetchFallback) throw error;
     return directFetch(url, {
       headers: options.headers,
-      signal: options.signal
+      signal: timed.signal
     });
+  } finally {
+    timed.cleanup();
   }
 };
 

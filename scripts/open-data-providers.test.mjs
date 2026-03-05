@@ -377,6 +377,52 @@ const runAssessorAmbiguityFallsBackToGisTest = async () => {
   assert.equal(result.resolutionMethod, "gis");
 };
 
+const runAssessorUnitTieBreakTest = async () => {
+  const result = await resolveParcelWorkflow(
+    {
+      address: "510 W ERIE ST 2-1, CHICAGO, IL",
+      normalizedAddress: "510 W ERIE ST 2-1, CHICAGO, IL"
+    },
+    {
+      geocode: async () => null,
+      assessorLookup: async () => ([
+        { parcelId: "P-UNIT-1", source: "assessor", situsAddress: "510 W ERIE ST 2-1" },
+        { parcelId: "P-UNIT-2", source: "assessor", situsAddress: "510 W ERIE ST 2-10" }
+      ])
+    }
+  );
+  assert.equal(result.parcel?.parcelId, "P-UNIT-1");
+  assert.equal(result.resolutionMethod, "assessor");
+};
+
+const runAssessorYearTieBreakTest = async () => {
+  const result = await resolveParcelWorkflow(
+    {
+      address: "501 N CLINTON ST P-436, CHICAGO, IL",
+      normalizedAddress: "501 N CLINTON ST P-436, CHICAGO, IL"
+    },
+    {
+      geocode: async () => null,
+      assessorLookup: async () => ([
+        {
+          parcelId: "PIN-OLD",
+          source: "assessor",
+          situsAddress: "501 N CLINTON ST P-436",
+          attributes: { year: "2001", pin: "17091121061434" }
+        },
+        {
+          parcelId: "PIN-NEW",
+          source: "assessor",
+          situsAddress: "501 N CLINTON ST P-436",
+          attributes: { year: "2024", pin: "17091121071434" }
+        }
+      ])
+    }
+  );
+  assert.equal(result.parcel?.parcelId, "PIN-NEW");
+  assert.equal(result.resolutionMethod, "assessor");
+};
+
 const runPhase3COrchestrationTest = async () => {
   const attempts = [];
   const result = await runOpenDataParcelResolutionPhase(
@@ -543,6 +589,69 @@ const runAssessorQueryFanOutTest = async () => {
   assert.equal(result.resolutionMethod, "assessor");
 };
 
+const runAssessorUnitRecallFanOutTest = async () => {
+  updateOpenDataConfig({
+    zeroCostMode: true,
+    allowPaidAccess: false,
+    auth: {}
+  });
+  const rows = [];
+  for (let i = 101; i <= 180; i += 1) {
+    rows.push(`R-${i},"1401 LITTLE ELM TRL #${i}, CEDAR PARK, TX 78613"`);
+  }
+  rows.push('R529748,"1401 LITTLE ELM TRL #409, CEDAR PARK, TX 78613"');
+  const csv = ["parcel_id,site_address", ...rows].join("\n");
+
+  global.fetch = buildProxyFetch((target) => {
+    if (String(target).includes("nominatim.openstreetmap.org/search")) {
+      return buildResponse([]);
+    }
+    if (String(target).endsWith("/data.json")) {
+      return buildResponse({
+        dataset: [
+          {
+            identifier: "parcel-unit-recall",
+            title: "County Parcel Assessor Data",
+            description: "Official parcel dataset",
+            distribution: [
+              { downloadURL: "https://fanout-unit.example.gov/unit-recall.csv" }
+            ]
+          }
+        ]
+      });
+    }
+    if (String(target).includes("/unit-recall.csv")) {
+      return buildResponse(csv);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const result = await resolveParcelFromOpenDataPortal({
+    address: "1401 LITTLE ELM TRL #409, CEDAR PARK, TX 78613",
+    portalUrl: "https://fanout-unit.example.gov",
+    portalType: "dcat",
+    calibration: {
+      enabled: true,
+      relaxPublicAssessorReviewGates: true
+    }
+  });
+  assert.equal(
+    result.parcel?.parcelId,
+    "R529748",
+    JSON.stringify({
+      parcel: result.parcel,
+      method: result.resolutionMethod,
+      candidates: (result.assessorCandidates || []).slice(0, 5).map((candidate) => ({
+        parcelId: candidate.parcelId,
+        situsAddress: candidate.situsAddress
+      })),
+      diagnostics: result.diagnostics,
+      gaps: (result.dataGaps || []).slice(0, 3).map((gap) => gap.reason)
+    })
+  );
+  assert.equal(result.resolutionMethod, "assessor");
+};
+
 const runZeroCostGuardTests = () => {
   updateOpenDataConfig({
     zeroCostMode: true,
@@ -568,9 +677,12 @@ await runArcGisTests();
 await runDcatTests();
 await runSpatialJoinParcelTest();
 await runAssessorAmbiguityFallsBackToGisTest();
+await runAssessorUnitTieBreakTest();
+await runAssessorYearTieBreakTest();
 await runPhase3COrchestrationTest();
 await runCalibrationModePublicAssessorOverrideTest();
 await runAssessorQueryFanOutTest();
+await runAssessorUnitRecallFanOutTest();
 await runZeroCostGuardTests();
 runDallasVariantTest();
 resetOpenDataConfig();

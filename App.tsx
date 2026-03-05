@@ -1098,11 +1098,14 @@ const App: React.FC = () => {
                   type="password"
                   value={draftKeys.google}
                   onChange={(e) => setDraftKeys(prev => ({ ...prev, google: e.target.value }))}
+                  disabled={USE_PROXY}
                   placeholder={ENV_GEMINI_KEY ? 'Using .env.local' : 'AIza...'}
-                  className="w-full bg-black border border-gray-700 rounded p-2 text-sm focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  className={`w-full bg-black border border-gray-700 rounded p-2 text-sm outline-none transition-colors font-mono text-cyber-green ${USE_PROXY ? 'opacity-60 cursor-not-allowed' : 'focus:border-cyber-green'}`}
                 />
                 <p className="text-[10px] text-gray-500 mt-1">
-                  Leave blank to use `.env.local`. Get a free key at <a href="https://aistudio.google.com/" target="_blank" className="underline hover:text-cyber-green">Google AI Studio</a>.
+                  {USE_PROXY
+                    ? <>Ignored in proxy mode. Configure `GEMINI_API_KEY` on the Worker secret instead.</>
+                    : <>Leave blank to use `.env.local`. Get a free key at <a href="https://aistudio.google.com/" target="_blank" className="underline hover:text-cyber-green">Google AI Studio</a>.</>}
                 </p>
               </div>
 
@@ -1112,11 +1115,14 @@ const App: React.FC = () => {
                   type="password"
                   value={draftKeys.openai}
                   onChange={(e) => setDraftKeys(prev => ({ ...prev, openai: e.target.value }))}
+                  disabled={USE_PROXY}
                   placeholder={ENV_OPENAI_KEY ? 'Using .env.local' : 'sk-...'}
-                  className="w-full bg-black border border-gray-700 rounded p-2 text-sm focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
+                  className={`w-full bg-black border border-gray-700 rounded p-2 text-sm outline-none transition-colors font-mono text-cyber-green ${USE_PROXY ? 'opacity-60 cursor-not-allowed' : 'focus:border-cyber-green'}`}
                 />
                 <p className="text-[10px] text-gray-500 mt-1">
-                  Leave blank to use `.env.local`. Ensure your OpenAI key has access to the selected model.
+                  {USE_PROXY
+                    ? <>Ignored in proxy mode. Configure `OPENAI_API_KEY` on the Worker secret instead.</>
+                    : <>Leave blank to use `.env.local`. Ensure your OpenAI key has access to the selected model.</>}
                 </p>
               </div>
 
@@ -1803,7 +1809,7 @@ const App: React.FC = () => {
               )}
               {USE_PROXY && (
                 <p className="text-[10px] text-gray-500 font-mono">
-                  Proxy enabled: keys are stored server-side.
+                  Proxy enabled: this client always calls `/api/*`; provider keys are read from Worker secrets.
                 </p>
               )}
             </div>

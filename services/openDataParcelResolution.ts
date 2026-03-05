@@ -155,6 +155,7 @@ const rankDatasetsForParcelResolution = (datasets: OpenDatasetMetadata[], normal
 
 const MAX_ASSESSOR_QUERY_VARIANTS = 6;
 const ADDRESS_UNIT_PATTERN = /(?:^|\s|,)(?:#|apt|apartment|unit|suite|ste|bldg|building|fl|floor|lot|trlr|trailer)\.?\s*[a-z0-9-]+\b/gi;
+const UNIT_HINT_PATTERN = /(?:^|\s|,)(?:#|apt|apartment|unit|suite|ste|bldg|building|fl|floor|lot|rm|room|ph)\s*[-#]*([a-z0-9-]+)/gi;
 
 const normalizeAssessorSearchText = (value: string) =>
   value
@@ -175,6 +176,48 @@ const toStreetLine = (value: string) => {
 };
 
 const searchVariantKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const normalizeUnitHint = (value?: string) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const extractUnitHints = (...values: Array<string | undefined>) => {
+  const hints = new Set<string>();
+  values.forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    let match: RegExpExecArray | null;
+    UNIT_HINT_PATTERN.lastIndex = 0;
+    while ((match = UNIT_HINT_PATTERN.exec(text)) !== null) {
+      const unit = normalizeUnitHint(match[1]);
+      if (unit) hints.add(unit);
+    }
+    const streetLine = text.split(",")[0]?.trim() || "";
+    const trailing = streetLine.split(/\s+/).filter(Boolean).pop() || "";
+    if (/^(?:[a-z]-\d+[a-z]?|\d+[a-z]?(?:-\d+[a-z]?)?)$/i.test(trailing)) {
+      const unit = normalizeUnitHint(trailing);
+      if (unit) hints.add(unit);
+    }
+  });
+  return hints;
+};
+
+const candidateMatchesUnitHints = (candidate: ParcelCandidate, hints: Set<string>) => {
+  if (hints.size === 0) return true;
+  const texts = [candidate.situsAddress];
+  const attrs = candidate.attributes || {};
+  Object.entries(attrs).forEach(([key, value]) => {
+    if (!/(address|addr|situs|site|location|unit|apt|suite|ste|room|line)/i.test(key)) return;
+    if (typeof value !== "string") return;
+    if (value.length > 160) return;
+    texts.push(value);
+  });
+  for (const text of texts) {
+    const tokens = extractUnitHints(text);
+    for (const token of tokens) {
+      if (hints.has(token)) return true;
+    }
+  }
+  return false;
+};
 
 const buildAssessorSearchTexts = (input: {
   address: string;
@@ -574,13 +617,20 @@ export const resolveParcelFromOpenDataPortal = async (input: {
       normalizedAddress: lookupInput.normalizedAddress || normalizedAddress,
       addressVariants: lookupInput.addressVariants
     });
+    const unitHints = extractUnitHints(
+      lookupInput.address,
+      lookupInput.normalizedAddress,
+      ...(lookupInput.addressVariants || [])
+    );
+    const queryLimit = unitHints.size > 0 ? 100 : 25;
     for (const dataset of textQueryDatasets) {
       if (!dataset.datasetId) continue;
+      let datasetMatched = false;
       for (const searchText of searchTexts) {
         const result = await provider.queryByText({
           datasetId: dataset.datasetId,
           searchText,
-          limit: 25
+          limit: queryLimit
         });
         if (result.errors && result.errors.length > 0) {
           const perf = datasetPerformance.get(dataset.id);
@@ -601,12 +651,19 @@ export const resolveParcelFromOpenDataPortal = async (input: {
         }
         const records = buildCandidatesFromRecords(result.records, "assessor");
         if (records.length > 0) {
+          const filteredByUnit = unitHints.size > 0
+            ? records.filter((candidate) => candidateMatchesUnitHints(candidate, unitHints))
+            : records;
           const perf = datasetPerformance.get(dataset.id);
-          if (perf) perf.textHits += records.length;
-          candidates.push(...records);
-          break;
+          if (filteredByUnit.length > 0) {
+            if (perf) perf.textHits += filteredByUnit.length;
+            candidates.push(...filteredByUnit);
+            datasetMatched = true;
+            break;
+          }
         }
       }
+      if (datasetMatched) continue;
     }
     return candidates;
   };

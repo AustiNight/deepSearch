@@ -18,6 +18,17 @@ const normalizeText = (value?: string) => (value || "").toLowerCase();
 
 const matchesAnyPattern = (value: string, patterns: RegExp[]) => patterns.some((pattern) => pattern.test(value));
 
+const EXPLICIT_PAID_ACCESS_PATTERNS: RegExp[] = [
+  /\bpayment\s+required\b/i,
+  /\bpaid\s+access\s+required\b/i,
+  /\bpaid\s+subscription\s+required\b/i,
+  /\bsubscription\s+required\b/i,
+  /\bpaywall\b/i,
+  /\bpurchase\s+required\b/i,
+  /\bfee(s)?\s+required\b/i,
+  /\bcommercial\s+license\s+required\b/i
+];
+
 const collectComplianceText = (dataset: OpenDatasetMetadata) => {
   const parts: string[] = [];
   if (dataset.license) parts.push(dataset.license);
@@ -69,6 +80,10 @@ export const evaluateDatasetUsage = (dataset: OpenDatasetMetadata) => {
     complianceAction = "block";
     notes.push("access restriction");
   }
+  if (complianceAction === "allow" && complianceText && matchesAnyPattern(complianceText, EXPLICIT_PAID_ACCESS_PATTERNS)) {
+    complianceAction = "block";
+    notes.push("paid access required");
+  }
 
   if (complianceAction === "allow" && config.zeroCostMode) {
     if (COMPLIANCE_POLICY.review.requireLicense && !dataset.license && !dataset.licenseUrl) {
@@ -106,7 +121,6 @@ export const evaluateDatasetUsage = (dataset: OpenDatasetMetadata) => {
 
   const doNotUse = config.featureFlags.gatingEnforcement
     ? complianceAction === "block"
-      || (config.zeroCostMode && complianceAction === "review" && !config.allowPaidAccess)
       || (freshnessStatus === "stale" && !config.allowPaidAccess)
     : false;
 
