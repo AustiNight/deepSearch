@@ -3,7 +3,8 @@ import type {
   Jurisdiction,
   NormalizedSource,
   OpenDataPortalType,
-  PrimaryRecordCoverage
+  PrimaryRecordCoverage,
+  PrimaryRecordCoverageStatus
 } from "../types";
 import { PRIMARY_RECORD_TYPES, type PrimaryRecordType } from "../data/jurisdictionAvailability";
 import { formatAvailabilityDetails, getRecordAvailability } from "./jurisdictionAvailability";
@@ -159,7 +160,7 @@ export const evaluatePrimaryRecordCoverage = (
     .filter((uri): uri is string => typeof uri === "string" && uri.trim().length > 0);
   const datasetMatches = buildDatasetComplianceSummary(sourceUris, getOpenDatasetIndex());
 
-  const entries = PRIMARY_RECORD_TYPES.map((recordType) => {
+  const entries: PrimaryRecordCoverage["entries"] = PRIMARY_RECORD_TYPES.map((recordType) => {
     const availability = getRecordAvailability(recordType, jurisdiction);
     const availabilityStatus = availability?.status ?? "unknown";
     const availabilityDetails = formatAvailabilityDetails(availability);
@@ -194,7 +195,7 @@ export const evaluatePrimaryRecordCoverage = (
       };
     }
 
-    const status = availabilityStatus === "restricted"
+    const status: PrimaryRecordCoverageStatus = availabilityStatus === "restricted"
       ? "restricted"
       : availabilityStatus === "partial"
         ? "partial"

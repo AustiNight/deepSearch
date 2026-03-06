@@ -47,7 +47,9 @@ export const stripSettingsForKv = <T extends Record<string, unknown>>(settings: 
         autoIngestion: openDataConfigRaw.featureFlags?.autoIngestion === true,
         evidenceRecovery: openDataConfigRaw.featureFlags?.evidenceRecovery !== false,
         gatingEnforcement: openDataConfigRaw.featureFlags?.gatingEnforcement !== false,
-        usOnlyAddressPolicy: openDataConfigRaw.featureFlags?.usOnlyAddressPolicy === true
+        usOnlyAddressPolicy: openDataConfigRaw.featureFlags?.usOnlyAddressPolicy === true,
+        datasetTelemetryRanking: openDataConfigRaw.featureFlags?.datasetTelemetryRanking !== false,
+        socrataPreferV3: openDataConfigRaw.featureFlags?.socrataPreferV3 === true
       },
       auth: {
         socrataAppToken: typeof openDataConfigRaw.auth?.socrataAppToken === "string" ? openDataConfigRaw.auth.socrataAppToken : undefined,
@@ -72,7 +74,9 @@ export const stripSettingsForKv = <T extends Record<string, unknown>>(settings: 
         autoIngestion: true,
         evidenceRecovery: true,
         gatingEnforcement: true,
-        usOnlyAddressPolicy: false
+        usOnlyAddressPolicy: false,
+        datasetTelemetryRanking: true,
+        socrataPreferV3: false
       },
       auth: {}
     }

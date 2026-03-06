@@ -8,6 +8,7 @@ import type {
   DataGap,
   Jurisdiction,
   PrimaryRecordCoverage,
+  PrimaryRecordCoverageStatus,
   SourcePointer,
   SourceTaxonomy
 } from "../types";
@@ -278,6 +279,15 @@ const expectedSourcesForRecord = (recordType: string, jurisdiction?: Jurisdictio
   }));
 };
 
+const toDataGapStatus = (status: PrimaryRecordCoverageStatus): DataGap["status"] => {
+  if (status === "unavailable") return "unavailable";
+  if (status === "restricted") return "restricted";
+  if (status === "missing") return "missing";
+  if (status === "partial") return "conflict";
+  if (status === "unknown") return "ambiguous";
+  return "missing";
+};
+
 const buildCoverageDataGaps = (
   coverage?: PrimaryRecordCoverage,
   jurisdiction?: Jurisdiction
@@ -286,18 +296,19 @@ const buildCoverageDataGaps = (
   return coverage.entries
     .filter((entry) => entry.status !== "covered")
     .map((entry) => {
-      const status = entry.status ?? "missing";
-      const severity = status === "missing" || status === "restricted" ? "major" : "minor";
+      const coverageStatus = entry.status ?? "missing";
+      const status = toDataGapStatus(coverageStatus);
+      const severity = coverageStatus === "missing" || coverageStatus === "restricted" ? "major" : "minor";
       return {
         id: `gap-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         recordType: entry.recordType,
         description: `Primary record ${entry.recordType.replace(/_/g, " ")} is ${status}.`,
-        reason: entry.availabilityDetails || entry.availabilityStatus || `Record status is ${status}.`,
+        reason: entry.availabilityDetails || entry.availabilityStatus || `Record status is ${coverageStatus}.`,
         expectedSources: expectedSourcesForRecord(entry.recordType, jurisdiction),
         severity,
         status,
         detectedAt: isoDateToday(),
-        impact: status === "missing"
+        impact: coverageStatus === "missing"
           ? "Missing primary records reduce confidence in this section."
           : "Record coverage is incomplete for this section."
       };

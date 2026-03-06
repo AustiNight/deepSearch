@@ -6,6 +6,7 @@ import { resolveParcelFromOpenDataPortal } from "../services/openDataParcelResol
 import { buildDallasAddressVariants } from "../services/dallasEvidencePack.ts";
 import { resolveParcelWorkflow } from "../services/parcelResolution.ts";
 import { runOpenDataParcelResolutionPhase } from "../services/openDataPhase3C.ts";
+import { recordOpenDataDatasetTelemetry, resetOpenDataDatasetTelemetry } from "../services/openDataDatasetTelemetry.ts";
 
 const buildResponse = (body, { status = 200, headers = {} } = {}) => {
   const ok = status >= 200 && status < 300;
@@ -89,6 +90,138 @@ const runSocrataTests = async () => {
   assert.ok(searchCall.target.includes("domains=data.example.gov"), "Expected Socrata discovery domain filter.");
   assert.ok(searchCall.target.includes("only=datasets"), "Expected Socrata discovery dataset-only filter.");
   assert.ok(searchCall.target.includes("order=updated_at+desc"), "Expected Socrata discovery recency ordering.");
+};
+
+const runSocrataPaginationAndCachingTest = async () => {
+  const calls = [];
+  global.fetch = buildProxyFetch((target) => {
+    calls.push(String(target));
+    if (String(target).includes("/api/views/pg-1.json")) {
+      return buildResponse({
+        name: "Paged Parcel Dataset",
+        columns: [
+          { fieldName: "parcel_id", dataTypeName: "text" },
+          { fieldName: "site_address", dataTypeName: "text" },
+          { fieldName: "latitude", dataTypeName: "number" },
+          { fieldName: "longitude", dataTypeName: "number" }
+        ]
+      });
+    }
+    if (String(target).includes("/resource/pg-1.json")) {
+      const parsed = new URL(String(target));
+      const offset = Number(parsed.searchParams.get("$offset") || "0");
+      const limit = Number(parsed.searchParams.get("$limit") || "0");
+      const count = offset === 0 ? 200 : (offset === 200 ? 150 : 0);
+      const rows = [];
+      for (let i = 0; i < Math.max(0, Math.min(limit || count, count)); i += 1) {
+        const id = offset + i + 1;
+        rows.push({
+          parcel_id: `PG-${id}`,
+          site_address: `${id} MAIN ST`,
+          latitude: 32.9,
+          longitude: -97.1
+        });
+      }
+      return buildResponse(rows);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const provider = createOpenDataProvider({ portalUrl: "https://data.example.gov", portalType: "socrata" });
+  const paged = await provider.queryByText({ datasetId: "pg-1", limit: 350 });
+  assert.equal(paged.records.length, 350, "Expected paged Socrata retrieval to aggregate records across pages.");
+  const firstPage = calls.find((entry) => entry.includes("/resource/pg-1.json") && entry.includes("%24offset=0"));
+  const secondPage = calls.find((entry) => entry.includes("/resource/pg-1.json") && entry.includes("%24offset=200"));
+  assert.ok(firstPage, "Expected first Socrata page query.");
+  assert.ok(secondPage, "Expected second Socrata page query.");
+  assert.ok(firstPage.includes("%24order="), "Expected stable Socrata ordering parameter.");
+  assert.ok(firstPage.includes("%24select="), "Expected Socrata field projection parameter.");
+
+  await provider.queryByText({ datasetId: "pg-1", limit: 10 });
+  const metadataCalls = calls.filter((entry) => entry.includes("/api/views/pg-1.json"));
+  assert.equal(metadataCalls.length, 1, "Expected Socrata metadata fetch to be cached per dataset.");
+};
+
+const runSocrataCoordinateFallbackGeometryTest = async () => {
+  const calls = [];
+  global.fetch = buildProxyFetch((target) => {
+    calls.push(String(target));
+    if (String(target).includes("/api/views/coord-1.json")) {
+      return buildResponse({
+        name: "Coordinate Dataset",
+        columns: [
+          { fieldName: "parcel_id", dataTypeName: "text" },
+          { fieldName: "latitude", dataTypeName: "number" },
+          { fieldName: "longitude", dataTypeName: "number" }
+        ]
+      });
+    }
+    if (String(target).includes("/resource/coord-1.json")) {
+      return buildResponse([
+        { parcel_id: "C-1", latitude: 32.9, longitude: -97.1 }
+      ]);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const provider = createOpenDataProvider({ portalUrl: "https://data.example.gov", portalType: "socrata" });
+  const result = await provider.queryByGeometry({
+    datasetId: "coord-1",
+    point: { lat: 32.9, lon: -97.1 },
+    limit: 25
+  });
+  assert.equal(result.records.length, 1, "Expected geometry fallback via latitude/longitude fields.");
+  assert.ok(result.records[0].geometry, "Expected inferred geometry from coordinate columns.");
+  const whereCall = calls.find((entry) => entry.includes("/resource/coord-1.json"));
+  assert.ok(whereCall && whereCall.includes("%24where="), "Expected coordinate fallback to emit a Socrata $where filter.");
+};
+
+const runSocrataV3RuntimeFallbackTest = async () => {
+  const calls = [];
+  updateOpenDataConfig({
+    auth: { socrataAppToken: "token-123" },
+    featureFlags: {
+      autoIngestion: true,
+      evidenceRecovery: true,
+      gatingEnforcement: true,
+      usOnlyAddressPolicy: false,
+      datasetTelemetryRanking: true,
+      socrataPreferV3: true
+    }
+  });
+  global.fetch = buildProxyFetch((target) => {
+    calls.push(String(target));
+    if (String(target).includes("/api/views/v3-1.json")) {
+      return buildResponse({
+        name: "V3 Runtime Dataset",
+        columns: [
+          { fieldName: "parcel_id", dataTypeName: "text" },
+          { fieldName: "site_address", dataTypeName: "text" }
+        ]
+      });
+    }
+    if (String(target).includes("/api/v3/views/v3-1/query.json")) {
+      return buildResponse({ error: true, message: "Method not allowed" }, { status: 405 });
+    }
+    if (String(target).includes("/resource/v3-1.json")) {
+      return buildResponse([
+        { parcel_id: "V3-1", site_address: "123 MAIN ST" }
+      ]);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const provider = createOpenDataProvider({ portalUrl: "https://runtime-v3.example.gov", portalType: "socrata" });
+  const result = await provider.queryByText({ datasetId: "v3-1", searchText: "123 MAIN ST" });
+  assert.equal(result.records.length, 1, "Expected v3-enabled query to fall back to v2 when v3 fails.");
+  assert.ok(
+    calls.some((target) => target.includes("/api/v3/views/v3-1/query.json")),
+    "Expected v3 endpoint attempt when runtime flag is enabled."
+  );
+  assert.ok(
+    calls.some((target) => target.includes("/resource/v3-1.json")),
+    "Expected v2 fallback after v3 endpoint failure."
+  );
 };
 
 const runSocrataValidationTests = async () => {
@@ -804,6 +937,104 @@ const runAssessorUnitRecallFanOutTest = async () => {
   assert.equal(result.resolutionMethod, "assessor");
 };
 
+const runTelemetryWeightedDatasetRankingTest = async () => {
+  resetOpenDataDatasetTelemetry();
+  updateOpenDataConfig({
+    zeroCostMode: true,
+    allowPaidAccess: false,
+    auth: {},
+    featureFlags: {
+      autoIngestion: true,
+      evidenceRecovery: true,
+      gatingEnforcement: true,
+      usOnlyAddressPolicy: false,
+      datasetTelemetryRanking: true,
+      socrataPreferV3: false
+    }
+  });
+  const calls = [];
+  const portalUrl = "https://telemetry-rank.example.gov";
+
+  recordOpenDataDatasetTelemetry({
+    dataset: {
+      id: "dataset-beta",
+      portalType: "socrata",
+      portalUrl,
+      datasetId: "beta-2",
+      title: "Parcel Registry Beta",
+      retrievedAt: new Date().toISOString()
+    },
+    mode: "text",
+    hits: 40
+  });
+  recordOpenDataDatasetTelemetry({
+    dataset: {
+      id: "dataset-beta",
+      portalType: "socrata",
+      portalUrl,
+      datasetId: "beta-2",
+      title: "Parcel Registry Beta",
+      retrievedAt: new Date().toISOString()
+    },
+    mode: "text",
+    hits: 35
+  });
+
+  global.fetch = buildProxyFetch((target) => {
+    const normalized = String(target);
+    calls.push(normalized);
+    if (normalized.includes("nominatim.openstreetmap.org/search")) {
+      return buildResponse([]);
+    }
+    if (normalized.includes("/api/catalog/v1")) {
+      return buildResponse({
+        results: [
+          {
+            resource: {
+              id: "alpha-1",
+              name: "Parcel Registry Alpha",
+              description: "Official parcel records",
+              updatedAt: "2025-01-01"
+            }
+          },
+          {
+            resource: {
+              id: "beta-2",
+              name: "Parcel Registry Beta",
+              description: "Official parcel records",
+              updatedAt: "2025-01-01"
+            }
+          }
+        ]
+      });
+    }
+    if (normalized.includes("/api/views/alpha-1.json") || normalized.includes("/api/views/beta-2.json")) {
+      return buildResponse({
+        columns: [
+          { fieldName: "parcel_id", dataTypeName: "text" },
+          { fieldName: "site_address", dataTypeName: "text" }
+        ]
+      });
+    }
+    if (normalized.includes("/resource/alpha-1.json") || normalized.includes("/resource/beta-2.json")) {
+      return buildResponse([]);
+    }
+    throw new Error(`Unexpected URL ${normalized}`);
+  });
+
+  await resolveParcelFromOpenDataPortal({
+    address: "123 MAIN ST, AUSTIN, TX 78701",
+    portalUrl,
+    portalType: "socrata"
+  });
+  const firstSocrataQuery = calls.find((target) => target.includes("/resource/"));
+  assert.ok(firstSocrataQuery, "Expected at least one Socrata resource query call.");
+  assert.ok(
+    firstSocrataQuery.includes("/resource/beta-2.json"),
+    `Expected telemetry-weighted dataset to be queried first. First call: ${firstSocrataQuery}`
+  );
+};
+
 const runZeroCostGuardTests = () => {
   updateOpenDataConfig({
     zeroCostMode: true,
@@ -823,6 +1054,9 @@ const runDallasVariantTest = () => {
 };
 
 await runSocrataTests();
+await runSocrataPaginationAndCachingTest();
+await runSocrataCoordinateFallbackGeometryTest();
+await runSocrataV3RuntimeFallbackTest();
 await runSocrataValidationTests();
 await runSocrataNonTextFieldFallbackTest();
 await runNodeProxyFallbackTest();
@@ -839,6 +1073,8 @@ await runPhase3COrchestrationTest();
 await runCalibrationModePublicAssessorOverrideTest();
 await runAssessorQueryFanOutTest();
 await runAssessorUnitRecallFanOutTest();
+await runTelemetryWeightedDatasetRankingTest();
 await runZeroCostGuardTests();
 runDallasVariantTest();
+resetOpenDataDatasetTelemetry();
 resetOpenDataConfig();

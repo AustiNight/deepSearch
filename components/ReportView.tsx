@@ -3,6 +3,7 @@ import { FinalReport } from '../types';
 import ReactMarkdown from 'react-markdown';
 import { Download, FileText, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react';
 import { ReportVisualizations } from './ReportVisualizations';
+import { ColumnAlignment, ReportDataTable } from './ReportDataTable';
 
 interface Props {
   report: FinalReport;
@@ -10,7 +11,7 @@ interface Props {
 
 type MarkdownBlock =
   | { type: 'markdown'; content: string }
-  | { type: 'table'; headers: string[]; rows: string[][] };
+  | { type: 'table'; headers: string[]; rows: string[][]; alignments: ColumnAlignment[] };
 
 const PRIMARY_RECORD_LABELS: Record<string, string> = {
   assessor_parcel: 'Assessor / Parcel',
@@ -169,19 +170,22 @@ const extractDataGapMessage = (content: string) => {
 };
 
 const isTableDivider = (line: string) => {
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  return /^\|?(\s*:?-{3,}:?\s*\|)+\s*$/.test(trimmed);
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  if (!trimmed || !trimmed.includes('|')) return false;
+  const segments = trimmed.split('|').map((segment) => segment.trim());
+  if (segments.length < 2) return false;
+  return segments.every((segment) => /^:?-{3,}:?$/.test(segment));
 };
 
 const isTableRow = (line: string) => {
   const trimmed = line.trim();
-  return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 1;
+  if (!trimmed || !trimmed.includes('|')) return false;
+  if (trimmed.startsWith('```')) return false;
+  return true;
 };
 
 const splitTableRow = (line: string) => {
-  const trimmed = line.trim();
-  const raw = trimmed.replace(/^\|/, '').replace(/\|$/, '');
+  const raw = line.trim().replace(/^\|/, '').replace(/\|$/, '');
   const cells: string[] = [];
   let current = '';
   let escaping = false;
@@ -209,6 +213,18 @@ const splitTableRow = (line: string) => {
   return cells.map((cell) => cell.replace(/\\\|/g, '|').replace(/\\\\/g, '\\'));
 };
 
+const parseTableAlignments = (dividerLine: string): ColumnAlignment[] => {
+  const segments = dividerLine.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+  return segments.map((segment) => {
+    const value = segment.trim();
+    const left = value.startsWith(':');
+    const right = value.endsWith(':');
+    if (left && right) return 'center';
+    if (right) return 'right';
+    return 'left';
+  });
+};
+
 const parseMarkdownBlocks = (content: string): MarkdownBlock[] => {
   const lines = content.split('\n');
   const blocks: MarkdownBlock[] = [];
@@ -226,16 +242,29 @@ const parseMarkdownBlocks = (content: string): MarkdownBlock[] => {
   while (i < lines.length) {
     const line = lines[i];
     const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
+    const trimmedLine = line.trim();
+    if (trimmedLine.startsWith('```')) {
+      buffer.push(line);
+      i += 1;
+      while (i < lines.length) {
+        const fenceLine = lines[i];
+        buffer.push(fenceLine);
+        i += 1;
+        if (fenceLine.trim().startsWith('```')) break;
+      }
+      continue;
+    }
     if (isTableRow(line) && isTableDivider(nextLine)) {
       flushBuffer();
       const headers = splitTableRow(line);
+      const alignments = parseTableAlignments(nextLine);
       i += 2;
       const rows: string[][] = [];
       while (i < lines.length && isTableRow(lines[i])) {
         rows.push(splitTableRow(lines[i]));
         i += 1;
       }
-      blocks.push({ type: 'table', headers, rows });
+      blocks.push({ type: 'table', headers, rows, alignments });
       continue;
     }
     buffer.push(line);
@@ -246,65 +275,25 @@ const parseMarkdownBlocks = (content: string): MarkdownBlock[] => {
   return blocks;
 };
 
-const MarkdownDataTable: React.FC<{ headers: string[]; rows: string[][] }> = ({
-  headers,
-  rows
-}) => (
-  <div className="not-prose my-6 overflow-x-auto rounded-lg border border-gray-700 bg-black/30 print:bg-white print:border-gray-300 print-avoid-break print:overflow-visible">
-    <table className="min-w-full border-collapse text-left text-sm text-gray-200 print:text-black">
-      <thead className="bg-gray-900/60 text-cyber-blue print:bg-gray-100 print:text-black">
-        <tr>
-          {headers.map((header, index) => (
-            <th
-              key={`${header}-${index}`}
-              scope="col"
-              className="px-3 py-2 font-semibold border-b border-gray-700 print:border-gray-300"
-            >
-              {header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-gray-800 print:divide-gray-300">
-        {rows.map((row, rowIndex) => {
-          const normalizedRow = headers.map((_, index) => row[index] ?? '');
-          return (
-            <tr key={`row-${rowIndex}`} className="hover:bg-gray-800/40 print:hover:bg-white">
-              {normalizedRow.map((cell, cellIndex) => (
-                <td
-                  key={`cell-${rowIndex}-${cellIndex}`}
-                  className="px-3 py-2 align-top border-b border-gray-800 print:border-gray-300"
-                >
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  </div>
-);
-
 const renderMarkdownBlocks = (content: string) => {
   const blocks = parseMarkdownBlocks(content);
   return blocks.map((block, index) => {
     if (block.type === 'table') {
       return (
-        <MarkdownDataTable
+        <ReportDataTable
           key={`table-${index}`}
           headers={block.headers}
           rows={block.rows}
+          alignments={block.alignments}
         />
       );
     }
     return (
-      <ReactMarkdown
-        key={`markdown-${index}`}
-        className="text-gray-300 leading-relaxed print:text-black"
-      >
-        {block.content}
-      </ReactMarkdown>
+      <div key={`markdown-${index}`} className="text-gray-300 leading-relaxed print:text-black">
+        <ReactMarkdown>
+          {block.content}
+        </ReactMarkdown>
+      </div>
     );
   });
 };
@@ -767,7 +756,7 @@ export const ReportView: React.FC<Props> = ({ report }) => {
 
         {compliance && (
           <div className="mt-8 rounded-lg border border-gray-800 bg-black/30 p-4 text-xs text-gray-300 print:bg-white print:border-gray-300 print:text-black print-avoid-break">
-            <p className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">Compliance Gate</p>
+            <p className="text-[11px] uppercase tracking-wide text-gray-500 print:text-gray-700">Source Access Policy</p>
             <div className="mt-2 space-y-2 text-gray-400 print:text-gray-700">
               <div>
                 Mode: <span className="text-gray-200 print:text-gray-800">{compliance.mode}</span>
@@ -778,19 +767,9 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                   <span className="text-gray-200 print:text-gray-800">{compliance.zeroCostMode ? "enabled" : "disabled"}</span>
                 </div>
               )}
-              {compliance.gateStatus === "signoff_required" && (
-                <div className="text-amber-300 print:text-gray-700">
-                  Sign-off required before rollout. Set approver + date in compliance policy.
-                </div>
-              )}
-              {compliance.reviewRequired && (
-                <div className="text-amber-300 print:text-gray-700">
-                  Compliance review required{compliance.reviewItems?.length ? ` (${compliance.reviewItems.length})` : ""}.
-                </div>
-              )}
               {compliance.blockedSources.length > 0 && (
                 <div className="text-amber-300 print:text-gray-700">
-                  Blocked sources: {compliance.blockedSources.length}
+                  Restricted/non-public sources blocked: {compliance.blockedSources.length}
                 </div>
               )}
             </div>
@@ -799,15 +778,6 @@ export const ReportView: React.FC<Props> = ({ report }) => {
                 {compliance.blockedSources.slice(0, 6).map((entry, idx) => (
                   <div key={`${entry.uri}-${idx}`} className="text-[11px] text-gray-400 print:text-gray-600">
                     {entry.domain} — {entry.reason}
-                  </div>
-                ))}
-              </div>
-            )}
-            {compliance.reviewItems && compliance.reviewItems.length > 0 && (
-              <div className="mt-3 space-y-1 text-[11px] text-gray-400 print:text-gray-700">
-                {compliance.reviewItems.slice(0, 6).map((entry, idx) => (
-                  <div key={`${entry.datasetTitle || "review"}-${idx}`}>
-                    {(entry.datasetTitle || entry.datasetId || "Dataset")} — {entry.reason}
                   </div>
                 ))}
               </div>

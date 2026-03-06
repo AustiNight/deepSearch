@@ -36,6 +36,17 @@ const NON_PUBLIC_ACCESS_PATTERNS: RegExp[] = [
   /\bcommercial\s+license\s+required\b/i
 ];
 
+const EXPLICIT_PAID_ACCESS_PATTERNS: RegExp[] = [
+  /\bpayment\s+required\b/i,
+  /\bpaid\s+access\s+required\b/i,
+  /\bpaid\s+subscription\s+required\b/i,
+  /\bsubscription\s+required\b/i,
+  /\bpaywall\b/i,
+  /\bpurchase\s+required\b/i,
+  /\bfee(s)?\s+required\b/i,
+  /\bcommercial\s+license\s+required\b/i
+];
+
 const collectComplianceText = (dataset: OpenDatasetMetadata) => {
   const parts: string[] = [];
   if (dataset.license) parts.push(dataset.license);

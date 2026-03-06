@@ -31,7 +31,9 @@ const settingsInput = {
       autoIngestion: true,
       evidenceRecovery: true,
       gatingEnforcement: true,
-      usOnlyAddressPolicy: false
+      usOnlyAddressPolicy: false,
+      datasetTelemetryRanking: true,
+      socrataPreferV3: true
     },
     auth: {
       socrataAppToken: "token-123"
@@ -47,6 +49,8 @@ assert.equal(stripped.keyOverrides?.openai, "sk-test-should-not-leak");
 assert.equal(stripped.keyOverrides?.google, "AIza-test-should-not-leak");
 assert.equal(stripped.openDataConfig?.auth?.socrataAppToken, "token-123");
 assert.equal(stripped.openDataConfig?.allowPaidAccess, false);
+assert.equal(stripped.openDataConfig?.featureFlags?.datasetTelemetryRanking, true);
+assert.equal(stripped.openDataConfig?.featureFlags?.socrataPreferV3, true);
 
 const metadata = await buildAllowlistMetadata({
   entries: ["user@example.com", "other@example.com"],

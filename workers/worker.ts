@@ -3,6 +3,12 @@ import { buildAllowlistMetadata, hashEntries, hashValue, stripSettingsForKv } fr
 import { installLogRedactionGuard, redactSensitiveValue } from "../services/redaction";
 import { getSocrataRagChunksById, querySocrataRag } from "./socrataRagIndex";
 
+type KVNamespace = {
+  get<T = string>(key: string, type?: "text" | "json" | "arrayBuffer" | "stream"): Promise<T | null>;
+  put(key: string, value: string, options?: { expiration?: number; expirationTtl?: number; metadata?: unknown }): Promise<void>;
+  delete(key: string): Promise<void>;
+};
+
 export interface Env {
   OPENAI_API_KEY: string;
   GEMINI_API_KEY: string;
@@ -128,6 +134,8 @@ type SettingsOpenDataConfig = {
     evidenceRecovery: boolean;
     gatingEnforcement: boolean;
     usOnlyAddressPolicy: boolean;
+    datasetTelemetryRanking: boolean;
+    socrataPreferV3: boolean;
   };
   auth: {
     socrataAppToken?: string;
@@ -152,6 +160,10 @@ type SettingsRecord = {
   updatedBy: string | null;
   version: number;
 };
+
+type NormalizedSettingsPayloadResult =
+  | { settings: SettingsPayload; error?: undefined }
+  | { settings?: undefined; error: string };
 
 const MODEL_ROLES = [
   "overseer_planning",
@@ -436,7 +448,9 @@ const normalizeSettingsOpenDataConfig = (raw: unknown): SettingsOpenDataConfig =
       autoIngestion: typeof rawFlags.autoIngestion === "boolean" ? rawFlags.autoIngestion : true,
       evidenceRecovery: typeof rawFlags.evidenceRecovery === "boolean" ? rawFlags.evidenceRecovery : true,
       gatingEnforcement: typeof rawFlags.gatingEnforcement === "boolean" ? rawFlags.gatingEnforcement : true,
-      usOnlyAddressPolicy: typeof rawFlags.usOnlyAddressPolicy === "boolean" ? rawFlags.usOnlyAddressPolicy : false
+      usOnlyAddressPolicy: typeof rawFlags.usOnlyAddressPolicy === "boolean" ? rawFlags.usOnlyAddressPolicy : false,
+      datasetTelemetryRanking: typeof rawFlags.datasetTelemetryRanking === "boolean" ? rawFlags.datasetTelemetryRanking : true,
+      socrataPreferV3: typeof rawFlags.socrataPreferV3 === "boolean" ? rawFlags.socrataPreferV3 : false
     },
     auth: {
       socrataAppToken: trimMaybe(rawAuth.socrataAppToken) || undefined,
@@ -447,7 +461,7 @@ const normalizeSettingsOpenDataConfig = (raw: unknown): SettingsOpenDataConfig =
   };
 };
 
-const normalizeSettingsPayload = (rawPayload: unknown) => {
+const normalizeSettingsPayload = (rawPayload: unknown): NormalizedSettingsPayloadResult => {
   if (!rawPayload || typeof rawPayload !== "object") {
     return { error: "settings payload required." };
   }
@@ -1040,7 +1054,7 @@ export default {
 
       const updatedAt = new Date().toISOString();
       const record: SettingsRecord = {
-        settings: stripSettingsForKv(settings as SettingsPayload),
+        settings: stripSettingsForKv(settings as Record<string, unknown>) as SettingsPayload,
         updatedAt,
         updatedBy: null,
         version: (stored?.version || 0) + 1,
@@ -1097,7 +1111,7 @@ export default {
         return json({ error: "GEMINI_API_KEY not configured" }, 500, corsHeaders);
       }
       const payload = await request.json();
-      const genAI = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, fetch: createScopedFetch("gemini") });
+      const genAI = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, fetch: createScopedFetch("gemini") } as any);
       const response = await genAI.models.generateContent(payload);
       const out = {
         text: response.text,

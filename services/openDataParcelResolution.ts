@@ -6,7 +6,13 @@ import { getOpenDataProviderForPortalAsync } from "./openDataPortalService";
 import { getOpenDatasetIndex, persistOpenDatasetMetadata } from "./openDataDiscovery";
 import { evaluateDatasetUsage } from "./openDataUsage";
 import { normalizeAddressVariants } from "./addressNormalization";
+import { getOpenDataConfig } from "./openDataConfig";
+import { recordOpenDataDatasetTelemetry, scoreOpenDataDatasetTelemetry } from "./openDataDatasetTelemetry";
 import { validateDataSourceContracts } from "../data/dataSourceContracts";
+import {
+  OPEN_DATA_PORTAL_MAX_GEOMETRY_DATASET_QUERIES,
+  OPEN_DATA_PORTAL_MAX_TEXT_DATASET_QUERIES
+} from "../constants";
 
 const isoDateToday = () => new Date().toISOString().slice(0, 10);
 
@@ -196,7 +202,15 @@ const computeRecencyScore = (value?: string) => {
   return 0;
 };
 
-const scoreDatasetForParcelResolution = (dataset: OpenDatasetMetadata, normalizedAddress: string) => {
+type DatasetRankingOptions = {
+  useTelemetry?: boolean;
+};
+
+const scoreDatasetForParcelResolution = (
+  dataset: OpenDatasetMetadata,
+  normalizedAddress: string,
+  options: DatasetRankingOptions = {}
+) => {
   const textCorpus = `${dataset.title || ""} ${dataset.description || ""} ${(dataset.tags || []).join(" ")} ${(dataset.fields || []).join(" ")}`.toLowerCase();
   const addressToken = normalizedAddress.toLowerCase().split(/[^a-z0-9]+/).find((token) => token.length >= 4);
   let score = 0;
@@ -209,15 +223,22 @@ const scoreDatasetForParcelResolution = (dataset: OpenDatasetMetadata, normalize
   if (dataset.datasetId) score += 3;
   if (addressToken && textCorpus.includes(addressToken)) score += 2;
   score += computeRecencyScore(dataset.lastUpdated || dataset.retrievedAt);
+  if (options.useTelemetry !== false) {
+    score += scoreOpenDataDatasetTelemetry(dataset);
+  }
   return score;
 };
 
-const rankDatasetsForParcelResolution = (datasets: OpenDatasetMetadata[], normalizedAddress: string) => {
+const rankDatasetsForParcelResolution = (
+  datasets: OpenDatasetMetadata[],
+  normalizedAddress: string,
+  options: DatasetRankingOptions = {}
+) => {
   return datasets
     .map((dataset, index) => ({
       dataset,
       index,
-      score: scoreDatasetForParcelResolution(dataset, normalizedAddress)
+      score: scoreDatasetForParcelResolution(dataset, normalizedAddress, options)
     }))
     .sort((a, b) => (b.score - a.score) || (a.index - b.index))
     .map((entry) => entry.dataset);
@@ -352,10 +373,11 @@ const buildCandidatesFromRecords = (
 ): ParcelCandidate[] => {
   return records.map((record) => {
     const fields = extractParcelFields(record.attributes);
+    const matchType: ParcelCandidate["matchType"] = source === "gis" ? "spatial" : "unknown";
     return {
       ...fields,
       source,
-      matchType: source === "gis" ? "spatial" : "unknown",
+      matchType,
       geometry: record.geometry,
       attributes: record.attributes
     };
@@ -465,6 +487,7 @@ const resolveSecondaryRecordEvidence = async (input: {
   geocodePoint?: GeoPoint;
   lookupTokens: string[];
   dataGaps: DataGap[];
+  collectTelemetry?: boolean;
 }) => {
   const sources: CitationSource[] = [];
   const claims: ClaimCitation[] = [];
@@ -479,14 +502,22 @@ const resolveSecondaryRecordEvidence = async (input: {
     for (const dataset of candidateDatasets) {
       if (!dataset.datasetId) continue;
       let datasetMatched = false;
+      let textAttempted = false;
+      let textHits = 0;
+      let textErrored = false;
+      let geometryAttempted = false;
+      let geometryHits = 0;
+      let geometryErrored = false;
 
       for (const token of input.lookupTokens) {
+        textAttempted = true;
         const textResult = await input.provider.queryByText({
           datasetId: dataset.datasetId,
           searchText: token,
           limit: SECONDARY_RECORD_TEXT_MATCH_LIMIT
         });
         if (Array.isArray(textResult?.errors) && textResult.errors.length > 0) {
+          textErrored = true;
           const error = textResult.errors[0];
           input.dataGaps.push(buildDataGap(
             `${definition.label} dataset query failed.`,
@@ -498,17 +529,20 @@ const resolveSecondaryRecordEvidence = async (input: {
         }
         if (Array.isArray(textResult?.records) && textResult.records.length > 0) {
           datasetMatched = true;
+          textHits = textResult.records.length;
           break;
         }
       }
 
       if (!datasetMatched && definition.supportsGeometry && input.geocodePoint) {
+        geometryAttempted = true;
         const geometryResult = await input.provider.queryByGeometry({
           datasetId: dataset.datasetId,
           point: input.geocodePoint,
           limit: SECONDARY_RECORD_TEXT_MATCH_LIMIT
         });
         if (Array.isArray(geometryResult?.errors) && geometryResult.errors.length > 0) {
+          geometryErrored = true;
           const error = geometryResult.errors[0];
           input.dataGaps.push(buildDataGap(
             `${definition.label} geometry query failed.`,
@@ -518,6 +552,26 @@ const resolveSecondaryRecordEvidence = async (input: {
           ));
         } else if (Array.isArray(geometryResult?.records) && geometryResult.records.length > 0) {
           datasetMatched = true;
+          geometryHits = geometryResult.records.length;
+        }
+      }
+
+      if (input.collectTelemetry !== false) {
+        if (textAttempted) {
+          recordOpenDataDatasetTelemetry({
+            dataset,
+            mode: "text",
+            hits: textHits,
+            errored: textErrored
+          });
+        }
+        if (geometryAttempted) {
+          recordOpenDataDatasetTelemetry({
+            dataset,
+            mode: "geometry",
+            hits: geometryHits,
+            errored: geometryErrored
+          });
         }
       }
 
@@ -627,6 +681,9 @@ export const resolveParcelFromOpenDataPortal = async (input: {
   const calibration = input.calibration || {};
   const calibrationMode = Boolean(calibration.enabled || calibration.includeDiagnostics);
   const dataGaps: DataGap[] = [];
+  const runtimeConfig = getOpenDataConfig();
+  const useDatasetTelemetryRanking = runtimeConfig.featureFlags.datasetTelemetryRanking !== false;
+  const rankingOptions: DatasetRankingOptions = { useTelemetry: useDatasetTelemetryRanking };
 
   const provider = await getOpenDataProviderForPortalAsync(input.portalUrl, input.portalType);
   const normalizedAddress = normalizeAddressVariants(input.address)[0] || input.address;
@@ -715,9 +772,9 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     ));
   }
 
-  const rankedQueryableDatasets = rankDatasetsForParcelResolution(queryableDatasets, normalizedAddress);
-  const textQueryDatasets = rankedQueryableDatasets;
-  const geometryQueryDatasets = rankedQueryableDatasets;
+  const rankedQueryableDatasets = rankDatasetsForParcelResolution(queryableDatasets, normalizedAddress, rankingOptions);
+  const textQueryDatasets = rankedQueryableDatasets.slice(0, Math.max(1, OPEN_DATA_PORTAL_MAX_TEXT_DATASET_QUERIES));
+  const geometryQueryDatasets = rankedQueryableDatasets.slice(0, Math.max(1, OPEN_DATA_PORTAL_MAX_GEOMETRY_DATASET_QUERIES));
 
   const datasetPerformance = new Map<string, {
     dataset: OpenDatasetMetadata;
@@ -729,7 +786,7 @@ export const resolveParcelFromOpenDataPortal = async (input: {
   rankedQueryableDatasets.forEach((dataset) => {
     datasetPerformance.set(dataset.id, {
       dataset,
-      score: scoreDatasetForParcelResolution(dataset, normalizedAddress),
+      score: scoreDatasetForParcelResolution(dataset, normalizedAddress, rankingOptions),
       textHits: 0,
       geometryHits: 0,
       queryErrors: 0
@@ -752,13 +809,18 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     for (const dataset of textQueryDatasets) {
       if (!dataset.datasetId) continue;
       let datasetMatched = false;
+      let datasetAttempted = false;
+      let datasetErrored = false;
+      let datasetTextHits = 0;
       for (const searchText of searchTexts) {
+        datasetAttempted = true;
         const result = await provider.queryByText({
           datasetId: dataset.datasetId,
           searchText,
           limit: queryLimit
         });
         if (result.errors && result.errors.length > 0) {
+          datasetErrored = true;
           const perf = datasetPerformance.get(dataset.id);
           if (perf) perf.queryErrors += 1;
           const error = result.errors[0];
@@ -782,12 +844,21 @@ export const resolveParcelFromOpenDataPortal = async (input: {
             : records;
           const perf = datasetPerformance.get(dataset.id);
           if (filteredByUnit.length > 0) {
+            datasetTextHits += filteredByUnit.length;
             if (perf) perf.textHits += filteredByUnit.length;
             candidates.push(...filteredByUnit);
             datasetMatched = true;
             break;
           }
         }
+      }
+      if (useDatasetTelemetryRanking && datasetAttempted) {
+        recordOpenDataDatasetTelemetry({
+          dataset,
+          mode: "text",
+          hits: datasetTextHits,
+          errored: datasetErrored
+        });
       }
       if (datasetMatched) continue;
     }
@@ -798,12 +869,17 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     const features: ParcelGeometryFeature[] = [];
     for (const dataset of geometryQueryDatasets) {
       if (!dataset.datasetId) continue;
+      let geometryAttempted = false;
+      let geometryHits = 0;
+      let geometryErrored = false;
+      geometryAttempted = true;
       const result = await provider.queryByGeometry({
         datasetId: dataset.datasetId,
         point: params.point,
         limit: 25
       });
       if (result.errors && result.errors.length > 0) {
+        geometryErrored = true;
         const perf = datasetPerformance.get(dataset.id);
         if (perf) perf.queryErrors += 1;
         const error = result.errors[0];
@@ -818,6 +894,14 @@ export const resolveParcelFromOpenDataPortal = async (input: {
           "missing",
           buildExpectedSources(input.portalUrl, dataset.datasetId)
         ));
+        if (useDatasetTelemetryRanking && geometryAttempted) {
+          recordOpenDataDatasetTelemetry({
+            dataset,
+            mode: "geometry",
+            hits: 0,
+            errored: geometryErrored
+          });
+        }
         continue;
       }
       let geometryMatchCount = 0;
@@ -836,6 +920,15 @@ export const resolveParcelFromOpenDataPortal = async (input: {
       if (geometryMatchCount > 0) {
         const perf = datasetPerformance.get(dataset.id);
         if (perf) perf.geometryHits += geometryMatchCount;
+        geometryHits = geometryMatchCount;
+      }
+      if (useDatasetTelemetryRanking && geometryAttempted) {
+        recordOpenDataDatasetTelemetry({
+          dataset,
+          mode: "geometry",
+          hits: geometryHits,
+          errored: geometryErrored
+        });
       }
     }
     return features;
@@ -871,13 +964,14 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     situsAddress: result.parcel?.situsAddress
   });
   const secondaryEvidence = lookupTokens.length > 0
-    ? await resolveSecondaryRecordEvidence({
+      ? await resolveSecondaryRecordEvidence({
         provider,
         portalUrl: input.portalUrl,
         datasets: rankedQueryableDatasets,
         geocodePoint: geocode?.point,
         lookupTokens,
-        dataGaps
+        dataGaps,
+        collectTelemetry: useDatasetTelemetryRanking
       })
     : {
         sources: [] as CitationSource[],
@@ -889,7 +983,7 @@ export const resolveParcelFromOpenDataPortal = async (input: {
     ...secondaryEvidence.contributingDatasets
   ];
   const selectedCitationDatasets = citationDatasets.length > 0
-    ? rankDatasetsForParcelResolution(citationDatasets, normalizedAddress)
+    ? rankDatasetsForParcelResolution(citationDatasets, normalizedAddress, rankingOptions)
     : rankedQueryableDatasets.slice(0, 1);
   const parcelSources = buildCitationSourcesFromDatasets(input.portalUrl, selectedCitationDatasets);
   const mergedSources = mergeCitationSources([...parcelSources, ...secondaryEvidence.sources]);

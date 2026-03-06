@@ -508,7 +508,7 @@ const logSourceDiagnostics = (
   input: { model: string; query: string; diagnostics: SourceNormalizationDiagnostics }
 ) => {
   if (!logCallback) return;
-  logCallback(formatSourceDiagnosticsMessage(input));
+  logCallback(formatSourceDiagnosticsMessage({ ...input, provider: "google" }));
 };
 
 const singleSearch = async (

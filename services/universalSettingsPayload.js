@@ -18,7 +18,9 @@ const BOOLEAN_DEFAULTS = {
   autoIngestion: true,
   evidenceRecovery: true,
   gatingEnforcement: true,
-  usOnlyAddressPolicy: false
+  usOnlyAddressPolicy: false,
+  datasetTelemetryRanking: true,
+  socrataPreferV3: false
 };
 
 export const SETTINGS_SCHEMA_VERSION = 1;
@@ -174,7 +176,13 @@ export const sanitizeOpenDataConfig = (config) => {
         : BOOLEAN_DEFAULTS.gatingEnforcement,
       usOnlyAddressPolicy: typeof featureFlags.usOnlyAddressPolicy === 'boolean'
         ? featureFlags.usOnlyAddressPolicy
-        : BOOLEAN_DEFAULTS.usOnlyAddressPolicy
+        : BOOLEAN_DEFAULTS.usOnlyAddressPolicy,
+      datasetTelemetryRanking: typeof featureFlags.datasetTelemetryRanking === 'boolean'
+        ? featureFlags.datasetTelemetryRanking
+        : BOOLEAN_DEFAULTS.datasetTelemetryRanking,
+      socrataPreferV3: typeof featureFlags.socrataPreferV3 === 'boolean'
+        ? featureFlags.socrataPreferV3
+        : BOOLEAN_DEFAULTS.socrataPreferV3
     },
     auth: sanitizeOpenDataAuth(config.auth)
   };

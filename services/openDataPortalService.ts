@@ -128,7 +128,13 @@ export const rankOpenDataPortalCandidates = (
 
 export const shouldRecrawlPortal = (portalUrl: string) => {
   const normalizedPortal = normalizePortalUrl(portalUrl);
-  return Boolean(normalizedPortal);
+  if (!normalizedPortal) return false;
+  const index = getOpenDatasetIndex();
+  const crawl = index.portalCrawls?.[normalizedPortal];
+  if (!crawl) return true;
+  const nextCrawlAt = parseIso(crawl.nextCrawlAt);
+  if (!nextCrawlAt) return true;
+  return nextCrawlAt <= Date.now();
 };
 
 export const autoIngestOpenDataPortals = async (plans: PortalDiscoveryPlan[]) => {

@@ -71,5 +71,35 @@ export const FAILURE_TAXONOMY: Record<DataGapReasonCode, FailureTaxonomyEntry> =
     userMessage: 'Evidence confidence is below the minimum required to complete this report.',
     reason: 'Section or report confidence fell below the hard-fail threshold.',
     impact: 'Findings are too uncertain to present as a completed report.'
+  },
+  address_evidence_minimum_missing: {
+    code: 'address_evidence_minimum_missing',
+    status: 'missing',
+    severity: 'critical',
+    fieldPath: '/sources',
+    recordType: 'authoritative_sources',
+    userMessage: 'Minimum address evidence requirements were not met.',
+    reason: 'The run did not collect enough authoritative and corroborating address-level sources.',
+    impact: 'Address conclusions may be incomplete or under-supported.'
+  },
+  macro_only_section: {
+    code: 'macro_only_section',
+    status: 'conflict',
+    severity: 'major',
+    fieldPath: '/sections',
+    recordType: 'section_scope',
+    userMessage: 'A section appears to rely on citywide or macro context only.',
+    reason: 'Section content did not include enough parcel-level or address-level evidence.',
+    impact: 'Section findings may not be specific to the subject property.'
+  },
+  unsupported_jurisdiction: {
+    code: 'unsupported_jurisdiction',
+    status: 'unavailable',
+    severity: 'major',
+    fieldPath: '/subject/jurisdiction',
+    recordType: 'jurisdiction',
+    userMessage: 'This jurisdiction is not currently supported by the address evidence workflow.',
+    reason: 'No supported authoritative primary-record sources were available for the selected jurisdiction.',
+    impact: 'Primary parcel-linked record recovery may be unavailable.'
   }
 };

@@ -68,6 +68,12 @@ export type SettingsMetadata = {
 
 export type UiPreferences = {
   showGuardrailDebug?: boolean;
+  graphVisualization?: {
+    motion?: boolean;
+    links?: boolean;
+    focus?: boolean;
+    compact?: boolean;
+  };
 };
 
 type SettingsMetadataRecord = {
@@ -402,7 +408,9 @@ const normalizeFeatureFlags = (flags?: Partial<OpenDataFeatureFlags>): OpenDataF
   autoIngestion: flags?.autoIngestion === true,
   evidenceRecovery: flags?.evidenceRecovery !== false,
   gatingEnforcement: flags?.gatingEnforcement !== false,
-  usOnlyAddressPolicy: flags?.usOnlyAddressPolicy === true
+  usOnlyAddressPolicy: flags?.usOnlyAddressPolicy === true,
+  datasetTelemetryRanking: flags?.datasetTelemetryRanking !== false,
+  socrataPreferV3: flags?.socrataPreferV3 === true
 });
 
 const pickOpenDataSettings = (config?: Partial<OpenDataRuntimeConfig> | null) => ({

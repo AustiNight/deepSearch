@@ -27,7 +27,9 @@ const payload = buildUniversalSettingsPayload({
       autoIngestion: true,
       evidenceRecovery: true,
       gatingEnforcement: true,
-      usOnlyAddressPolicy: false
+      usOnlyAddressPolicy: false,
+      datasetTelemetryRanking: true,
+      socrataPreferV3: true
     },
     auth: {
       socrataAppToken: 'token-123',
@@ -42,6 +44,8 @@ assert.equal(payload.keyOverrides?.openai, 'sk-test-should-not-leak');
 assert.equal(payload.keyOverrides?.google, 'AIza-test-should-not-leak');
 assert.equal(payload.openDataConfig?.auth?.socrataAppToken, 'token-123');
 assert.equal(payload.openDataConfig?.allowPaidAccess, false);
+assert.equal(payload.openDataConfig?.featureFlags?.datasetTelemetryRanking, true);
+assert.equal(payload.openDataConfig?.featureFlags?.socrataPreferV3, true);
 
 const serialized = JSON.stringify(payload);
 assert.ok(serialized.includes('sk-test-should-not-leak'));

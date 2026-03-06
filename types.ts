@@ -558,6 +558,8 @@ export type OpenDataFeatureFlags = {
   evidenceRecovery: boolean;
   gatingEnforcement: boolean;
   usOnlyAddressPolicy: boolean;
+  datasetTelemetryRanking: boolean;
+  socrataPreferV3: boolean;
 };
 
 export type OpenDataAuthConfig = {

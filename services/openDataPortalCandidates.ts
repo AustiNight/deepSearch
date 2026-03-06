@@ -19,6 +19,16 @@ const normalizeJurisdictionSlug = (value?: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
+const isLikelyPortalToken = (value: string) => {
+  const token = String(value || "").trim().toLowerCase();
+  if (!token) return false;
+  if (token.length < 2 || token.length > 40) return false;
+  if (/^\d/.test(token)) return false;
+  if (/\d/.test(token)) return false;
+  if (!/^[a-z][a-z-]*$/.test(token)) return false;
+  return true;
+};
+
 const stripCountySuffix = (value?: string) =>
   (value || "")
     .replace(/\b(county|parish|borough|municipality)\b/gi, " ")
@@ -28,7 +38,7 @@ const stripCountySuffix = (value?: string) =>
 const buildTokenVariants = (value?: string) => uniqueList([
   normalizeJurisdictionToken(value),
   normalizeJurisdictionSlug(value)
-]).filter(Boolean);
+]).filter((token) => isLikelyPortalToken(token));
 
 const expandPortalTemplate = (value: string, jurisdiction?: Jurisdiction) => {
   const template = String(value || "").trim();
@@ -95,7 +105,10 @@ const buildHeuristicPortalCandidates = (jurisdiction?: Jurisdiction) => {
   return uniqueList([...cityPortals, ...countyPortals, ...statePortals]);
 };
 
-export const buildOpenDataPortalCandidates = (jurisdiction?: Jurisdiction) => {
+export const buildOpenDataPortalCandidates = (
+  jurisdiction?: Jurisdiction,
+  options?: { includeHeuristicPortals?: boolean }
+) => {
   const hints = getOpenDatasetHints(["parcel", "assessor", "appraiser", "apn", "pin", "cadastre"]).map((dataset) => dataset.portalUrl);
   const availability = findJurisdictionAvailability(jurisdiction);
   const availabilityPortals = Object.values(availability?.records || {})
@@ -107,7 +120,8 @@ export const buildOpenDataPortalCandidates = (jurisdiction?: Jurisdiction) => {
       ];
       return templates.flatMap((template) => expandPortalTemplate(String(template || ""), jurisdiction));
     });
-  const heuristicPortals = buildHeuristicPortalCandidates(jurisdiction);
+  const includeHeuristicPortals = options?.includeHeuristicPortals !== false;
+  const heuristicPortals = includeHeuristicPortals ? buildHeuristicPortalCandidates(jurisdiction) : [];
   const normalized = uniqueList(
     [...availabilityPortals, ...hints, ...heuristicPortals]
       .map((value) => normalizePortalCandidate(String(value || "")))

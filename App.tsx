@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Activity, Brain, Settings, Search, Terminal, RotateCcw, Zap, Database, Trash2, Save } from 'lucide-react';
 import { useOverseer } from './hooks/useOverseer';
 import { AgentGraph } from './components/AgentGraph';
@@ -7,8 +7,13 @@ import { ReportView } from './components/ReportView';
 import { TransparencyPanel } from './components/TransparencyPanel';
 import { AgentStatus, LLMProvider, ModelOverrides, ModelRole, OpenDataAuthConfig, RunConfig, UniversalSettingsPayload } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
-import { fetchAllowlist, updateAllowlist } from './services/accessAllowlistService';
-import { fetchUniversalSettings, updateUniversalSettings } from './services/universalSettingsService';
+import { fetchAllowlist, updateAllowlist, type AllowlistUpdateResult } from './services/accessAllowlistService';
+import {
+  fetchUniversalSettings,
+  updateUniversalSettings,
+  type UniversalSettingsFetchResult,
+  type UniversalSettingsUpdateResult
+} from './services/universalSettingsService';
 import { buildUniversalSettingsPayload, normalizeUniversalSettingsPayload } from './services/universalSettingsPayload';
 import { isSystemTestTopic } from './data/verticalLogic';
 import { fetchSocrataRagChunksById, querySocrataRag } from './services/socrataRagClient';
@@ -192,6 +197,18 @@ const parseAllowlistText = (text: string) => {
   return { entries, invalid };
 };
 
+const isUniversalSettingsFetchFailure = (
+  result: UniversalSettingsFetchResult
+): result is Extract<UniversalSettingsFetchResult, { ok: false }> => result.ok === false;
+
+const isUniversalSettingsUpdateFailure = (
+  result: UniversalSettingsUpdateResult
+): result is Extract<UniversalSettingsUpdateResult, { ok: false }> => result.ok === false;
+
+const isAllowlistUpdateFailure = (
+  result: AllowlistUpdateResult
+): result is Extract<AllowlistUpdateResult, { ok: false }> => result.ok === false;
+
 const sanitizeOpenDataAuth = (input: OpenDataAuthConfig): OpenDataAuthConfig => {
   const normalize = (value?: string) => {
     const trimmed = (value || '').trim();
@@ -204,6 +221,20 @@ const sanitizeOpenDataAuth = (input: OpenDataAuthConfig): OpenDataAuthConfig => 
     geocodingKey: normalize(input.geocodingKey)
   };
 };
+
+type GraphVisualizationPrefs = {
+  motion: boolean;
+  links: boolean;
+  focus: boolean;
+  compact: boolean;
+};
+
+const normalizeGraphVisualizationPrefs = (raw?: Partial<GraphVisualizationPrefs>): GraphVisualizationPrefs => ({
+  motion: raw?.motion !== false,
+  links: raw?.links !== false,
+  focus: raw?.focus !== false,
+  compact: raw?.compact === true
+});
 
 const App: React.FC = () => {
   const [topic, setTopic] = useState('');
@@ -245,6 +276,9 @@ const App: React.FC = () => {
   const [showSkills, setShowSkills] = useState(false);
   const [showTransparency, setShowTransparency] = useState(false);
   const [showGuardrailDebug, setShowGuardrailDebug] = useState<boolean>(() => readUiPreferences().showGuardrailDebug === true);
+  const [graphVisualization, setGraphVisualization] = useState<GraphVisualizationPrefs>(() => (
+    normalizeGraphVisualizationPrefs(readUiPreferences().graphVisualization)
+  ));
   const [isUnlocked, setIsUnlocked] = useState(!REQUIRES_PASSWORD);
   const [showAuth, setShowAuth] = useState(false);
   const [authInput, setAuthInput] = useState('');
@@ -273,6 +307,15 @@ const App: React.FC = () => {
     setShowGuardrailDebug(value);
     const current = readUiPreferences();
     writeUiPreferences({ ...current, showGuardrailDebug: value });
+  };
+
+  const updateGraphVisualization = (key: keyof GraphVisualizationPrefs, value: boolean) => {
+    setGraphVisualization(prev => {
+      const next = { ...prev, [key]: value };
+      const current = readUiPreferences();
+      writeUiPreferences({ ...current, graphVisualization: next });
+      return next;
+    });
   };
 
   const resolvedPriorityWeights = normalizePriorityWeights(draftRunConfig.priorityWeights);
@@ -462,7 +505,7 @@ const App: React.FC = () => {
     setSettingsSyncing(true);
     try {
       const result = await fetchUniversalSettings();
-      if (!result.ok) {
+      if (isUniversalSettingsFetchFailure(result)) {
         const unauthorized = result.status === 401 || result.status === 403;
         setSettingsCloudStatus(unauthorized ? 'unauthorized' : 'unavailable');
         setSettingsSyncStatus({
@@ -495,7 +538,7 @@ const App: React.FC = () => {
       const migrationComplete = readSettingsMigrationComplete();
       if (!migrationComplete && hasLocalSettings) {
         const migrationResult = await updateUniversalSettings(localSnapshot, null, null);
-        if (migrationResult.ok) {
+        if (!isUniversalSettingsUpdateFailure(migrationResult)) {
           persistSettingsMetadata({
             updatedAt: migrationResult.data.updatedAt ?? null,
             updatedBy: migrationResult.data.updatedBy ?? null,
@@ -531,7 +574,7 @@ const App: React.FC = () => {
 
     let resolvedRunConfig: RunConfig = { ...DEFAULT_RUN_CONFIG };
     try {
-      const parsed = readRunConfig();
+      const parsed = readRunConfig() as Partial<RunConfig> | null;
       if (parsed && typeof parsed === 'object') {
         const minAgents = parseEnvNumber(parsed?.minAgents?.toString(), ENV_MIN_AGENTS);
         const maxAgents = parseEnvNumber(parsed?.maxAgents?.toString(), ENV_MAX_AGENTS);
@@ -708,7 +751,7 @@ const App: React.FC = () => {
       setAllowlistSyncing(true);
       try {
         const allowlistResult = await updateAllowlist(sanitizedAllowlist, allowlistUpdatedAt);
-        if (allowlistResult.ok) {
+        if (!isAllowlistUpdateFailure(allowlistResult)) {
           const { entries, updatedAt } = allowlistResult.data;
           const resolvedEntries = Array.isArray(entries) ? entries : sanitizedAllowlist;
           setAccessAllowlist(resolvedEntries);
@@ -763,7 +806,7 @@ const App: React.FC = () => {
     setSettingsSyncing(true);
     try {
       const settingsResult = await updateUniversalSettings(settingsPayload, settingsUpdatedAt, settingsVersion);
-      if (settingsResult.ok) {
+      if (!isUniversalSettingsUpdateFailure(settingsResult)) {
         setSettingsCloudStatus('available');
         persistSettingsMetadata({
           updatedAt: settingsResult.data.updatedAt ?? null,
@@ -927,6 +970,37 @@ const App: React.FC = () => {
     ? agents
     : agents.filter(agent => agent.status !== AgentStatus.SKIPPED);
   const skippedAgents = agents.filter(agent => agent.status === AgentStatus.SKIPPED);
+  const graphAggregate = useMemo(() => {
+    const activeStates = new Set<AgentStatus>([
+      AgentStatus.THINKING,
+      AgentStatus.SEARCHING,
+      AgentStatus.ANALYZING
+    ]);
+    let active = 0;
+    let complete = 0;
+    let failed = 0;
+    let skipped = 0;
+    for (const agent of agents) {
+      if (activeStates.has(agent.status)) active += 1;
+      if (agent.status === AgentStatus.COMPLETE) complete += 1;
+      if (agent.status === AgentStatus.FAILED) failed += 1;
+      if (agent.status === AgentStatus.SKIPPED) skipped += 1;
+    }
+    return {
+      total: agents.length,
+      active,
+      complete,
+      failed,
+      skipped
+    };
+  }, [agents]);
+  const graphStatusChips = [
+    { key: 'total', label: 'Total', value: graphAggregate.total, className: 'text-gray-200 border-gray-700 bg-gray-900/60' },
+    { key: 'active', label: 'Active', value: graphAggregate.active, className: 'text-cyber-blue border-cyber-blue/40 bg-cyber-blue/10' },
+    { key: 'complete', label: 'Done', value: graphAggregate.complete, className: 'text-cyber-green border-cyber-green/40 bg-cyber-green/10' },
+    { key: 'failed', label: 'Failed', value: graphAggregate.failed, className: 'text-red-400 border-red-500/40 bg-red-500/10' },
+    { key: 'skipped', label: 'Skipped', value: graphAggregate.skipped, className: 'text-gray-400 border-gray-700 bg-gray-900/60' }
+  ];
 
   const effectiveKeys = {
     google: keyOverrides.google || ENV_GEMINI_KEY,
@@ -1004,31 +1078,34 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-black text-white font-sans selection:bg-cyber-green selection:text-black flex flex-col">
       {/* Header */}
-      <header className="h-16 border-b border-gray-800 flex items-center justify-between px-6 bg-black/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <Brain className="w-8 h-8 text-cyber-green" />
+      <header className="min-h-16 border-b border-gray-800 flex items-center justify-between px-3 sm:px-6 py-2 sm:py-0 bg-black/50 backdrop-blur-md sticky top-0 z-50">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Brain className="w-6 h-6 sm:w-8 sm:h-8 text-cyber-green shrink-0" />
           <div>
-            <h1 className="font-bold text-lg tracking-wider">DEEPSEARCH OVERSEER</h1>
-            <div className="text-[10px] text-gray-500 font-mono tracking-widest">AUTONOMOUS RESEARCH PROTOCOL</div>
+            <h1 className="font-bold text-base sm:text-lg tracking-wider leading-tight whitespace-nowrap">
+              DEEPSEARCH<span className="hidden sm:inline"> OVERSEER</span>
+            </h1>
+            <div className="hidden sm:block text-[10px] text-gray-500 font-mono tracking-widest">AUTONOMOUS RESEARCH PROTOCOL</div>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
            {skills.length > 0 && (
              <button
                onClick={() => setShowSkills(!showSkills)}
-               className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 hover:border-cyber-blue transition-colors text-xs font-mono text-cyber-blue"
+               className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 hover:border-cyber-blue transition-colors text-xs font-mono text-cyber-blue"
              >
                <Zap className="w-3 h-3" />
-               SKILLS: {skills.length}
+               <span className="hidden sm:inline">SKILLS: </span>{skills.length}
              </button>
            )}
            <button
              onClick={handleNewSearch}
              data-testid="new-search"
-             className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 hover:border-cyber-green transition-colors text-xs font-mono text-cyber-green"
+             className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 hover:border-cyber-green transition-colors text-xs font-mono text-cyber-green"
+             title="New search"
            >
              <RotateCcw className="w-3 h-3" />
-             NEW SEARCH
+             <span className="hidden sm:inline">NEW SEARCH</span>
            </button>
            <button
              onClick={openSettings}
@@ -1877,7 +1954,7 @@ const App: React.FC = () => {
       <TransparencyPanel open={showTransparency} onClose={() => setShowTransparency(false)} />
 
       {/* Main Content */}
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full flex flex-col gap-6 relative">
+      <main className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full flex flex-col gap-4 sm:gap-6 relative">
         
         {/* Input Phase */}
         {!isRunning && !report && (
@@ -1927,16 +2004,64 @@ const App: React.FC = () => {
 
         {/* Processing Phase */}
         {(isRunning || (agents.length > 0 && !report)) && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-140px)]">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 h-[calc(100vh-150px)] sm:h-[calc(100vh-140px)]">
              {/* Left: Agent Graph */}
-             <div className="lg:col-span-2 bg-black/50 border border-gray-800 rounded-lg overflow-hidden flex flex-col relative">
-                <div className="absolute top-0 left-0 p-4 z-10">
-                   <h3 className="text-sm font-mono text-gray-400 flex items-center gap-2">
+             <div className="lg:col-span-2 bg-black/50 border border-gray-800 rounded-lg overflow-hidden flex flex-col">
+                <div className="px-3 sm:px-4 pt-3 sm:pt-4 pb-2 border-b border-gray-900 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                   <h3 className="text-xs sm:text-sm font-mono text-gray-400 flex items-center gap-2">
                      <Activity className="w-4 h-4 text-cyber-blue" />
                      AGENT ORCHESTRATION GRAPH
                    </h3>
+                   <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                     {([
+                       { key: 'motion', label: 'Motion' },
+                       { key: 'links', label: 'Links' },
+                       { key: 'focus', label: 'Focus' },
+                       { key: 'compact', label: 'Compact' }
+                     ] as const).map(toggle => {
+                       const enabled = graphVisualization[toggle.key];
+                       return (
+                         <button
+                           key={toggle.key}
+                           type="button"
+                           role="switch"
+                           aria-checked={enabled}
+                           aria-label={`${toggle.label} toggle`}
+                           onClick={() => updateGraphVisualization(toggle.key, !enabled)}
+                           className={`px-2 py-1 rounded border text-[10px] font-mono uppercase tracking-wider transition-colors ${
+                             enabled
+                               ? 'text-cyber-green border-cyber-green/40 bg-cyber-green/10'
+                               : 'text-gray-500 border-gray-700 bg-black/40'
+                           }`}
+                         >
+                           {toggle.label}
+                         </button>
+                       );
+                     })}
+                   </div>
                 </div>
-                <AgentGraph agents={visibleAgents} />
+                <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+                  <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-gray-900 lg:border-b-0 lg:border-r flex flex-wrap lg:flex-col gap-2 lg:w-40 lg:shrink-0">
+                    {graphStatusChips.map(chip => (
+                      <div
+                        key={chip.key}
+                        className={`w-full min-w-[92px] px-2 py-1.5 rounded border text-[10px] font-mono uppercase tracking-wide ${chip.className}`}
+                      >
+                        <div className="opacity-75">{chip.label}</div>
+                        <div className="text-sm leading-tight font-bold">{chip.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    <AgentGraph
+                      agents={visibleAgents}
+                      motionEnabled={graphVisualization.motion}
+                      linksEnabled={graphVisualization.links}
+                      focusEnabled={graphVisualization.focus}
+                      compact={graphVisualization.compact}
+                    />
+                  </div>
+                </div>
              </div>
 
              {/* Right: Logs */}

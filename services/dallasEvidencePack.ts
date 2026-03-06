@@ -48,7 +48,6 @@ export type DallasEvidencePackResult = {
 };
 
 const DALLAS_PORTAL_URL = "https://www.dallasopendata.com";
-const PRE_2023_CUTOFF = "2023-01-01T00:00:00.000";
 const DALLAS_SCHEMA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const MAX_ADDRESS_VARIANTS = 12;
 const MAX_SAMPLE_RECORDS = 3;
@@ -237,10 +236,22 @@ export const buildDallasAddressVariants = (address: string): string[] => {
     const withoutSuffixDirection = hasSuffixDirection
       ? tokens.slice(0, -1).join(" ")
       : null;
+    const withoutNumber = /^\d+$/.test(tokens[0])
+      ? tokens.slice(1).join(" ")
+      : null;
+    const withoutNumberAndPrefixDirection = (withoutNumber && tokens.length >= 3 && DIRECTION_TOKENS.has(tokens[1]))
+      ? tokens.slice(2).join(" ")
+      : null;
+    const withoutNumberStreetSuffix = (withoutNumber && hasStreetSuffix)
+      ? withoutNumber.split(" ").slice(0, -1).join(" ")
+      : null;
 
     if (withoutPrefix) variants.add(withoutPrefix);
     if (withoutSuffix) variants.add(withoutSuffix);
     if (withoutSuffixDirection) variants.add(withoutSuffixDirection);
+    if (withoutNumber) variants.add(withoutNumber);
+    if (withoutNumberAndPrefixDirection) variants.add(withoutNumberAndPrefixDirection);
+    if (withoutNumberStreetSuffix) variants.add(withoutNumberStreetSuffix);
 
     if (withoutPrefix && withoutSuffix) {
       variants.add(`${withoutPrefix.split(" ").slice(0, -1).join(" ")}`.trim());
@@ -250,6 +261,23 @@ export const buildDallasAddressVariants = (address: string): string[] => {
   return Array.from(variants)
     .filter(Boolean)
     .slice(0, MAX_ADDRESS_VARIANTS);
+};
+
+const buildRelaxedDallasAddressVariants = (variants: string[]): string[] => {
+  const relaxed = new Set<string>();
+  variants.forEach((variant) => {
+    const tokens = String(variant || "").split(" ").filter(Boolean);
+    if (tokens.length <= 2) return;
+    const withoutNumber = /^\d+$/.test(tokens[0]) ? tokens.slice(1) : tokens;
+    if (withoutNumber.length >= 2) relaxed.add(withoutNumber.join(" "));
+    if (withoutNumber.length >= 3 && STREET_SUFFIX_TOKENS.has(withoutNumber[withoutNumber.length - 1])) {
+      relaxed.add(withoutNumber.slice(0, -1).join(" "));
+    }
+    if (withoutNumber.length >= 3 && DIRECTION_TOKENS.has(withoutNumber[0])) {
+      relaxed.add(withoutNumber.slice(1).join(" "));
+    }
+  });
+  return Array.from(relaxed).filter(Boolean).slice(0, 6);
 };
 
 const buildSchemaHash = (fields: Array<{ name: string; type?: string }>) =>
@@ -440,19 +468,43 @@ const fetchSocrataMetadata = async (portalUrl: string, datasetId: string) => {
 
 const fetchSocrataRows = async (portalUrl: string, datasetId: string, params: URLSearchParams) => {
   const headers = buildSocrataHeaders();
-  const sodaPlan = buildSocrataSodaEndpoint({
+  const config = getOpenDataConfig();
+  const primaryPlan = buildSocrataSodaEndpoint({
     portalUrl,
     datasetId,
-    hasAppToken: Boolean(getOpenDataConfig().auth.socrataAppToken),
+    preferV3: config.featureFlags?.socrataPreferV3 === true,
+    hasAppToken: Boolean(config.auth.socrataAppToken),
     params
   });
-  const url = sodaPlan.url;
-  const response = await fetchJsonWithRetry<any[]>(url, { headers, retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
-  if (sodaPlan.ragUsageId) {
-    const success = response.ok && Array.isArray(response.data) && response.data.length > 0;
-    recordRagOutcome(sodaPlan.ragUsageId, success);
+  const fallbackPlan = primaryPlan.version === "3.0"
+    ? buildSocrataSodaEndpoint({
+        portalUrl,
+        datasetId,
+        preferV3: false,
+        hasAppToken: Boolean(config.auth.socrataAppToken),
+        params
+      })
+    : null;
+  const plans = fallbackPlan ? [primaryPlan, fallbackPlan] : [primaryPlan];
+  let lastResponse: any = null;
+
+  for (let i = 0; i < plans.length; i += 1) {
+    const sodaPlan = plans[i];
+    const response = await fetchJsonWithRetry<any>(sodaPlan.url, { headers, retries: 1, minDelayMs: 200 }, { portalType: "socrata", portalUrl });
+    lastResponse = response;
+    const rows = Array.isArray(response.data)
+      ? response.data
+      : (Array.isArray((response.data as any)?.data) ? (response.data as any).data : null);
+    const success = response.ok && Array.isArray(rows);
+    if (sodaPlan.ragUsageId) {
+      recordRagOutcome(sodaPlan.ragUsageId, success && rows.length > 0);
+    }
+    if (success) {
+      return { ...response, data: rows };
+    }
+    if (i < plans.length - 1) continue;
   }
-  return response;
+  return lastResponse || { ok: false, status: 0, data: null, error: "query failed", headers: new Headers() };
 };
 
 const filterTabularCandidates = (results: any[]): DallasDatasetCandidate[] => {
@@ -518,8 +570,6 @@ const buildWhereAddressClause = (field: string, variants: string[]) => {
   return `(${sanitized.join(" OR ")})`;
 };
 
-const buildWhereDateClause = (field?: string) => field ? `${field} < '${PRE_2023_CUTOFF}'` : "";
-
 const buildWhereRadiusClause = (field: string, point: { lat: number; lon: number }, radius: number) =>
   `within_circle(${field}, ${point.lat}, ${point.lon}, ${radius})`;
 
@@ -575,7 +625,7 @@ const fetchDatasetCandidates = async (portalUrl: string, queries: string[], atte
       queryType: "discovery",
       query,
       matched: ok && Array.isArray(response.data?.results) ? response.data.results.length : 0,
-      error: response.ok ? undefined : response.error
+      error: response.ok ? undefined : ("error" in response ? response.error : undefined)
     });
     if (!ok) continue;
     const results = Array.isArray(response.data?.results) ? response.data.results : [];
@@ -627,11 +677,10 @@ const queryDataset = async (
     fieldMap.addressField
   ].filter(Boolean) as string[];
 
-  const queryNote = kind === "parcel" ? "address variant query" : "address variant query (pre-2023)";
+  const queryNote = "address variant query";
   if (fieldMap.addressField && addressVariants.length > 0) {
     const whereClause = mergeWhereClauses([
-      buildWhereAddressClause(fieldMap.addressField, addressVariants),
-      kind === "parcel" ? "" : buildWhereDateClause(fieldMap.dateField)
+      buildWhereAddressClause(fieldMap.addressField, addressVariants)
     ]);
     const params = new URLSearchParams();
     if (selectFields.length > 0) params.set("$select", selectFields.join(","));
@@ -648,15 +697,42 @@ const queryDataset = async (
       queryType: "address",
       query: whereClause || queryNote,
       matched: rows.length,
-      error: response.ok ? undefined : response.error
+      error: response.ok ? undefined : ("error" in response ? response.error : undefined)
     });
     if (rows.length > 0) return { rows, queryNote };
+
+    if (kind !== "parcel") {
+      const relaxedVariants = buildRelaxedDallasAddressVariants(addressVariants);
+      if (relaxedVariants.length > 0) {
+        const relaxedWhere = buildWhereAddressClause(fieldMap.addressField, relaxedVariants);
+        if (relaxedWhere) {
+          const relaxedParams = new URLSearchParams();
+          if (selectFields.length > 0) relaxedParams.set("$select", selectFields.join(","));
+          relaxedParams.set("$where", relaxedWhere);
+          relaxedParams.set("$limit", String(250));
+          if (fieldMap.dateField) relaxedParams.set("$order", `${fieldMap.dateField} DESC`);
+          const relaxedResponse = await fetchSocrataRows(portalUrl, dataset.datasetId, relaxedParams);
+          const relaxedRows = relaxedResponse.ok && Array.isArray(relaxedResponse.data) ? relaxedResponse.data : [];
+          attempts.push({
+            datasetKind: kind,
+            datasetId: dataset.datasetId,
+            datasetTitle: dataset.title,
+            queryType: "address",
+            query: relaxedWhere,
+            matched: relaxedRows.length,
+            error: relaxedResponse.ok ? undefined : ("error" in relaxedResponse ? relaxedResponse.error : undefined)
+          });
+          if (relaxedRows.length > 0) {
+            return { rows: relaxedRows, queryNote: "street-fragment address query" };
+          }
+        }
+      }
+    }
   }
 
   if (fieldMap.geometryField && geocodePoint) {
     const whereClause = mergeWhereClauses([
-      buildWhereRadiusClause(fieldMap.geometryField, geocodePoint, DEFAULT_RADIUS_METERS),
-      kind === "parcel" ? "" : buildWhereDateClause(fieldMap.dateField)
+      buildWhereRadiusClause(fieldMap.geometryField, geocodePoint, DEFAULT_RADIUS_METERS)
     ]);
     const params = new URLSearchParams();
     if (selectFields.length > 0) params.set("$select", selectFields.join(","));
@@ -673,11 +749,9 @@ const queryDataset = async (
       queryType: "radius",
       query: whereClause || "radius query",
       matched: rows.length,
-      error: response.ok ? undefined : response.error
+      error: response.ok ? undefined : ("error" in response ? response.error : undefined)
     });
-    if (rows.length > 0) {
-      return { rows, queryNote: kind === "parcel" ? "radius query" : "radius query (pre-2023)" };
-    }
+    if (rows.length > 0) return { rows, queryNote: "radius query" };
   }
 
   return { rows: [], queryNote };
@@ -724,7 +798,7 @@ export const runDallasEvidencePack = async (input: {
       if (!response.ok || !response.data) {
         dataGaps.push(buildDataGap(
           `${candidate.title} (${candidate.datasetId}) metadata unavailable.`,
-          response.error || "Metadata fetch failed.",
+          ("error" in response ? response.error : undefined) || "Metadata fetch failed.",
           "unavailable",
           DATASET_CONFIG[kind].recordType,
           buildDatasetSourcePointer(portalUrl, candidate.datasetId)
@@ -777,17 +851,6 @@ export const runDallasEvidencePack = async (input: {
         dataGaps.push(buildDataGap(
           `${DATASET_CONFIG[kind].label} dataset missing address field.`,
           `Unable to locate address field in dataset ${candidate.datasetId}.`,
-          "missing",
-          DATASET_CONFIG[kind].recordType,
-          buildDatasetSourcePointer(portalUrl, candidate.datasetId)
-        ));
-        continue;
-      }
-
-      if (kind !== "parcel" && !fieldMap.dateField) {
-        dataGaps.push(buildDataGap(
-          `${DATASET_CONFIG[kind].label} dataset missing date field.`,
-          `Unable to locate date field for pre-2023 filter in dataset ${candidate.datasetId}.`,
           "missing",
           DATASET_CONFIG[kind].recordType,
           buildDatasetSourcePointer(portalUrl, candidate.datasetId)
@@ -854,7 +917,7 @@ export const runDallasEvidencePack = async (input: {
     findingsText = [
       "Dallas Open Data Evidence (PII-redacted, block-level addresses only).",
       ...summaries,
-      "Notes: Query results reflect pre-2023 filters for police/311 datasets. Zero results mean the query returned no rows, not a guarantee of absence."
+      "Notes: Query results use full-history address and spatial matching. Zero results mean the query returned no rows, not a guarantee of absence."
     ].join("\n");
   }
 

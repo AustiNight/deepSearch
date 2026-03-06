@@ -35,12 +35,24 @@ const buildApiUrl = (input: string) => {
 
 export const apiFetch = async (path: string, init?: RequestInit) => {
   const url = buildApiUrl(path);
-  return fetch(url, init);
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    if ((error as any)?.name === "AbortError") throw error;
+    const message = error instanceof Error ? error.message : String(error ?? "Unknown fetch error");
+    throw new Error(`Failed to fetch API endpoint ${url}: ${message}`);
+  }
 };
 
 export const directFetch = async (url: string, init?: RequestInit) => {
   if (isBrowser()) {
     throw new Error("Direct fetch blocked in browser.");
   }
-  return fetch(url, init);
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    if ((error as any)?.name === "AbortError") throw error;
+    const message = error instanceof Error ? error.message : String(error ?? "Unknown fetch error");
+    throw new Error(`Failed to fetch URL ${url}: ${message}`);
+  }
 };

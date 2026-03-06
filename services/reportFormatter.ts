@@ -36,7 +36,7 @@ const isPortalType = (value: unknown) =>
 const normalizePrimaryRecordCoverage = (value: unknown): PrimaryRecordCoverage | undefined => {
   if (!isPlainObject(value)) return undefined;
   if (!Array.isArray(value.entries)) return undefined;
-  return value as PrimaryRecordCoverage;
+  return value as unknown as PrimaryRecordCoverage;
 };
 
 const normalizeDatasetCompliance = (value: unknown): DatasetComplianceEntry[] | undefined => {

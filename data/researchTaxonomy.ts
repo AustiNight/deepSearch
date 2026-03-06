@@ -1190,6 +1190,8 @@ type TemplateValidationResult =
   | { valid: true }
   | { valid: false; code: 'empty' | 'too_short' | 'too_long' | 'multiline' | 'unsafe_scheme' | 'insufficient_alnum' };
 
+type TemplateValidationCode = Extract<TemplateValidationResult, { valid: false }>['code'];
+
 const validateTemplate = (template: string): TemplateValidationResult => {
   if (!template) return { valid: false, code: 'empty' };
   if (template.length < 4) return { valid: false, code: 'too_short' };
@@ -1202,7 +1204,7 @@ const validateTemplate = (template: string): TemplateValidationResult => {
   return { valid: true };
 };
 
-const formatTemplateValidationCode = (code: TemplateValidationResult extends { valid: false; code: infer C } ? C : never) => {
+const formatTemplateValidationCode = (code: TemplateValidationCode) => {
   if (code === 'empty') return 'empty';
   if (code === 'too_short') return 'too_short';
   if (code === 'too_long') return 'too_long';
@@ -1338,10 +1340,11 @@ export const vetAndPersistTaxonomyProposals = (
     const normalized = normalizeTemplateAndNotes(template, notes);
     const validation = validateTemplate(normalized.template);
     if (!validation.valid) {
+      const failureCode = (validation as Extract<TemplateValidationResult, { valid: false }>).code;
       rejected += 1;
       rejectedItems.push({
         item: template,
-        reason: `Invalid template (${formatTemplateValidationCode(validation.code)}).`
+        reason: `Invalid template (${formatTemplateValidationCode(failureCode)}).`
       });
       return;
     }

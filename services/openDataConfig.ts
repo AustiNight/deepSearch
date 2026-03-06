@@ -25,7 +25,9 @@ const defaultFlags: OpenDataFeatureFlags = {
   autoIngestion: true,
   evidenceRecovery: true,
   gatingEnforcement: true,
-  usOnlyAddressPolicy: false
+  usOnlyAddressPolicy: false,
+  datasetTelemetryRanking: true,
+  socrataPreferV3: false
 };
 
 const defaultAuth: OpenDataAuthConfig = {};
@@ -78,7 +80,13 @@ const mergeConfig = (input: Partial<OpenDataRuntimeConfig>): OpenDataRuntimeConf
         : defaultConfig.featureFlags.gatingEnforcement,
       usOnlyAddressPolicy: typeof input.featureFlags?.usOnlyAddressPolicy === "boolean"
         ? input.featureFlags.usOnlyAddressPolicy
-        : defaultConfig.featureFlags.usOnlyAddressPolicy
+        : defaultConfig.featureFlags.usOnlyAddressPolicy,
+      datasetTelemetryRanking: typeof input.featureFlags?.datasetTelemetryRanking === "boolean"
+        ? input.featureFlags.datasetTelemetryRanking
+        : defaultConfig.featureFlags.datasetTelemetryRanking,
+      socrataPreferV3: typeof input.featureFlags?.socrataPreferV3 === "boolean"
+        ? input.featureFlags.socrataPreferV3
+        : defaultConfig.featureFlags.socrataPreferV3
     },
     auth: {
       socrataAppToken: input.auth?.socrataAppToken,

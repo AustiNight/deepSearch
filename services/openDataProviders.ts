@@ -8,6 +8,8 @@ import type {
 import {
   OPEN_DATA_DISCOVERY_MAX_DATASETS,
   OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES,
+  OPEN_DATA_PROVIDER_MAX_PAGES,
+  OPEN_DATA_PROVIDER_MAX_RECORDS,
   OPEN_DATA_QUERY_CACHE_TTL_MS
 } from "../constants";
 import { fetchJsonWithRetry, fetchTextWithRetry, enforceRateLimit } from "./openDataHttp";
@@ -335,7 +337,6 @@ export const detectPortalType = (portalUrl: string): OpenDataPortalType => {
   if (pathname.endsWith("/data.json") || pathname.endsWith("/catalog.json")) return "dcat";
   if (hostname.includes("arcgis") || hostname.includes("hub.arcgis") || hostname.includes("opendata.arcgis")) return "arcgis";
   if (hostname.includes("socrata")) return "socrata";
-  if (hostname.startsWith("data.") || hostname.includes(".data.") || hostname.startsWith("opendata.") || hostname.includes(".opendata.")) return "socrata";
   if (normalized.includes("/api/views/") || normalized.includes("/resource/")) return "socrata";
   return "unknown";
 };
@@ -374,6 +375,10 @@ const SOCRATA_TEXT_FIELD_PATTERN = /address|situs|site|location|parcel|apn|pin|a
 const SOCRATA_GEOMETRY_TYPE_PATTERN = /(location|point|polygon|line|multipolygon|multiline|geometry)/i;
 const SOCRATA_TEXT_TYPE_PATTERN = /(text|multiline|url|email|phone)/i;
 const SOCRATA_NON_TEXT_TYPE_PATTERN = /(location|point|polygon|line|multipolygon|multiline|geometry|number|money|percent|checkbox|calendar|date|timestamp)/i;
+const SOCRATA_ID_FIELD_PATTERN = /(^id$|_id$|^sid$|parcel|apn|pin|account|acct|taxroll|record|case)/i;
+const SOCRATA_ADDRESS_FIELD_PATTERN = /address|situs|site|street|location|block|legal|owner/i;
+const SOCRATA_LAT_FIELD_PATTERN = /(lat|latitude)$/i;
+const SOCRATA_LON_FIELD_PATTERN = /(lon|lng|long|longitude)$/i;
 
 const isSocrataTextField = (field: OpenDataField) => {
   if (!field.name || field.isGeometry) return false;
@@ -391,6 +396,26 @@ const isSocrataTextField = (field: OpenDataField) => {
 };
 
 const escapeSocrataLiteral = (value: string) => value.replace(/\\/g, "\\\\").replace(/'/g, "''");
+const quoteSocrataIdentifier = (fieldName: string) => /^[a-z_][a-z0-9_]*$/i.test(fieldName) ? fieldName : `\`${fieldName.replace(/`/g, "")}\``;
+const tokenizeSocrataSearch = (value: string) =>
+  Array.from(new Set(
+    String(value || "")
+      .toUpperCase()
+      .split(/[^A-Z0-9]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2)
+  ));
+const parseSocrataRecordId = (row: Record<string, unknown>) => {
+  if (!row || typeof row !== "object") return undefined;
+  const direct = asStringFrom((row as any).id, (row as any).sid, (row as any)[":id"]);
+  if (direct) return direct;
+  for (const [key, value] of Object.entries(row)) {
+    if (!SOCRATA_ID_FIELD_PATTERN.test(key)) continue;
+    const parsed = asString(value);
+    if (parsed) return parsed;
+  }
+  return undefined;
+};
 
 const buildSocrataWhereForText = (searchText: string, fields: OpenDataField[]) => {
   const trimmed = searchText.trim();
@@ -399,11 +424,98 @@ const buildSocrataWhereForText = (searchText: string, fields: OpenDataField[]) =
     .filter((field) => isSocrataTextField(field));
   if (searchableFields.length === 0) return null;
   const escaped = escapeSocrataLiteral(trimmed.toUpperCase());
-  const predicates = searchableFields.map((field) => `upper(${field.name}) like '%${escaped}%'`);
+  const predicates = searchableFields.map((field) => `upper(${quoteSocrataIdentifier(field.name)}) like '%${escaped}%'`);
   if (predicates.length === 1) {
     return predicates[0];
   }
   return `(${predicates.join(" OR ")})`;
+};
+
+const buildSocrataFieldSelect = (
+  fields: OpenDataField[],
+  options: {
+    includeSearchableText?: boolean;
+    includeGeometry?: boolean;
+    includeIds?: boolean;
+    maxFields?: number;
+  } = {}
+) => {
+  const includeSearchableText = options.includeSearchableText !== false;
+  const includeGeometry = options.includeGeometry !== false;
+  const includeIds = options.includeIds !== false;
+  const maxFields = Math.max(3, Math.min(24, Math.floor(options.maxFields ?? 12)));
+  const selected = new Set<string>();
+  const push = (fieldName?: string) => {
+    const name = asString(fieldName);
+    if (!name) return;
+    selected.add(name);
+  };
+
+  if (includeIds) {
+    fields.forEach((field) => {
+      if (SOCRATA_ID_FIELD_PATTERN.test(field.name)) push(field.name);
+    });
+  }
+  if (includeSearchableText) {
+    fields
+      .filter((field) => isSocrataTextField(field))
+      .forEach((field) => push(field.name));
+  }
+  if (includeGeometry) {
+    fields
+      .filter((field) => field.isGeometry)
+      .forEach((field) => push(field.name));
+  }
+  if (selected.size === 0) return undefined;
+  const serialized = Array.from(selected).slice(0, maxFields).map((name) => quoteSocrataIdentifier(name));
+  if (serialized.length === 0) return undefined;
+  return serialized.join(", ");
+};
+
+const buildSocrataTextQueryTemplates = (
+  searchText: string,
+  fields: OpenDataField[]
+): Array<{ label: string; where?: string; fullText?: string }> => {
+  const trimmed = searchText.trim();
+  if (!trimmed) return [{ label: "q_fallback", fullText: searchText }];
+  const escaped = escapeSocrataLiteral(trimmed.toUpperCase());
+  const tokens = tokenizeSocrataSearch(trimmed).slice(0, 6).map((token) => escapeSocrataLiteral(token));
+  const searchable = fields.filter((field) => isSocrataTextField(field));
+  const idFields = searchable.filter((field) => SOCRATA_ID_FIELD_PATTERN.test(field.name));
+  const addressFields = searchable.filter((field) => SOCRATA_ADDRESS_FIELD_PATTERN.test(field.name));
+  const broadFields = searchable.length > 0 ? searchable : fields.filter((field) => !field.isGeometry).slice(0, 8);
+  const templates: Array<{ label: string; where?: string; fullText?: string }> = [];
+
+  if (idFields.length > 0 && /[0-9]/.test(trimmed)) {
+    const idExact = idFields.map((field) => `upper(${quoteSocrataIdentifier(field.name)}) = '${escaped}'`);
+    templates.push({ label: "id_exact", where: idExact.length === 1 ? idExact[0] : `(${idExact.join(" OR ")})` });
+    const idContains = idFields.map((field) => `upper(${quoteSocrataIdentifier(field.name)}) like '%${escaped}%'`);
+    templates.push({ label: "id_contains", where: idContains.length === 1 ? idContains[0] : `(${idContains.join(" OR ")})` });
+  }
+
+  if (addressFields.length > 0) {
+    const addressContains = addressFields.map((field) => `upper(${quoteSocrataIdentifier(field.name)}) like '%${escaped}%'`);
+    templates.push({
+      label: "address_contains",
+      where: addressContains.length === 1 ? addressContains[0] : `(${addressContains.join(" OR ")})`
+    });
+    if (tokens.length >= 2) {
+      const tokenAnd = tokens.map((token) => {
+        const tokenPredicates = addressFields.map(
+          (field) => `upper(${quoteSocrataIdentifier(field.name)}) like '%${token}%'`
+        );
+        return tokenPredicates.length === 1 ? tokenPredicates[0] : `(${tokenPredicates.join(" OR ")})`;
+      });
+      templates.push({ label: "address_tokens_and", where: tokenAnd.join(" AND ") });
+    }
+  }
+
+  const broadWhere = buildSocrataWhereForText(searchText, broadFields);
+  if (broadWhere) {
+    templates.push({ label: "broad_like", where: broadWhere });
+  }
+  templates.push({ label: "q_fallback", fullText: searchText });
+  return templates;
 };
 
 const pointToBufferedPolygon = (lon: number, lat: number, delta = 0.00005): GeoJsonGeometry => ({
@@ -440,6 +552,46 @@ const parseSocrataGeometry = (value: any): GeoJsonGeometry | undefined => {
   return undefined;
 };
 
+const parseSocrataCoordinateGeometry = (attributes: Record<string, unknown>): GeoJsonGeometry | undefined => {
+  const keys = Object.keys(attributes || {});
+  const latKey = keys.find((key) => SOCRATA_LAT_FIELD_PATTERN.test(key));
+  const lonKey = keys.find((key) => SOCRATA_LON_FIELD_PATTERN.test(key));
+  if (!latKey || !lonKey) return undefined;
+  const lat = Number(attributes[latKey]);
+  const lon = Number(attributes[lonKey]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+  return pointToBufferedPolygon(lon, lat);
+};
+
+const pickSocrataCoordinateFields = (fields: OpenDataField[]) => {
+  const latField = fields.find((field) => SOCRATA_LAT_FIELD_PATTERN.test(field.name))?.name;
+  const lonField = fields.find((field) => SOCRATA_LON_FIELD_PATTERN.test(field.name))?.name;
+  if (!latField || !lonField) return null;
+  return { latField, lonField };
+};
+
+const bboxFromGeometry = (geometry: GeoJsonGeometry) => {
+  const points: Array<[number, number]> = geometry.type === "Polygon"
+    ? (geometry.coordinates[0] || [])
+    : geometry.coordinates.flatMap((polygon) => polygon[0] || []);
+  if (points.length === 0) return null;
+  let minLon = Number.POSITIVE_INFINITY;
+  let maxLon = Number.NEGATIVE_INFINITY;
+  let minLat = Number.POSITIVE_INFINITY;
+  let maxLat = Number.NEGATIVE_INFINITY;
+  points.forEach(([lon, lat]) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    minLon = Math.min(minLon, lon);
+    maxLon = Math.max(maxLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  });
+  if (!Number.isFinite(minLon) || !Number.isFinite(maxLon) || !Number.isFinite(minLat) || !Number.isFinite(maxLat)) {
+    return null;
+  }
+  return { minLon, maxLon, minLat, maxLat };
+};
+
 const wktFromPolygon = (geometry: GeoJsonGeometry) => {
   if (geometry.type === "Polygon") {
     const ring = geometry.coordinates[0] || [];
@@ -452,11 +604,174 @@ const wktFromPolygon = (geometry: GeoJsonGeometry) => {
   return `MULTIPOLYGON(${parts.join(", ")})`;
 };
 
+const coerceSocrataRows = (payload: unknown): Array<Record<string, unknown>> | null => {
+  const candidates = [
+    payload,
+    (payload as any)?.data,
+    (payload as any)?.results,
+    (payload as any)?.rows,
+    (payload as any)?.result?.rows
+  ];
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+    const rows = candidate.filter((row) => row && typeof row === "object") as Array<Record<string, unknown>>;
+    if (rows.length > 0 || candidate.length === 0) {
+      return rows;
+    }
+  }
+  return null;
+};
+
 const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvider => {
   const portalUrl = normalizePortalUrl(context.portalUrl);
   const config = context.config || getOpenDataConfig();
   const headers = buildSocrataHeaders(config);
   const socrataRateLimitMs = config.auth.socrataAppToken ? 100 : 500;
+  const preferSocrataV3 = config.featureFlags?.socrataPreferV3 === true;
+  const socrataViewCache = new Map<string, any | null>();
+  const socrataMetadataCache = new Map<string, OpenDatasetMetadata | null>();
+  const socrataFieldsCache = new Map<string, OpenDataField[]>();
+
+  const fetchSocrataView = async (datasetId: string) => {
+    if (!datasetId) return null;
+    if (socrataViewCache.has(datasetId)) {
+      return socrataViewCache.get(datasetId) ?? null;
+    }
+    const metaUrl = `${portalUrl}/api/views/${datasetId}.json`;
+    await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
+    const response = await fetchJsonWithPortalCache<any>(metaUrl, { headers }, { portalType: "socrata", portalUrl });
+    if (!response.ok || !response.data) {
+      socrataViewCache.set(datasetId, null);
+      return null;
+    }
+    socrataViewCache.set(datasetId, response.data);
+    return response.data;
+  };
+
+  const buildSocrataOrderClause = (fields: OpenDataField[]) => {
+    const preferred = fields.find((field) => SOCRATA_ID_FIELD_PATTERN.test(field.name))?.name;
+    if (preferred) return `${quoteSocrataIdentifier(preferred)} ASC`;
+    return ":id ASC";
+  };
+
+  const toSocrataRecord = (row: Record<string, unknown>, geometryFieldNames: string[] = []): OpenDataRecord => {
+    let geometry = parseSocrataGeometry((row as any).location || (row as any).geom || (row as any).the_geom);
+    if (!geometry) {
+      for (const fieldName of geometryFieldNames) {
+        geometry = parseSocrataGeometry((row as any)[fieldName]);
+        if (geometry) break;
+      }
+    }
+    if (!geometry) {
+      geometry = parseSocrataCoordinateGeometry(row);
+    }
+    return {
+      id: parseSocrataRecordId(row),
+      attributes: row,
+      geometry
+    };
+  };
+
+  const runPagedSocrataQuery = async (input: {
+    datasetId: string;
+    baseParams: URLSearchParams;
+    limit: number;
+    offset: number;
+    orderClause?: string;
+    geometryFieldNames?: string[];
+  }): Promise<OpenDataQueryResult> => {
+    const safeLimit = Math.max(1, Math.min(Math.trunc(input.limit), OPEN_DATA_PROVIDER_MAX_RECORDS));
+    const safeOffset = Math.max(0, Math.trunc(input.offset));
+    const maxPages = Math.max(1, OPEN_DATA_PROVIDER_MAX_PAGES);
+    const perPage = Math.max(1, Math.min(200, safeLimit));
+    const records: OpenDataRecord[] = [];
+    const seenRecordKeys = new Set<string>();
+    const geometryFieldNames = Array.isArray(input.geometryFieldNames) ? input.geometryFieldNames : [];
+    let currentOffset = safeOffset;
+    let pages = 0;
+    let lastError: OpenDataProviderError | undefined;
+    let lastRagUsageId: string | undefined;
+
+    while (pages < maxPages && records.length < safeLimit) {
+      const pageParams = new URLSearchParams(input.baseParams);
+      const remaining = Math.max(1, safeLimit - records.length);
+      pageParams.set("$limit", String(Math.min(perPage, remaining)));
+      pageParams.set("$offset", String(currentOffset));
+      if (input.orderClause && !pageParams.has("$order")) {
+        pageParams.set("$order", input.orderClause);
+      }
+      const primarySodaPlan = buildSocrataSodaEndpoint({
+        portalUrl,
+        datasetId: input.datasetId,
+        preferV3: preferSocrataV3,
+        hasAppToken: Boolean(config.auth.socrataAppToken),
+        params: pageParams
+      });
+      const fallbackSodaPlan = primarySodaPlan.version === "3.0"
+        ? buildSocrataSodaEndpoint({
+            portalUrl,
+            datasetId: input.datasetId,
+            preferV3: false,
+            hasAppToken: Boolean(config.auth.socrataAppToken),
+            params: pageParams
+          })
+        : null;
+      const plans = fallbackSodaPlan ? [primarySodaPlan, fallbackSodaPlan] : [primarySodaPlan];
+      let pageRows: Array<Record<string, unknown>> | null = null;
+      let pageError: OpenDataProviderError | undefined;
+
+      for (let i = 0; i < plans.length; i += 1) {
+        const sodaPlan = plans[i];
+        lastRagUsageId = sodaPlan.ragUsageId;
+        await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
+        const response = await fetchJsonWithPortalCache<any>(sodaPlan.url, { headers }, { portalType: "socrata", portalUrl });
+        const rows = response.ok ? coerceSocrataRows(response.data) : null;
+        const success = response.ok && Array.isArray(rows);
+        if (lastRagUsageId) recordRagOutcome(lastRagUsageId, success && rows.length > 0);
+        if (!success) {
+          const errorMessage = "error" in response ? response.error : "query failed";
+          pageError = { code: "query_failed", message: errorMessage, status: response.status };
+          const shouldFallback = i < plans.length - 1;
+          if (shouldFallback) continue;
+          break;
+        }
+        pageRows = rows;
+        break;
+      }
+
+      if (!Array.isArray(pageRows)) {
+        lastError = pageError || { code: "query_failed", message: "query failed" };
+        break;
+      }
+      if (pageRows.length === 0) {
+        break;
+      }
+
+      pageRows.forEach((row: any, index: number) => {
+        const record = toSocrataRecord(row, geometryFieldNames);
+        const key = record.id || `${currentOffset + index}|${JSON.stringify(record.attributes || {})}`;
+        if (seenRecordKeys.has(key)) return;
+        seenRecordKeys.add(key);
+        records.push(record);
+      });
+
+      const pageLimit = Number(pageParams.get("$limit") || 0) || perPage;
+      currentOffset += pageRows.length;
+      pages += 1;
+      if (pageRows.length < pageLimit) {
+        break;
+      }
+    }
+
+    const nextOffset = records.length >= safeLimit ? safeOffset + records.length : undefined;
+    if (records.length > 0) {
+      return { records: records.slice(0, safeLimit), nextOffset };
+    }
+    if (lastError) {
+      return { records: [], errors: [lastError] };
+    }
+    return { records: [], nextOffset: undefined };
+  };
 
   const discoverDatasets = async (query: string, limit = OPEN_DATA_DISCOVERY_MAX_DATASETS) => {
     const portalDomain = getPortalDomain(portalUrl);
@@ -539,11 +854,14 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
 
   const fetchMetadata = async (datasetId: string) => {
     if (!datasetId) return null;
-    const metaUrl = `${portalUrl}/api/views/${datasetId}.json`;
-    await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithPortalCache<any>(metaUrl, { headers }, { portalType: "socrata", portalUrl });
-    if (!response.ok || !response.data) return null;
-    const data = response.data;
+    if (socrataMetadataCache.has(datasetId)) {
+      return socrataMetadataCache.get(datasetId) ?? null;
+    }
+    const data = await fetchSocrataView(datasetId);
+    if (!data) {
+      socrataMetadataCache.set(datasetId, null);
+      return null;
+    }
     const licenseInfo = parseLicenseDetails(data?.license);
     const termsInfo = parseTermsDetails(data?.termsOfService || data?.terms);
     const dataset = normalizeDataset({
@@ -563,23 +881,29 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       homepageUrl: asStringFrom(data?.permalink, data?.link),
       tags: Array.isArray(data?.tags) ? data.tags.filter((tag: unknown) => typeof tag === "string") : undefined
     });
+    socrataMetadataCache.set(datasetId, dataset);
     return dataset;
   };
 
   const listFields = async (datasetId: string): Promise<OpenDataField[]> => {
-    const metadata = await fetchMetadata(datasetId);
-    if (!metadata) return [];
-    const metaUrl = `${portalUrl}/api/views/${datasetId}.json`;
-    await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithPortalCache<any>(metaUrl, { headers }, { portalType: "socrata", portalUrl });
-    if (!response.ok || !response.data) return [];
-    const columns = Array.isArray(response.data?.columns) ? response.data.columns : [];
-    return columns.map((col: any) => ({
+    if (!datasetId) return [];
+    if (socrataFieldsCache.has(datasetId)) {
+      return socrataFieldsCache.get(datasetId) || [];
+    }
+    const data = await fetchSocrataView(datasetId);
+    if (!data) {
+      socrataFieldsCache.set(datasetId, []);
+      return [];
+    }
+    const columns = Array.isArray(data?.columns) ? data.columns : [];
+    const parsed = columns.map((col: any) => ({
       name: asString(col?.fieldName || col?.name) || "",
       type: asString(col?.dataTypeName || col?.dataType) || undefined,
       description: asString(col?.description) || undefined,
       isGeometry: SOCRATA_GEOMETRY_TYPE_PATTERN.test(asString(col?.dataTypeName || col?.dataType) || "")
     })).filter((field: OpenDataField) => field.name);
+    socrataFieldsCache.set(datasetId, parsed);
+    return parsed;
   };
 
   const getDistributions = async (datasetId: string): Promise<OpenDataDistribution[]> => {
@@ -593,92 +917,193 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
   };
 
   const queryByText = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
-    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
+    const limit = Math.max(1, Math.min(Math.trunc(input.limit ?? 50), OPEN_DATA_PROVIDER_MAX_RECORDS));
     const offset = Math.max(0, input.offset ?? 0);
-    const params = new URLSearchParams({
-      "$limit": String(limit),
-      "$offset": String(offset)
+    const fields = await listFields(input.datasetId);
+    const geometryFieldNames = fields.filter((field) => field.isGeometry).map((field) => field.name);
+    const selectClause = buildSocrataFieldSelect(fields, {
+      includeSearchableText: true,
+      includeGeometry: true,
+      includeIds: true,
+      maxFields: 16
     });
-    if (input.searchText) {
-      const fields = await listFields(input.datasetId);
-      const fieldScopedWhere = buildSocrataWhereForText(input.searchText, fields);
-      if (fieldScopedWhere) {
-        params.set("$where", fieldScopedWhere);
-      } else {
-        params.set("$q", input.searchText);
+    const orderClause = buildSocrataOrderClause(fields);
+    const baseParams = new URLSearchParams();
+    if (selectClause) baseParams.set("$select", selectClause);
+
+    if (!input.searchText || !input.searchText.trim()) {
+      return runPagedSocrataQuery({
+        datasetId: input.datasetId,
+        baseParams,
+        limit,
+        offset,
+        orderClause,
+        geometryFieldNames
+      });
+    }
+
+    const templates = buildSocrataTextQueryTemplates(input.searchText, fields);
+    const merged: OpenDataRecord[] = [];
+    const seen = new Set<string>();
+    const errors: OpenDataProviderError[] = [];
+    const mergeResult = (result: OpenDataQueryResult) => {
+      if (Array.isArray(result.errors) && result.errors.length > 0) {
+        errors.push(...result.errors);
+      }
+      (result.records || []).forEach((record) => {
+        const key = record.id || JSON.stringify(record.attributes || {});
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        merged.push(record);
+      });
+    };
+
+    for (const template of templates) {
+      if (merged.length >= limit) break;
+      const params = new URLSearchParams(baseParams);
+      if (template.where) {
+        params.set("$where", template.where);
+      } else if (template.fullText) {
+        params.set("$q", template.fullText);
+      }
+      const result = await runPagedSocrataQuery({
+        datasetId: input.datasetId,
+        baseParams: params,
+        limit,
+        offset,
+        orderClause,
+        geometryFieldNames
+      });
+      mergeResult(result);
+      if ((template.label === "id_exact" || template.label === "id_contains") && merged.length > 0) {
+        break;
       }
     }
-    const sodaPlan = buildSocrataSodaEndpoint({
-      portalUrl,
-      datasetId: input.datasetId,
-      hasAppToken: Boolean(config.auth.socrataAppToken),
-      params
-    });
-    const ragUsageId = sodaPlan.ragUsageId;
-    const url = sodaPlan.url;
-    await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithPortalCache<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
-    if (!response.ok || !Array.isArray(response.data)) {
-      if (ragUsageId) recordRagOutcome(ragUsageId, false);
-      return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
+
+    if (merged.length > 0) {
+      return {
+        records: merged.slice(0, limit),
+        nextOffset: merged.length >= limit ? offset + limit : undefined
+      };
     }
-    const records = response.data.map((row: any) => ({
-      id: asString(row?.id || row?.sid),
-      attributes: row,
-      geometry: parseSocrataGeometry(row?.location || row?.geom || row?.the_geom)
-    }));
-    if (ragUsageId) recordRagOutcome(ragUsageId, records.length > 0);
     return {
-      records,
-      nextOffset: records.length === limit ? offset + limit : undefined
+      records: [],
+      errors: errors.length > 0 ? [errors[0]] : undefined
     };
   };
 
   const queryByGeometry = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
-    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
+    const limit = Math.max(1, Math.min(Math.trunc(input.limit ?? 50), OPEN_DATA_PROVIDER_MAX_RECORDS));
     const offset = Math.max(0, input.offset ?? 0);
     const fields = await listFields(input.datasetId);
     const geometryField = fields.find((field) => field.isGeometry)?.name;
-    if (!geometryField) {
+    const coordinateFields = pickSocrataCoordinateFields(fields);
+    if (!geometryField && !coordinateFields) {
       return { records: [], errors: [{ code: "no_geometry", message: "No geometry field detected." }] };
     }
-    const params = new URLSearchParams({
-      "$limit": String(limit),
-      "$offset": String(offset)
+    const baseParams = new URLSearchParams();
+    const selectClause = buildSocrataFieldSelect(fields, {
+      includeSearchableText: false,
+      includeGeometry: true,
+      includeIds: true,
+      maxFields: 14
     });
+    if (selectClause) {
+      baseParams.set("$select", selectClause);
+    }
+    const orderClause = buildSocrataOrderClause(fields);
+    const geometryFieldNames = fields.filter((field) => field.isGeometry).map((field) => field.name);
     const point = normalizePoint(input.point);
     if (input.point && !point) {
       return { records: [], errors: [{ code: "invalid_crs", message: "Invalid point geometry (expect EPSG:4326)." }] };
     }
+    const mergeById = (target: OpenDataRecord[], incoming: OpenDataRecord[]) => {
+      const seen = new Set(target.map((item) => item.id || JSON.stringify(item.attributes || {})));
+      incoming.forEach((item) => {
+        const key = item.id || JSON.stringify(item.attributes || {});
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        target.push(item);
+      });
+    };
+
+    const combined: OpenDataRecord[] = [];
+    const errors: OpenDataProviderError[] = [];
+
     if (point) {
-      params.set("$where", `within_circle(${geometryField}, ${point.lat}, ${point.lon}, 25)`);
+      const radiiMeters = [25, 100, 250];
+      for (const radius of radiiMeters) {
+        const params = new URLSearchParams(baseParams);
+        if (geometryField) {
+          params.set("$where", `within_circle(${quoteSocrataIdentifier(geometryField)}, ${point.lat}, ${point.lon}, ${radius})`);
+        } else if (coordinateFields) {
+          const delta = radius / 111_320;
+          const minLat = point.lat - delta;
+          const maxLat = point.lat + delta;
+          const minLon = point.lon - delta;
+          const maxLon = point.lon + delta;
+          params.set(
+            "$where",
+            `${quoteSocrataIdentifier(coordinateFields.latField)} >= ${minLat} AND ${quoteSocrataIdentifier(coordinateFields.latField)} <= ${maxLat} AND `
+            + `${quoteSocrataIdentifier(coordinateFields.lonField)} >= ${minLon} AND ${quoteSocrataIdentifier(coordinateFields.lonField)} <= ${maxLon}`
+          );
+        }
+        const result = await runPagedSocrataQuery({
+          datasetId: input.datasetId,
+          baseParams: params,
+          limit,
+          offset,
+          orderClause,
+          geometryFieldNames
+        });
+        if (Array.isArray(result.errors) && result.errors.length > 0) {
+          errors.push(...result.errors);
+          continue;
+        }
+        mergeById(combined, result.records || []);
+        if (combined.length > 0 || combined.length >= limit) {
+          break;
+        }
+      }
     } else if (input.geometry) {
-      const wkt = wktFromPolygon(input.geometry);
-      params.set("$where", `within_polygon(${geometryField}, '${wkt}')`);
+      const params = new URLSearchParams(baseParams);
+      if (geometryField) {
+        const wkt = wktFromPolygon(input.geometry);
+        params.set("$where", `within_polygon(${quoteSocrataIdentifier(geometryField)}, '${wkt}')`);
+      } else if (coordinateFields) {
+        const bbox = bboxFromGeometry(input.geometry);
+        if (!bbox) {
+          return { records: [], errors: [{ code: "invalid_geometry", message: "Invalid polygon geometry." }] };
+        }
+        params.set(
+          "$where",
+          `${quoteSocrataIdentifier(coordinateFields.latField)} >= ${bbox.minLat} AND ${quoteSocrataIdentifier(coordinateFields.latField)} <= ${bbox.maxLat} AND `
+          + `${quoteSocrataIdentifier(coordinateFields.lonField)} >= ${bbox.minLon} AND ${quoteSocrataIdentifier(coordinateFields.lonField)} <= ${bbox.maxLon}`
+        );
+      }
+      const result = await runPagedSocrataQuery({
+        datasetId: input.datasetId,
+        baseParams: params,
+        limit,
+        offset,
+        orderClause,
+        geometryFieldNames
+      });
+      if (Array.isArray(result.errors) && result.errors.length > 0) {
+        errors.push(...result.errors);
+      }
+      mergeById(combined, result.records || []);
     }
-    const sodaPlan = buildSocrataSodaEndpoint({
-      portalUrl,
-      datasetId: input.datasetId,
-      hasAppToken: Boolean(config.auth.socrataAppToken),
-      params
-    });
-    const ragUsageId = sodaPlan.ragUsageId;
-    const url = sodaPlan.url;
-    await enforceRateLimit(`socrata:${portalUrl}`, socrataRateLimitMs);
-    const response = await fetchJsonWithPortalCache<any[]>(url, { headers }, { portalType: "socrata", portalUrl });
-    if (!response.ok || !Array.isArray(response.data)) {
-      if (ragUsageId) recordRagOutcome(ragUsageId, false);
-      return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
+
+    if (combined.length > 0) {
+      return {
+        records: combined.slice(0, limit),
+        nextOffset: combined.length >= limit ? offset + limit : undefined
+      };
     }
-    const records = response.data.map((row: any) => ({
-      id: asString(row?.id || row?.sid),
-      attributes: row,
-      geometry: parseSocrataGeometry(row?.location || row?.geom || row?.the_geom)
-    }));
-    if (ragUsageId) recordRagOutcome(ragUsageId, records.length > 0);
     return {
-      records,
-      nextOffset: records.length === limit ? offset + limit : undefined
+      records: [],
+      errors: errors.length > 0 ? [errors[0]] : undefined
     };
   };
 
@@ -916,7 +1341,8 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     await enforceRateLimit(`arcgis:${portalUrl}`, arcgisRateLimitMs);
     const response = await fetchJsonWithPortalCache<any>(withToken(url), {}, { portalType: "arcgis", portalUrl });
     if (!response.ok || !response.data) {
-      return { records: [], errors: [{ code: "query_failed", message: response.error || "query failed", status: response.status }] };
+      const errorMessage = "error" in response ? response.error : "query failed";
+      return { records: [], errors: [{ code: "query_failed", message: errorMessage, status: response.status }] };
     }
     const features = Array.isArray(response.data?.features) ? response.data.features : [];
     const records = features.map((feature: any) => ({
@@ -1263,7 +1689,7 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
 
   const listFields = async (datasetId: string): Promise<OpenDataField[]> => {
     const distribution = await loadDistribution(datasetId);
-    if (!distribution || "error" in distribution) return [];
+    if (!distribution) return [];
     const data = distribution.data;
     if (Array.isArray(data) && data.length > 0 && typeof data[0] === "object") {
       return Object.keys(data[0]).map((key) => ({ name: key }));
@@ -1295,7 +1721,6 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
   const queryByText = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
     const distribution = await loadDistribution(input.datasetId);
     if (!distribution) return { records: [], errors: [{ code: "no_distribution", message: "No distribution found." }] };
-    if ("error" in distribution) return { records: [], errors: [{ code: distribution.error, message: "Dataset too large." }] };
     const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
     const records = normalizeDcatRecords(distribution.data);
@@ -1311,7 +1736,6 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
   const queryByGeometry = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
     const distribution = await loadDistribution(input.datasetId);
     if (!distribution) return { records: [], errors: [{ code: "no_distribution", message: "No distribution found." }] };
-    if ("error" in distribution) return { records: [], errors: [{ code: distribution.error, message: "Dataset too large." }] };
     const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
     const records = normalizeDcatRecords(distribution.data);
