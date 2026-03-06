@@ -23,10 +23,10 @@ The Settings modal persists configuration to localStorage. Keys are shown here s
 ## Universal Settings Sync
 When the Worker proxy is configured and Cloudflare Access headers are present, the app loads and saves settings to the universal store. If the cloud endpoint is unavailable or unauthorized, localStorage is used as a fallback.
 
-- **Save Configuration** persists provider/run config/model overrides locally, then attempts to sync non-secret settings to the cloud (`/api/settings`).
+- **Save Configuration** persists provider/run config/model overrides locally, then syncs the full household settings profile to the cloud (`/api/settings`) including key overrides and open-data auth/settings.
 - On success, the modal closes and the cloud metadata (`updatedAt`, `updatedBy`, `version`) is refreshed.
 - On errors or conflicts, the modal stays open and a status banner explains what happened. Conflicts offer a **Load Cloud Settings** action before retrying.
-- API keys are never sent to the server; only non-secret settings are synced.
+- Any Cloudflare Access-approved user loads the same shared settings profile.
 
 See `docs/universal-settings.md` for the full schema, conflict rules, and governance.
 

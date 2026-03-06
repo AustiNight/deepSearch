@@ -7,7 +7,7 @@ This review covers how API keys are stored, how logs handle sensitive data, and 
 
 ## Key Storage Review
 - Client-side API keys are stored only in browser localStorage (`overseer_api_key_google`, `overseer_api_key_openai`).
-- API keys are never included in the universal settings payload sent to the worker. The payload builder strips key fields and tests assert no keys are serialized.
+- Household key overrides and open-data auth keys are included in universal settings sync and stored in the shared Worker settings record (`shared_settings:v2`) for all Cloudflare Access-approved users.
 - Worker-side provider keys are stored in Cloudflare Worker environment bindings and are never emitted in responses.
 
 Files reviewed
@@ -18,8 +18,8 @@ Files reviewed
 - `workers/worker.ts`
 
 Status
-- Pass: keys are isolated to client localStorage or worker environment secrets, and are not sent to the server from the client settings flow.
-- Residual risk: localStorage is plaintext. Recommended for trusted environments only.
+- Pass: keys are redacted from logs and only transmitted to same-origin Worker settings endpoints under Cloudflare Access.
+- Residual risk: shared settings persistence means any Access-approved user can read/apply household keys via the app session.
 
 ## Logging Review
 - Run logs redact address-like inputs using normalized address variants.

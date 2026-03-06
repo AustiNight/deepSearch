@@ -153,11 +153,38 @@ const runSocrataValidationTests = async () => {
     portalType: "socrata"
   });
   assert.equal(result.parcel?.parcelId, "P-999");
-  const hasNonTabularGap = result.dataGaps.some((gap) => {
-    return (gap.description || "").toLowerCase().includes("not a tabular dataset")
-      || (gap.reason || "").toLowerCase().includes("not tabular");
+  const hasRestrictedGap = result.dataGaps.some((gap) => {
+    return (gap.status || "").toLowerCase() === "restricted";
   });
-  assert.ok(hasNonTabularGap, "Expected non-tabular dataset gap.");
+  assert.equal(hasRestrictedGap, false, "Expected no public-access restriction gap for this fixture.");
+};
+
+const runSocrataNonTextFieldFallbackTest = async () => {
+  const calls = [];
+  updateOpenDataConfig({ auth: { socrataAppToken: "token-123" } });
+  global.fetch = buildProxyFetch((target, body) => {
+    calls.push({ target: String(target), body });
+    if (String(target).includes("/api/views/loc-1.json")) {
+      return buildResponse({
+        name: "Code Violations",
+        columns: [
+          { fieldName: "location", dataTypeName: "location" },
+          { fieldName: "the_geom", dataTypeName: "multipolygon" }
+        ]
+      });
+    }
+    if (String(target).includes("/resource/loc-1.json")) {
+      return buildResponse([]);
+    }
+    throw new Error(`Unexpected URL ${target}`);
+  });
+
+  const provider = createOpenDataProvider({ portalUrl: "https://data.example.gov", portalType: "socrata" });
+  await provider.queryByText({ datasetId: "loc-1", searchText: "819 S VAN BUREN AVE" });
+  const textQueryCall = calls.find((call) => call.target.includes("/resource/loc-1.json"));
+  assert.ok(textQueryCall, "Expected Socrata query request.");
+  assert.ok(textQueryCall.target.includes("%24q="), "Expected $q fallback when no text-safe fields are available.");
+  assert.ok(!textQueryCall.target.includes("%24where="), "Did not expect $where with non-text fields.");
 };
 
 const runNodeProxyFallbackTest = async () => {
@@ -797,6 +824,7 @@ const runDallasVariantTest = () => {
 
 await runSocrataTests();
 await runSocrataValidationTests();
+await runSocrataNonTextFieldFallbackTest();
 await runNodeProxyFallbackTest();
 await runArcGisTests();
 await runDcatTests();

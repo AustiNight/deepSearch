@@ -1,10 +1,12 @@
 # Universal Settings Sync
 
 **Identity And Auth**
-Universal settings are tied to the Cloudflare Access identity presented to the worker. Requests must include `Cf-Access-Authenticated-User-Email` and `Cf-Access-Jwt-Assertion`. The email header is used as the per-user storage key.
+Universal settings are guarded by Cloudflare Access identity. Requests must include `Cf-Access-Authenticated-User-Email` and `Cf-Access-Jwt-Assertion`.
 
 **Storage Model**
-Settings are stored in Cloudflare KV under `SETTINGS_KV` using the key format `user_settings:<sha256(email)>`. Each record contains the settings payload (no allowlist, no keys) plus metadata for conflict detection. The Access email is hashed before storage to avoid PII in KV keys.
+Settings are stored in Cloudflare KV under `SETTINGS_KV` using one shared key: `shared_settings:v2`.
+Any user who passes Cloudflare Access reads/writes this same household profile.
+Legacy per-user keys are migrated into the shared key on first successful read/write.
 
 **Settings Schema**
 Schema version: `1`
@@ -14,6 +16,12 @@ Fields
 - `provider` (`google` or `openai`)
 - `runConfig` (object)
 - `modelOverrides` (object)
+- `keyOverrides` (object; optional `google` / `openai` key strings)
+- `openDataConfig` (object)
+  - `zeroCostMode`
+  - `allowPaidAccess`
+  - `featureFlags`
+  - `auth` (`socrataAppToken`, `arcgisApiKey`, `geocodingEmail`, `geocodingKey`)
 
 RunConfig fields
 - `minAgents`
@@ -26,6 +34,8 @@ RunConfig fields
 - `earlyStopNoveltyRatio`
 - `earlyStopNewDomains`
 - `earlyStopNewSources`
+- `estimatedCallLatencyMs`
+- `priorityWeights`
 
 **Versioning Strategy**
 The `schemaVersion` value is required. Unknown versions are rejected by the worker. The client normalizes missing fields to defaults before saving.
@@ -47,4 +57,4 @@ Example scenarios
 If the cloud record is missing and local storage contains settings, the client performs a one-time import. The migration flag is set only after a successful cloud write. If migration fails, the client keeps local settings and retries later.
 
 **Storage Governance**
-Retention is indefinite unless manually cleared. Payloads are capped at 50 KB. KV records exclude PII (no email allowlists, no access emails) and never store API keys. Worker logs record update events and version numbers without persisting PII.
+Retention is indefinite unless manually cleared. Payloads are capped at 50 KB. KV records exclude PII (no access emails, no allowlist emails in settings payload). Household key material may be stored in the shared settings record by design. Worker logs record update events and version numbers without persisting key values.

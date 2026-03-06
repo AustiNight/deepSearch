@@ -800,6 +800,11 @@ export type UniversalSettingsPayload = {
   runConfig: RunConfig;
   modelOverrides: ModelOverrides;
   accessAllowlist?: string[];
+  keyOverrides?: {
+    google?: string;
+    openai?: string;
+  };
+  openDataConfig?: OpenDataRuntimeConfig;
 };
 
 export type UniversalSettingsResponse = {

@@ -143,7 +143,7 @@ export const assertNoSecretExfiltration = (payload: unknown, context: string) =>
   if (!payload) return;
   if (isSensitivePayload(payload)) {
     throw new Error(
-      `Blocked ${context}: payload contains sensitive fields. Keys must remain client-only and never sync to Worker/KV.`
+      `Blocked ${context}: payload contains sensitive fields. Use a dedicated secure sync path for key-bearing payloads.`
     );
   }
 };
@@ -402,7 +402,7 @@ const normalizeFeatureFlags = (flags?: Partial<OpenDataFeatureFlags>): OpenDataF
   autoIngestion: flags?.autoIngestion === true,
   evidenceRecovery: flags?.evidenceRecovery !== false,
   gatingEnforcement: flags?.gatingEnforcement !== false,
-  usOnlyAddressPolicy: flags?.usOnlyAddressPolicy !== false
+  usOnlyAddressPolicy: flags?.usOnlyAddressPolicy === true
 });
 
 const pickOpenDataSettings = (config?: Partial<OpenDataRuntimeConfig> | null) => ({
@@ -927,9 +927,14 @@ export const writeAllowlistUpdatedAt = (value: string | null) => {
 
 export const hasLocalSettingsSnapshot = () => Boolean(
   readRaw("local", PROVIDER_STORAGE_KEY)
+  || readRaw("local", PROVIDER_KEY_STORAGE.google)
+  || readRaw("local", PROVIDER_KEY_STORAGE.openai)
   || readRaw("local", RUN_CONFIG_STORAGE_KEY)
   || readRaw("local", ACCESS_ALLOWLIST_STORAGE_KEY)
   || readRaw("local", MODEL_OVERRIDE_STORAGE_KEY)
+  || readRaw("local", OPEN_DATA_SETTINGS_STORAGE_KEY)
+  || readRaw("local", OPTIONAL_KEYS_STORAGE_KEY)
+  || readRaw("session", OPTIONAL_KEYS_STORAGE_KEY)
 );
 
 export const readModelOverridesRaw = () => safeJsonParse<unknown>(readRaw("local", MODEL_OVERRIDE_STORAGE_KEY));

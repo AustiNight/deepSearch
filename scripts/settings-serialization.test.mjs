@@ -19,18 +19,34 @@ const payload = buildUniversalSettingsPayload({
   runConfig,
   modelOverrides: { overseer_planning: 'gpt-4.1-mini', synthesis: 'gpt-4.1' },
   accessAllowlist: ['user@example.com', 'invalid-email'],
-  apiKey: 'sk-test-should-not-leak',
-  keys: { openai: 'sk-test-should-not-leak', google: 'AIza-test-should-not-leak' },
+  keyOverrides: { openai: 'sk-test-should-not-leak', google: 'AIza-test-should-not-leak' },
+  openDataConfig: {
+    zeroCostMode: true,
+    allowPaidAccess: true,
+    featureFlags: {
+      autoIngestion: true,
+      evidenceRecovery: true,
+      gatingEnforcement: true,
+      usOnlyAddressPolicy: false
+    },
+    auth: {
+      socrataAppToken: 'token-123',
+      arcgisApiKey: 'AAPK-test-123'
+    }
+  }
 });
 
 assert.equal(payload.provider, 'openai');
 assert.deepEqual(payload.accessAllowlist, ['user@example.com']);
-assert.ok(!('apiKey' in payload));
-assert.ok(!('keys' in payload));
+assert.equal(payload.keyOverrides?.openai, 'sk-test-should-not-leak');
+assert.equal(payload.keyOverrides?.google, 'AIza-test-should-not-leak');
+assert.equal(payload.openDataConfig?.auth?.socrataAppToken, 'token-123');
+assert.equal(payload.openDataConfig?.allowPaidAccess, false);
 
 const serialized = JSON.stringify(payload);
-assert.ok(!serialized.includes('sk-test-should-not-leak'));
-assert.ok(!serialized.includes('AIza-test-should-not-leak'));
+assert.ok(serialized.includes('sk-test-should-not-leak'));
+assert.ok(serialized.includes('AIza-test-should-not-leak'));
+assert.ok(serialized.includes('token-123'));
 
 const payloadWithoutAllowlist = buildUniversalSettingsPayload({
   provider: 'google',

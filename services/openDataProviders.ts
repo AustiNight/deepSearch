@@ -8,16 +8,13 @@ import type {
 import {
   OPEN_DATA_DISCOVERY_MAX_DATASETS,
   OPEN_DATA_DISCOVERY_MAX_ITEM_FETCHES,
-  OPEN_DATA_DCAT_MAX_DOWNLOAD_BYTES,
-  OPEN_DATA_PROVIDER_MAX_PAGES,
-  OPEN_DATA_PROVIDER_MAX_RECORDS,
   OPEN_DATA_QUERY_CACHE_TTL_MS
 } from "../constants";
 import { fetchJsonWithRetry, fetchTextWithRetry, enforceRateLimit } from "./openDataHttp";
 import { getOpenDataConfig } from "./openDataConfig";
 import { buildSocrataSodaEndpoint, planSocrataDiscoveryQuery } from "./socrataRagPlanner";
 import { recordRagOutcome } from "./ragTelemetry";
-import { MAX_LOCAL_SPATIAL_JOIN_FEATURES, pointInGeometry } from "./spatialJoin";
+import { pointInGeometry } from "./spatialJoin";
 import type { GeoJsonGeometry } from "./parcelResolution";
 
 export type OpenDataField = {
@@ -293,12 +290,6 @@ const normalizePoint = (point?: { lat: number; lon: number }) => {
   return point;
 };
 
-const exceedsPageLimit = (offset: number, limit: number) => {
-  if (limit <= 0) return true;
-  const page = Math.floor(offset / limit);
-  return page >= OPEN_DATA_PROVIDER_MAX_PAGES;
-};
-
 const fetchJsonWithPortalCache = <T>(
   url: string,
   options: {
@@ -380,6 +371,24 @@ const buildSocrataHeaders = (config: OpenDataRuntimeConfig) => {
 };
 
 const SOCRATA_TEXT_FIELD_PATTERN = /address|situs|site|location|parcel|apn|pin|account|acct|taxroll|owner|legal/i;
+const SOCRATA_GEOMETRY_TYPE_PATTERN = /(location|point|polygon|line|multipolygon|multiline|geometry)/i;
+const SOCRATA_TEXT_TYPE_PATTERN = /(text|multiline|url|email|phone)/i;
+const SOCRATA_NON_TEXT_TYPE_PATTERN = /(location|point|polygon|line|multipolygon|multiline|geometry|number|money|percent|checkbox|calendar|date|timestamp)/i;
+
+const isSocrataTextField = (field: OpenDataField) => {
+  if (!field.name || field.isGeometry) return false;
+  const type = (field.type || "").toLowerCase();
+  if (type && SOCRATA_NON_TEXT_TYPE_PATTERN.test(type)) {
+    return false;
+  }
+  if (/^(location|the_geom|geom)$/i.test(field.name)) {
+    return false;
+  }
+  if (type && !SOCRATA_TEXT_TYPE_PATTERN.test(type)) {
+    return false;
+  }
+  return SOCRATA_TEXT_FIELD_PATTERN.test(field.name);
+};
 
 const escapeSocrataLiteral = (value: string) => value.replace(/\\/g, "\\\\").replace(/'/g, "''");
 
@@ -387,8 +396,7 @@ const buildSocrataWhereForText = (searchText: string, fields: OpenDataField[]) =
   const trimmed = searchText.trim();
   if (!trimmed) return null;
   const searchableFields = fields
-    .filter((field) => field.name && !field.isGeometry && SOCRATA_TEXT_FIELD_PATTERN.test(field.name))
-    .slice(0, 6);
+    .filter((field) => isSocrataTextField(field));
   if (searchableFields.length === 0) return null;
   const escaped = escapeSocrataLiteral(trimmed.toUpperCase());
   const predicates = searchableFields.map((field) => `upper(${field.name}) like '%${escaped}%'`);
@@ -570,7 +578,7 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
       name: asString(col?.fieldName || col?.name) || "",
       type: asString(col?.dataTypeName || col?.dataType) || undefined,
       description: asString(col?.description) || undefined,
-      isGeometry: col?.dataTypeName === "location" || col?.dataTypeName === "point"
+      isGeometry: SOCRATA_GEOMETRY_TYPE_PATTERN.test(asString(col?.dataTypeName || col?.dataType) || "")
     })).filter((field: OpenDataField) => field.name);
   };
 
@@ -585,11 +593,8 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
   };
 
   const queryByText = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
-    const limit = Math.max(1, Math.min(input.limit ?? 50, OPEN_DATA_PROVIDER_MAX_RECORDS));
+    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    if (exceedsPageLimit(offset, limit)) {
-      return { records: [], errors: [{ code: "page_limit", message: "Pagination limit reached." }] };
-    }
     const params = new URLSearchParams({
       "$limit": String(limit),
       "$offset": String(offset)
@@ -630,11 +635,8 @@ const buildSocrataProvider = (context: OpenDataProviderContext): OpenDataProvide
   };
 
   const queryByGeometry = async (input: OpenDataQueryInput): Promise<OpenDataQueryResult> => {
-    const limit = Math.max(1, Math.min(input.limit ?? 50, OPEN_DATA_PROVIDER_MAX_RECORDS));
+    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    if (exceedsPageLimit(offset, limit)) {
-      return { records: [], errors: [{ code: "page_limit", message: "Pagination limit reached." }] };
-    }
     const fields = await listFields(input.datasetId);
     const geometryField = fields.find((field) => field.isGeometry)?.name;
     if (!geometryField) {
@@ -936,15 +938,12 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     const layer = selectArcGisLayer(layers, "text", input.searchText);
     if (!layer) return { records: [], errors: [{ code: "no_layers", message: "No layers found." }] };
     const fields = await listLayerFields(layer);
-    const limit = Math.max(1, Math.min(input.limit ?? 50, OPEN_DATA_PROVIDER_MAX_RECORDS));
+    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    if (exceedsPageLimit(offset, limit)) {
-      return { records: [], errors: [{ code: "page_limit", message: "Pagination limit reached." }] };
-    }
     const searchText = asString(input.searchText);
     let where = "1=1";
     if (searchText) {
-      const searchableFields = fields.filter((field) => ARC_GIS_TEXT_FIELD_PATTERN.test(field.name)).slice(0, 5);
+      const searchableFields = fields.filter((field) => ARC_GIS_TEXT_FIELD_PATTERN.test(field.name));
       if (searchableFields.length === 0) {
         return { records: [], errors: [{ code: "no_text_field", message: "No searchable text field detected." }] };
       }
@@ -970,11 +969,8 @@ const buildArcGisProvider = (context: OpenDataProviderContext): OpenDataProvider
     if (layers.length === 0) return { records: [], errors: [{ code: "no_layers", message: "No layers found." }] };
     const layer = selectArcGisLayer(layers, "geometry");
     if (!layer) return { records: [], errors: [{ code: "no_layers", message: "No layers found." }] };
-    const limit = Math.max(1, Math.min(input.limit ?? 50, OPEN_DATA_PROVIDER_MAX_RECORDS));
+    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    if (exceedsPageLimit(offset, limit)) {
-      return { records: [], errors: [{ code: "page_limit", message: "Pagination limit reached." }] };
-    }
     if (!input.point && !input.geometry) {
       return { records: [], errors: [{ code: "missing_geometry", message: "No geometry supplied." }] };
     }
@@ -1257,13 +1253,6 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
     await enforceRateLimit(`dcat:${portalUrl}`, 200);
     const response = await fetchTextWithPortalCache(meta.dataUrl, {}, { portalType: "dcat", portalUrl });
     if (!response.ok || !response.data) return null;
-    const sizeHeader = response.headers.get("content-length");
-    if (sizeHeader) {
-      const bytes = Number(sizeHeader);
-      if (Number.isFinite(bytes) && bytes > OPEN_DATA_DCAT_MAX_DOWNLOAD_BYTES) {
-        return { error: "download_too_large" } as const;
-      }
-    }
     const json = parseJsonMaybe(response.data);
     if (json) return { data: json, meta } as const;
     if (response.data.includes(",")) {
@@ -1307,11 +1296,8 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
     const distribution = await loadDistribution(input.datasetId);
     if (!distribution) return { records: [], errors: [{ code: "no_distribution", message: "No distribution found." }] };
     if ("error" in distribution) return { records: [], errors: [{ code: distribution.error, message: "Dataset too large." }] };
-    const limit = Math.max(1, Math.min(input.limit ?? OPEN_DATA_PROVIDER_MAX_RECORDS, OPEN_DATA_PROVIDER_MAX_RECORDS));
+    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    if (exceedsPageLimit(offset, limit)) {
-      return { records: [], errors: [{ code: "page_limit", message: "Pagination limit reached." }] };
-    }
     const records = normalizeDcatRecords(distribution.data);
     const text = (input.searchText || "").toLowerCase();
     if (!text) return { records };
@@ -1326,20 +1312,14 @@ const buildDcatProvider = (context: OpenDataProviderContext): OpenDataProvider =
     const distribution = await loadDistribution(input.datasetId);
     if (!distribution) return { records: [], errors: [{ code: "no_distribution", message: "No distribution found." }] };
     if ("error" in distribution) return { records: [], errors: [{ code: distribution.error, message: "Dataset too large." }] };
-    const limit = Math.max(1, Math.min(input.limit ?? OPEN_DATA_PROVIDER_MAX_RECORDS, OPEN_DATA_PROVIDER_MAX_RECORDS));
+    const limit = Math.max(1, Math.trunc(input.limit ?? 50));
     const offset = Math.max(0, input.offset ?? 0);
-    if (exceedsPageLimit(offset, limit)) {
-      return { records: [], errors: [{ code: "page_limit", message: "Pagination limit reached." }] };
-    }
     const records = normalizeDcatRecords(distribution.data);
     const point = normalizePoint(input.point);
     if (input.point && !point) {
       return { records: [], errors: [{ code: "invalid_crs", message: "Invalid point geometry (expect EPSG:4326)." }] };
     }
     if (!point) return { records: [], errors: [{ code: "missing_geometry", message: "No geometry supplied." }] };
-    if (records.length > MAX_LOCAL_SPATIAL_JOIN_FEATURES) {
-      return { records: [], errors: [{ code: "too_many_features", message: "Local spatial join skipped for large dataset." }] };
-    }
     const filtered = records.filter((record) => pointInGeometry(point, record.geometry));
     return { records: filtered.slice(offset, offset + limit) };
   };

@@ -582,6 +582,18 @@ type DeepResearchModelOptions = {
   signal?: AbortSignal;
 };
 
+const sanitizeDrillQueries = (queries: unknown[]): string[] => {
+  const normalized = (Array.isArray(queries) ? queries : []).map((entry) => {
+    if (typeof entry === "string") return entry.trim();
+    if (entry && typeof entry === "object") {
+      const candidate = (entry as any).query || (entry as any).text || (entry as any).q || (entry as any).value;
+      return typeof candidate === "string" ? candidate.trim() : "";
+    }
+    return "";
+  }).filter(Boolean);
+  return Array.from(new Set(normalized));
+};
+
 export const performDeepResearch = async (
   agentName: string,
   focus: string,
@@ -631,7 +643,7 @@ export const performDeepResearch = async (
             }
         }, { signal: options?.signal });
         const plan = parseJsonFromText(planResp.text || "{}");
-        if (Array.isArray(plan.queries)) drillQueries = plan.queries;
+        drillQueries = sanitizeDrillQueries(plan?.queries);
     } catch (e) {
         drillQueries = [`${initialQuery} statistics`, `${initialQuery} criticism`, `${initialQuery} latest news`];
     }

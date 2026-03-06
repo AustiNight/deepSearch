@@ -375,6 +375,17 @@ const App: React.FC = () => {
     writeProvider(payload.provider);
     writeRunConfig(payload.runConfig);
     saveModelOverrides(payload.modelOverrides);
+    if (payload.keyOverrides) {
+      const googleKey = (payload.keyOverrides.google || '').trim();
+      const openaiKey = (payload.keyOverrides.openai || '').trim();
+      const nextKeys = { google: googleKey, openai: openaiKey };
+      setKeyOverrides(nextKeys);
+      writeProviderKey('google', googleKey);
+      writeProviderKey('openai', openaiKey);
+    }
+    if (payload.openDataConfig) {
+      updateOpenDataConfig(payload.openDataConfig, { persist: getOpenDataPersistencePreference() });
+    }
     if (Array.isArray(payload.accessAllowlist)) {
       setAccessAllowlist(payload.accessAllowlist);
       writeAllowlist(JSON.stringify(payload.accessAllowlist));
@@ -383,6 +394,15 @@ const App: React.FC = () => {
       setDraftProvider(payload.provider);
       setDraftRunConfig(payload.runConfig);
       setDraftModelOverrides(payload.modelOverrides);
+      if (payload.keyOverrides) {
+        setDraftKeys({
+          google: payload.keyOverrides.google || '',
+          openai: payload.keyOverrides.openai || ''
+        });
+      }
+      if (payload.openDataConfig?.auth) {
+        setDraftOpenDataAuth(payload.openDataConfig.auth);
+      }
       if (Array.isArray(payload.accessAllowlist)) {
         setDraftAllowlistText(payload.accessAllowlist.join('\n'));
       }
@@ -597,6 +617,8 @@ const App: React.FC = () => {
       provider: resolvedProvider,
       runConfig: resolvedRunConfig,
       modelOverrides: storedOverrides,
+      keyOverrides: { google: storedGoogle, openai: storedOpenAI },
+      openDataConfig: getOpenDataConfig(),
       defaults: { runConfig: DEFAULT_RUN_CONFIG }
     });
 
@@ -729,6 +751,11 @@ const App: React.FC = () => {
       provider: draftProvider,
       runConfig: nextRunConfig,
       modelOverrides: sanitizedOverrides,
+      keyOverrides: nextKeys,
+      openDataConfig: {
+        ...getOpenDataConfig(),
+        auth: nextOpenDataAuth
+      },
       defaults: { runConfig: DEFAULT_RUN_CONFIG }
     });
 
@@ -1206,13 +1233,13 @@ const App: React.FC = () => {
                   Validation: leaving any field blank is OK. Any warning below only reflects potential rate limiting.
                 </p>
                 <p className="text-[10px] text-gray-500">
-                  Local-only and telemetry-free: keys are stored securely in your browser storage (sessionStorage by default) and never transmitted off-device.
+                  Household sync enabled: on Save, keys are included in cloud settings so every Cloudflare Access-approved user gets the same configuration.
                 </p>
                 <p className="text-[10px] text-gray-500">
-                  Keys stay client-only in this browser. Never synced to cloud settings, never sent to Worker/KV, and never included in telemetry.
+                  Keys are never written to telemetry logs. They are sent only to the same-origin Worker `/api/settings` endpoint and stored in the shared settings record.
                 </p>
                 <p className="text-[10px] text-gray-500">
-                  Warning: enabling persistence writes keys to localStorage on this device. Only enable on trusted machines and shared accounts you control.
+                  Optional local persistence still controls whether a browser keeps a local copy across restarts.
                 </p>
                 {optionalKeysPolicyReady ? (
                   <>
@@ -1245,7 +1272,7 @@ const App: React.FC = () => {
                   </p>
                 )}
                 <p className="text-[10px] text-gray-500">
-                  US-only address policy is enabled by default. Non-US addresses are flagged as out-of-scope and skip US record gates + portal queries. Toggle via
+                  US-only address policy is disabled by default. Toggle via
                   <span className="font-mono"> featureFlags.usOnlyAddressPolicy</span>.
                 </p>
                 <div>

@@ -26,11 +26,56 @@ export const hashEntries = async (entries: string[]) => {
 };
 
 export const stripSettingsForKv = <T extends Record<string, unknown>>(settings: T) => {
+  const raw = settings as Record<string, unknown>;
+  const keyOverrides = raw.keyOverrides && typeof raw.keyOverrides === "object"
+    ? {
+      google: typeof (raw.keyOverrides as any).google === "string" ? (raw.keyOverrides as any).google : undefined,
+      openai: typeof (raw.keyOverrides as any).openai === "string" ? (raw.keyOverrides as any).openai : undefined
+    }
+    : undefined;
+
+  const openDataConfigRaw = raw.openDataConfig && typeof raw.openDataConfig === "object"
+    ? raw.openDataConfig as any
+    : null;
+  const openDataConfig = openDataConfigRaw
+    ? (() => {
+      const zeroCostMode = openDataConfigRaw.zeroCostMode === true;
+      return {
+        zeroCostMode,
+        allowPaidAccess: zeroCostMode ? false : openDataConfigRaw.allowPaidAccess === true,
+      featureFlags: {
+        autoIngestion: openDataConfigRaw.featureFlags?.autoIngestion === true,
+        evidenceRecovery: openDataConfigRaw.featureFlags?.evidenceRecovery !== false,
+        gatingEnforcement: openDataConfigRaw.featureFlags?.gatingEnforcement !== false,
+        usOnlyAddressPolicy: openDataConfigRaw.featureFlags?.usOnlyAddressPolicy === true
+      },
+      auth: {
+        socrataAppToken: typeof openDataConfigRaw.auth?.socrataAppToken === "string" ? openDataConfigRaw.auth.socrataAppToken : undefined,
+        arcgisApiKey: typeof openDataConfigRaw.auth?.arcgisApiKey === "string" ? openDataConfigRaw.auth.arcgisApiKey : undefined,
+        geocodingEmail: typeof openDataConfigRaw.auth?.geocodingEmail === "string" ? openDataConfigRaw.auth.geocodingEmail : undefined,
+        geocodingKey: typeof openDataConfigRaw.auth?.geocodingKey === "string" ? openDataConfigRaw.auth.geocodingKey : undefined
+      }
+    };
+    })()
+    : undefined;
+
   return {
     schemaVersion: settings.schemaVersion as number,
     provider: settings.provider as "google" | "openai",
     runConfig: settings.runConfig,
     modelOverrides: settings.modelOverrides,
+    keyOverrides: keyOverrides || {},
+    openDataConfig: openDataConfig || {
+      zeroCostMode: true,
+      allowPaidAccess: false,
+      featureFlags: {
+        autoIngestion: true,
+        evidenceRecovery: true,
+        gatingEnforcement: true,
+        usOnlyAddressPolicy: false
+      },
+      auth: {}
+    }
   };
 };
 

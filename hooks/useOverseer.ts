@@ -42,7 +42,6 @@ import { evaluatePrimaryRecordCoverage } from '../services/primaryRecordCoverage
 import { getOpenDatasetHints, primeOpenDataPortalHints } from '../services/openDataPortalService';
 import { buildOpenDataPortalCandidates } from '../services/openDataPortalCandidates';
 import { buildUnsupportedJurisdictionGap, classifyAddressScope, AddressScopeClassification } from '../services/addressScope';
-import { getOpenDataConfig } from '../services/openDataConfig';
 import { resolveParcelFromOpenDataPortal } from '../services/openDataParcelResolution';
 import { runOpenDataParcelResolutionPhase } from '../services/openDataPhase3C';
 import { resolveCityOpenDataProfile } from '../services/cityOpenDataProfiles';
@@ -217,7 +216,7 @@ const buildFallbackAllowedSources = (input: {
       if (typeof sourcePointer?.notes === 'string') textFragments.push(sourcePointer.notes);
     }
   }
-  buildOpenDataPortalCandidates(input.jurisdiction).slice(0, 6).forEach((portal) => {
+  buildOpenDataPortalCandidates(input.jurisdiction).forEach((portal) => {
     urls.push(portal);
   });
   if (input.addressLike) {
@@ -335,7 +334,7 @@ const extractOpenDataHintKeywords = (dataset: OpenDatasetMetadata) => {
   const tags = Array.isArray(dataset.tags) ? dataset.tags : [];
   const text = `${dataset.title || ''} ${tags.join(' ')}`.toLowerCase();
   const matches = OPEN_DATA_DISCOVERY_KEYWORDS.filter((keyword) => text.includes(keyword));
-  return uniqueList(matches).slice(0, 4);
+  return uniqueList(matches);
 };
 
 const buildOpenDataDiscoveryQuery = (dataset: OpenDatasetMetadata) => {
@@ -721,7 +720,7 @@ const buildEvidenceRecoveryQueries = (slots: Record<string, unknown>, addressDir
     `${addressQuoted} ${city ? `"${city}"` : ''} ${state}`.trim()
   ].filter(Boolean);
 
-  const openDataHints = getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"]).slice(0, 6);
+  const openDataHints = getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"]);
   const portalQueries = openDataHints.map((dataset) => `${dataset.portalUrl} "${dataset.title}"`);
 
   return uniqueList([...baseQueries, ...addressDirectQueries, ...portalQueries]);
@@ -823,6 +822,38 @@ const stripZipFromStateToken = (value: string) => {
   return cleaned;
 };
 
+const STREET_SUFFIX_HINTS = new Set([
+  'aly', 'ave', 'av', 'avenue', 'blvd', 'boulevard', 'cir', 'circle', 'ct', 'court',
+  'dr', 'drive', 'expy', 'expressway', 'fwy', 'freeway', 'hwy', 'highway', 'ln', 'lane',
+  'loop', 'pkwy', 'parkway', 'pl', 'place', 'plz', 'plaza', 'rd', 'road', 'sq', 'square',
+  'st', 'street', 'ter', 'terrace', 'trl', 'trail', 'way'
+]);
+
+const extractTrailingCityFromAddressPrefix = (value: string) => {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  const tokens = cleaned.split(' ').filter(Boolean);
+  if (tokens.length < 3 || !/^\d+[a-z]?$/i.test(tokens[0])) return '';
+  let suffixIndex = -1;
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = tokens[i].toLowerCase().replace(/[^a-z]/g, '');
+    if (STREET_SUFFIX_HINTS.has(token)) {
+      suffixIndex = i;
+    }
+  }
+  if (suffixIndex < 0 || suffixIndex >= tokens.length - 1) return '';
+  const cityTokens = tokens
+    .slice(suffixIndex + 1)
+    .filter((token) => /^[a-z][a-z.'-]*$/i.test(token));
+  if (cityTokens.length === 0 || cityTokens.length > 4) return '';
+  return cityTokens.join(' ');
+};
+
+const normalizeCityCandidate = (value: string) => {
+  const trailingCity = extractTrailingCityFromAddressPrefix(value);
+  return trailingCity || value.trim();
+};
+
 const parseCityState = (value: string): { city: string; state: string } => {
   const cleaned = value.replace(/\s+/g, ' ').trim();
   if (!cleaned) return { city: '', state: '' };
@@ -835,7 +866,7 @@ const parseCityState = (value: string): { city: string; state: string } => {
       const cityCandidate = commaParts.length >= 3
         ? commaParts[commaParts.length - 2]
         : commaParts[0];
-      return { city: cityCandidate.trim(), state: stateCandidate };
+      return { city: normalizeCityCandidate(cityCandidate), state: stateCandidate };
     }
   }
 
@@ -843,7 +874,7 @@ const parseCityState = (value: string): { city: string; state: string } => {
   if (abbrMatch) {
     const stateCandidate = normalizeStateCode(abbrMatch[2]);
     if (stateCandidate) {
-      return { city: abbrMatch[1].trim(), state: stateCandidate };
+      return { city: normalizeCityCandidate(abbrMatch[1]), state: stateCandidate };
     }
   }
 
@@ -851,7 +882,7 @@ const parseCityState = (value: string): { city: string; state: string } => {
   if (nameMatch) {
     const stateCandidate = normalizeStateCode(nameMatch[2]);
     if (stateCandidate) {
-      return { city: nameMatch[1].trim(), state: stateCandidate };
+      return { city: normalizeCityCandidate(nameMatch[1]), state: stateCandidate };
     }
   }
 
@@ -2387,20 +2418,8 @@ export const useOverseer = () => {
       const addressScope = addressLike ? classifyAddressScope({ topic, slots: slotValuesAny }) : undefined;
       const jurisdiction = buildJurisdictionFromSlots(slotValuesAny, addressLike, addressScope);
       // re-use derived jurisdiction from earlier slot parsing
-      const usOnlyAddressPolicy = getOpenDataConfig().featureFlags.usOnlyAddressPolicy;
-      const enforceUsOnlyPolicy = Boolean(addressLike && usOnlyAddressPolicy && addressScope?.scope === 'non_us');
-      const unsupportedJurisdictionGap = enforceUsOnlyPolicy && addressScope
-        ? buildUnsupportedJurisdictionGap({ classification: addressScope })
-        : null;
-      if (enforceUsOnlyPolicy) {
-        logOverseer(
-          'PHASE 0: US-ONLY POLICY',
-          'non-US address detected',
-          'skip US-specific record gates and portal queries',
-          addressScope?.country ? `country ${addressScope.country}` : 'country unknown',
-          'warning'
-        );
-      }
+      const enforceUsOnlyPolicy = false;
+      const unsupportedJurisdictionGap = null;
       const companyDomainHint = Array.isArray(slotValuesAny.companyDomain) ? String(slotValuesAny.companyDomain[0] || '') : '';
       const brandDomainHint = Array.isArray(slotValuesAny.brandDomain) ? String(slotValuesAny.brandDomain[0] || '') : '';
       const { packs: tacticPacks, expandedAll: expandedTactics } = buildTacticPacks(taxonomy, selectedVerticalIds, slotValues);
@@ -2613,7 +2632,7 @@ export const useOverseer = () => {
         ...discoveryTemplateQueries
       ]).slice(0, Math.min(6, maxMethodAgents));
       const openDataDiscoveryHints = addressLike && !enforceUsOnlyPolicy
-        ? getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"]).slice(0, 4)
+        ? getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"])
         : [];
       const openDataDiscoveryQueries = openDataDiscoveryHints.map(buildOpenDataDiscoveryQuery);
       const discoveryQueriesWithOpenData = uniqueList([

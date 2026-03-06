@@ -8,7 +8,8 @@ This project centralizes client storage behavior in `services/storagePolicy.ts` 
 - Raw synthesis debug: memory-only with truncation.
 
 **Client-Only Guardrail**
-- Storage policy is client-only and does not write to Worker/KV or any network destination.
+- Storage policy is client-only and does not directly write to Worker/KV or make network calls.
+- The app may still sync settings (including key-bearing settings) via `services/universalSettingsService.ts` to `/api/settings` when Cloudflare Access auth is present.
 
 **Opt-Out Behavior**
 - Disabling persistence after it was enabled clears optional keys from both localStorage and sessionStorage.
@@ -55,4 +56,4 @@ This project centralizes client storage behavior in `services/storagePolicy.ts` 
 - Cache TTL pruning, size caps, and schema migration behavior.
 - Guardrails that block disallowed writes and enforce schema version invalidation.
 - Integration coverage stays in the browser/UI layer to confirm settings flows, migrations, and persistence toggles behave end-to-end.
-- Worker constraints: no storage policy code is executed in Workers because Workers lack `localStorage`/`sessionStorage`; Worker tests should assert client-only usage and zero server-side persistence of optional keys.
+- Worker constraints: no storage policy code is executed in Workers because Workers lack `localStorage`/`sessionStorage`; Worker tests should assert client-only storage behavior, while settings-sync tests cover server persistence behavior.

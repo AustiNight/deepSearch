@@ -1,4 +1,11 @@
-import type { LLMProvider, ModelOverrides, RunConfig, UniversalSettingsPayload } from '../types';
+import type {
+  LLMProvider,
+  ModelOverrides,
+  OpenDataAuthConfig,
+  OpenDataRuntimeConfig,
+  RunConfig,
+  UniversalSettingsPayload
+} from '../types';
 
 export const SETTINGS_SCHEMA_VERSION: 1;
 
@@ -11,6 +18,9 @@ export const buildUniversalSettingsPayload: (input: {
   runConfig: RunConfig;
   modelOverrides?: ModelOverrides | null;
   accessAllowlist?: string[] | null;
+  keyOverrides?: { google?: string | null; openai?: string | null } | null;
+  openDataConfig?: OpenDataRuntimeConfig | null;
+  openDataAuth?: OpenDataAuthConfig | null;
   defaults?: { runConfig: RunConfig };
 }) => UniversalSettingsPayload;
 

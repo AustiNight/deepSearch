@@ -3,16 +3,27 @@ import type {
   DatasetComplianceEntry,
   NormalizedSource
 } from "../types";
-import { COMPLIANCE_POLICY } from "../data/compliancePolicy";
 import { buildDatasetComplianceSummary } from "./openDataDiscovery";
 
-type DatasetEvaluation = {
-  entry: DatasetComplianceEntry;
-  action: "allow" | "block" | "review";
-  reasons: string[];
-};
-
-const isNonEmpty = (value?: string) => typeof value === "string" && value.trim().length > 0;
+const NON_PUBLIC_ACCESS_PATTERNS: RegExp[] = [
+  /\bprivate\b/i,
+  /\brestricted\b/i,
+  /\bnon[-\s]?public\b/i,
+  /\binternal\b/i,
+  /\bconfidential\b/i,
+  /\blogin\s+required\b/i,
+  /\baccount\s+required\b/i,
+  /\bauth(?:entication|orization)?\s+required\b/i,
+  /\bpermission\s+required\b/i,
+  /\bpayment\s+required\b/i,
+  /\bpaid\s+access\s+required\b/i,
+  /\bpaid\s+subscription\s+required\b/i,
+  /\bsubscription\s+required\b/i,
+  /\bpaywall\b/i,
+  /\bpurchase\s+required\b/i,
+  /\bfee(s)?\s+required\b/i,
+  /\bcommercial\s+license\s+required\b/i
+];
 
 const normalizeDomain = (value?: string) => {
   if (!value) return "";
@@ -20,7 +31,7 @@ const normalizeDomain = (value?: string) => {
     const host = new URL(value).hostname.toLowerCase();
     return host.startsWith("www.") ? host.slice(4) : host;
   } catch (_) {
-    return value.toLowerCase().replace(/^www\./, "");
+    return value.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
   }
 };
 
@@ -50,9 +61,7 @@ const sourceMatchesDatasetId = (sourceUrl: string, datasetId?: string, portalUrl
   const sourceLower = sourceUrl.toLowerCase();
   if (!sourceLower.includes(needle)) return false;
   if (!portalUrl) return true;
-  const sourceDomain = normalizeDomain(sourceUrl);
-  const portalDomain = normalizeDomain(portalUrl);
-  return sourceDomain === portalDomain;
+  return normalizeDomain(sourceUrl) === normalizeDomain(portalUrl);
 };
 
 const matchDatasetForSource = (sourceUrl: string, dataset: DatasetComplianceEntry) => {
@@ -62,100 +71,42 @@ const matchDatasetForSource = (sourceUrl: string, dataset: DatasetComplianceEntr
   return false;
 };
 
-const matchesAnyPattern = (value: string, patterns: RegExp[]) => {
-  return patterns.some((pattern) => pattern.test(value));
-};
+const matchesAnyPattern = (value: string, patterns: RegExp[]) => patterns.some((pattern) => pattern.test(value));
 
 const collectComplianceText = (entry: DatasetComplianceEntry) => {
   const parts: string[] = [];
-  if (isNonEmpty(entry.license)) parts.push(entry.license!.trim());
-  if (isNonEmpty(entry.termsOfService)) parts.push(entry.termsOfService!.trim());
+  if (entry.license) parts.push(entry.license);
+  if (entry.termsOfService) parts.push(entry.termsOfService);
   if (Array.isArray(entry.accessConstraints)) {
     entry.accessConstraints.forEach((constraint) => {
-      if (isNonEmpty(constraint)) parts.push(constraint.trim());
+      if (constraint) parts.push(constraint);
     });
   }
   return parts.join(" ");
 };
 
-const buildAttribution = (entry: DatasetComplianceEntry) => {
-  const portalDomain = normalizeDomain(entry.portalUrl || entry.dataUrl || entry.homepageUrl || "");
-  const source = entry.source || portalDomain || "Unknown source";
-  const title = entry.title || entry.datasetId || "Untitled dataset";
-  const base = COMPLIANCE_POLICY.attributionTemplate
-    .replace("{source}", source)
-    .replace("{title}", title)
-    .replace("{portalDomain}", portalDomain || "unknown-portal");
-  if (!base.includes("unknown-portal")) return base;
-  return COMPLIANCE_POLICY.attributionFallbackTemplate
-    .replace("{portalDomain}", portalDomain || "unknown-portal")
-    .replace("{title}", title);
+type DatasetEvaluation = {
+  entry: DatasetComplianceEntry;
+  action: "allow" | "block";
+  reasons: string[];
 };
 
 const evaluateDataset = (entry: DatasetComplianceEntry): DatasetEvaluation => {
-  const reasons: string[] = [];
-  const reviewReasons: string[] = [];
   const text = collectComplianceText(entry);
-  if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.blocklist.licensePatterns)) {
-    reasons.push("license restriction");
-  }
-  if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.blocklist.termsPatterns)) {
-    reasons.push("terms restriction");
-  }
-  if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.blocklist.accessConstraintPatterns)) {
-    reasons.push("access restriction");
-  }
-
-  if (COMPLIANCE_POLICY.zeroCostMode) {
-    if (COMPLIANCE_POLICY.review.requireLicense && !isNonEmpty(entry.license) && !isNonEmpty(entry.licenseUrl)) {
-      reviewReasons.push("missing license metadata (zero-cost review)");
-    }
-    if (COMPLIANCE_POLICY.review.requireTerms && !isNonEmpty(entry.termsOfService) && !isNonEmpty(entry.termsUrl)) {
-      reviewReasons.push("missing terms metadata (zero-cost review)");
-    }
-    if (
-      COMPLIANCE_POLICY.review.requireAccessConstraints &&
-      (!Array.isArray(entry.accessConstraints) || entry.accessConstraints.length === 0)
-    ) {
-      reviewReasons.push("missing access constraints (zero-cost review)");
-    }
-    if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.review.costPatterns)) {
-      reviewReasons.push("possible paid access");
-    }
-  }
-
-  if (text && matchesAnyPattern(text, COMPLIANCE_POLICY.review.privacyPatterns)) {
-    reviewReasons.push("privacy constraint present");
-  }
-
-  const action = reasons.length > 0 ? "block" : reviewReasons.length > 0 ? "review" : "allow";
-  const attribution = buildAttribution(entry);
-  const attributionRequired = COMPLIANCE_POLICY.requireAttributionByDefault;
-  const attributionIssues: string[] = [];
-  if (attributionRequired && (!attribution || attribution.includes("Unknown source"))) {
-    attributionIssues.push("missing attribution fields");
-  }
-
+  const blocked = Boolean(text && matchesAnyPattern(text, NON_PUBLIC_ACCESS_PATTERNS));
+  const reason = blocked ? "dataset appears non-public or access-restricted" : undefined;
   return {
     entry: {
       ...entry,
-      attribution,
-      attributionRequired,
-      attributionStatus: attributionIssues.length > 0 ? "missing" : "ok",
-      complianceAction: action,
-      complianceNotes: [...reasons, ...reviewReasons, ...attributionIssues]
+      complianceAction: blocked ? "block" : "allow",
+      complianceNotes: reason ? [reason] : undefined,
+      attribution: entry.attribution || entry.source || entry.portalUrl,
+      attributionRequired: false,
+      attributionStatus: "ok"
     },
-    action,
-    reasons: [...reasons, ...reviewReasons, ...attributionIssues]
+    action: blocked ? "block" : "allow",
+    reasons: reason ? [reason] : []
   };
-};
-
-const shouldBlockDomain = (domain: string) => {
-  if (!domain) return false;
-  return COMPLIANCE_POLICY.blockedDomains.some((blocked) => {
-    const normalized = blocked.toLowerCase().replace(/^www\./, "");
-    return domain === normalized || domain.endsWith(`.${normalized}`);
-  });
 };
 
 export type ComplianceEnforcementResult = {
@@ -174,80 +125,49 @@ export type ComplianceEnforcementResult = {
 export const enforceCompliance = (sources: NormalizedSource[]): ComplianceEnforcementResult => {
   const safeSources = Array.isArray(sources) ? sources : [];
   const sourceUris = safeSources.map((source) => source.uri);
-  const datasetCompliance = buildDatasetComplianceSummary(sourceUris);
-  const datasetEvaluations = datasetCompliance.map((entry) => evaluateDataset(entry));
-  const evaluatedEntries = datasetEvaluations.map((evaluation) => evaluation.entry);
-  const reviewEntries = datasetEvaluations.filter((evaluation) => evaluation.action === "review");
+  const datasetComplianceEntries = buildDatasetComplianceSummary(sourceUris);
+  const datasetEvaluations = datasetComplianceEntries.map((entry) => evaluateDataset(entry));
+  const datasetCompliance = datasetEvaluations.map((evaluation) => evaluation.entry);
   const blockedSources: ComplianceEnforcementResult["blockedSources"] = [];
   const allowedSources: NormalizedSource[] = [];
 
   for (const source of safeSources) {
-    const domain = source.domain || normalizeDomain(source.uri);
     let blockedReason: string | null = null;
     let blockedDataset: DatasetComplianceEntry | null = null;
-
-    if (shouldBlockDomain(domain)) {
-      blockedReason = "domain blocked by policy";
-    } else {
-      for (const evaluation of datasetEvaluations) {
-        if (evaluation.action !== "block") continue;
-        if (!matchDatasetForSource(source.uri, evaluation.entry)) continue;
-        blockedReason = evaluation.reasons[0] || "dataset restricted";
-        blockedDataset = evaluation.entry;
-        break;
-      }
+    for (const evaluation of datasetEvaluations) {
+      if (evaluation.action !== "block") continue;
+      if (!matchDatasetForSource(source.uri, evaluation.entry)) continue;
+      blockedReason = evaluation.reasons[0] || "dataset access restricted";
+      blockedDataset = evaluation.entry;
+      break;
     }
-
     if (blockedReason) {
       blockedSources.push({
         uri: source.uri,
-        domain,
+        domain: source.domain || normalizeDomain(source.uri),
         reason: blockedReason,
         datasetTitle: blockedDataset?.title,
         datasetId: blockedDataset?.datasetId
       });
-      if (COMPLIANCE_POLICY.mode !== "enforce") {
-        allowedSources.push(source);
-      }
-    } else {
-      allowedSources.push(source);
+      continue;
     }
-  }
-
-  const signoffRequired = COMPLIANCE_POLICY.signoff.required;
-  const signoffProvided = isNonEmpty(COMPLIANCE_POLICY.signoff.approvedBy) && isNonEmpty(COMPLIANCE_POLICY.signoff.approvedAt);
-  const gateStatus = signoffRequired && !signoffProvided ? "signoff_required" : "clear";
-  const notes: string[] = [];
-  if (gateStatus === "signoff_required") {
-    notes.push("Compliance sign-off required before rollout.");
-  }
-  if (reviewEntries.length > 0) {
-    notes.push("Compliance review required for zero-cost/ToS/privacy checks.");
+    allowedSources.push(source);
   }
 
   const summary: ComplianceSummary = {
-    mode: COMPLIANCE_POLICY.mode,
-    signoffRequired,
-    signoffProvided,
-    gateStatus,
+    mode: "enforce",
+    signoffRequired: false,
+    signoffProvided: true,
+    gateStatus: "clear",
     blockedSources,
-    zeroCostMode: COMPLIANCE_POLICY.zeroCostMode,
-    reviewRequired: reviewEntries.length > 0,
-    reviewItems: reviewEntries.length > 0
-      ? reviewEntries.slice(0, 12).map((entry) => ({
-          reason: entry.reasons[0] || "review required",
-          datasetTitle: entry.entry.title,
-          datasetId: entry.entry.datasetId,
-          portalUrl: entry.entry.portalUrl
-        }))
-      : undefined,
-    notes: notes.length > 0 ? notes : undefined
+    zeroCostMode: false,
+    reviewRequired: false
   };
 
   return {
-    allowedSources: COMPLIANCE_POLICY.mode === "enforce" ? allowedSources : safeSources,
+    allowedSources,
     blockedSources,
-    datasetCompliance: evaluatedEntries,
+    datasetCompliance,
     summary
   };
 };

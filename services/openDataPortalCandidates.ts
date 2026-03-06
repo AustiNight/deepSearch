@@ -92,7 +92,7 @@ const buildHeuristicPortalCandidates = (jurisdiction?: Jurisdiction) => {
     `https://${token}.opendata.arcgis.com`
   ]);
 
-  return uniqueList([...cityPortals, ...countyPortals, ...statePortals]).slice(0, 24);
+  return uniqueList([...cityPortals, ...countyPortals, ...statePortals]);
 };
 
 export const buildOpenDataPortalCandidates = (jurisdiction?: Jurisdiction) => {
@@ -131,8 +131,6 @@ export const buildOpenDataPortalCandidates = (jurisdiction?: Jurisdiction) => {
   });
   return rankOpenDataPortalCandidates(normalized, {
     jurisdiction,
-    limit: 10,
     baseWeights
   });
 };
-

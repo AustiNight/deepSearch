@@ -25,7 +25,7 @@ const defaultFlags: OpenDataFeatureFlags = {
   autoIngestion: true,
   evidenceRecovery: true,
   gatingEnforcement: true,
-  usOnlyAddressPolicy: true
+  usOnlyAddressPolicy: false
 };
 
 const defaultAuth: OpenDataAuthConfig = {};

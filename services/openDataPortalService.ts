@@ -24,8 +24,6 @@ const normalizePortalUrl = (value: string) => {
 
 const uniqueList = <T>(items: T[]) => Array.from(new Set(items));
 
-const nowMs = () => Date.now();
-
 const parseIso = (value?: string) => {
   if (!value) return null;
   const parsed = Date.parse(value);
@@ -130,21 +128,14 @@ export const rankOpenDataPortalCandidates = (
 
 export const shouldRecrawlPortal = (portalUrl: string) => {
   const normalizedPortal = normalizePortalUrl(portalUrl);
-  const index = getOpenDatasetIndex();
-  const crawl = index.portalCrawls?.[normalizedPortal];
-  if (!crawl?.nextCrawlAt) return true;
-  const next = parseIso(crawl.nextCrawlAt);
-  return !next || nowMs() >= next;
+  return Boolean(normalizedPortal);
 };
 
 export const autoIngestOpenDataPortals = async (plans: PortalDiscoveryPlan[]) => {
-  const config = getOpenDataConfig();
-  if (!config.featureFlags.autoIngestion) return getOpenDatasetIndex();
   for (const plan of plans) {
     if (!plan.portalUrl) continue;
     const normalizedPortal = normalizePortalUrl(plan.portalUrl);
     if (!normalizedPortal) continue;
-    if (!shouldRecrawlPortal(normalizedPortal)) continue;
     const provider = getOpenDataProviderForPortal(normalizedPortal, plan.portalType);
     for (const query of plan.queries) {
       const result = await discoverOpenDataDatasets({
@@ -181,12 +172,7 @@ export const primeOpenDataPortalHints = async (
     queries?: string[];
   }
 ): Promise<PortalPrimeResult> => {
-  const config = getOpenDataConfig();
-  if (!config.featureFlags.evidenceRecovery) {
-    return { attemptedPortals: [], primedPortals: [], datasetsDiscovered: 0 };
-  }
-
-  const maxPortals = Math.max(1, Math.min(5, Math.floor(input.maxPortals ?? 2)));
+  const maxPortals = Math.max(1, Math.floor(input.maxPortals ?? (input.portalCandidates.length || 1)));
   const attemptedPortals: string[] = [];
   const primedPortals: string[] = [];
   let datasetsDiscovered = 0;
@@ -198,7 +184,7 @@ export const primeOpenDataPortalHints = async (
   const queries = (input.queries && input.queries.length > 0
     ? uniqueList(input.queries).filter(Boolean)
     : buildPrimeQueries(input.jurisdiction)
-  ).slice(0, 3);
+  );
 
   const index = getOpenDatasetIndex();
   for (const portalUrl of normalizedCandidates) {
@@ -234,8 +220,7 @@ export const primeOpenDataPortalHints = async (
 };
 
 export const scheduleOpenDataAutoIngestion = (plans: PortalDiscoveryPlan[], intervalMs: number) => {
-  const config = getOpenDataConfig();
-  if (!config.featureFlags.autoIngestion || typeof window === "undefined") {
+  if (typeof window === "undefined") {
     return () => undefined;
   }
   const safeInterval = Math.max(60_000, Math.floor(intervalMs));
@@ -246,8 +231,6 @@ export const scheduleOpenDataAutoIngestion = (plans: PortalDiscoveryPlan[], inte
 };
 
 export const getOpenDatasetHints = (tags: string[] = []) => {
-  const config = getOpenDataConfig();
-  if (!config.featureFlags.evidenceRecovery) return [];
   const index = getOpenDatasetIndex();
   if (!index.datasets) return [];
   const normalizedTags = tags.map((tag) => tag.toLowerCase()).filter(Boolean);

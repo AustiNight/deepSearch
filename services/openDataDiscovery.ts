@@ -12,7 +12,7 @@ import { OPEN_DATA_INDEX_SCHEMA_VERSION, readOpenDataIndex, writeOpenDataIndex }
 import { planSocrataDiscoveryQuery } from "./socrataRagPlanner";
 import { recordRagOutcome } from "./ragTelemetry";
 import { detectPortalType } from "./openDataProviders";
-const DEFAULT_LIMIT = Math.min(25, OPEN_DATA_DISCOVERY_MAX_DATASETS);
+const DEFAULT_LIMIT = OPEN_DATA_DISCOVERY_MAX_DATASETS;
 
 
 const toIsoDateString = (value: unknown): IsoDateString | undefined => {
@@ -590,7 +590,7 @@ export const discoverOpenDataDatasets = async (input: OpenDataDiscoveryInput): P
   const portalUrl = normalizePortalUrl(input.portalUrl);
   let portalType = input.portalType && input.portalType !== "unknown" ? input.portalType : detectPortalType(portalUrl);
   const requestedLimit = typeof input.limit === "number" && input.limit > 0 ? Math.floor(input.limit) : DEFAULT_LIMIT;
-  const limit = Math.max(1, Math.min(requestedLimit, OPEN_DATA_DISCOVERY_MAX_DATASETS));
+  const limit = Math.max(1, requestedLimit);
   let datasets: OpenDatasetMetadata[] = [];
 
   if (portalType === "socrata") {

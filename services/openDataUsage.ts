@@ -1,6 +1,4 @@
 import type { OpenDatasetMetadata } from "../types";
-import { COMPLIANCE_POLICY } from "../data/compliancePolicy";
-import { getOpenDataConfig } from "./openDataConfig";
 
 const RECORD_TYPE_MAX_AGE_DAYS: Record<string, number> = {
   assessor_parcel: 730,
@@ -18,7 +16,16 @@ const normalizeText = (value?: string) => (value || "").toLowerCase();
 
 const matchesAnyPattern = (value: string, patterns: RegExp[]) => patterns.some((pattern) => pattern.test(value));
 
-const EXPLICIT_PAID_ACCESS_PATTERNS: RegExp[] = [
+const NON_PUBLIC_ACCESS_PATTERNS: RegExp[] = [
+  /\bprivate\b/i,
+  /\brestricted\b/i,
+  /\bnon[-\s]?public\b/i,
+  /\binternal\b/i,
+  /\bconfidential\b/i,
+  /\blogin\s+required\b/i,
+  /\baccount\s+required\b/i,
+  /\bauth(?:entication|orization)?\s+required\b/i,
+  /\bpermission\s+required\b/i,
   /\bpayment\s+required\b/i,
   /\bpaid\s+access\s+required\b/i,
   /\bpaid\s+subscription\s+required\b/i,
@@ -63,40 +70,16 @@ const computeAgeDays = (value?: string) => {
 };
 
 export const evaluateDatasetUsage = (dataset: OpenDatasetMetadata) => {
-  const config = getOpenDataConfig();
   const complianceText = normalizeText(collectComplianceText(dataset));
   const notes: string[] = [];
   let complianceAction: "allow" | "block" | "review" = "allow";
 
-  if (complianceText && matchesAnyPattern(complianceText, COMPLIANCE_POLICY.blocklist.licensePatterns)) {
+  if (complianceText && matchesAnyPattern(complianceText, NON_PUBLIC_ACCESS_PATTERNS)) {
     complianceAction = "block";
-    notes.push("license restriction");
-  }
-  if (complianceText && matchesAnyPattern(complianceText, COMPLIANCE_POLICY.blocklist.termsPatterns)) {
-    complianceAction = "block";
-    notes.push("terms restriction");
-  }
-  if (complianceText && matchesAnyPattern(complianceText, COMPLIANCE_POLICY.blocklist.accessConstraintPatterns)) {
-    complianceAction = "block";
-    notes.push("access restriction");
-  }
-  if (complianceAction === "allow" && complianceText && matchesAnyPattern(complianceText, EXPLICIT_PAID_ACCESS_PATTERNS)) {
-    complianceAction = "block";
-    notes.push("paid access required");
-  }
-
-  if (complianceAction === "allow" && config.zeroCostMode) {
-    if (COMPLIANCE_POLICY.review.requireLicense && !dataset.license && !dataset.licenseUrl) {
-      complianceAction = "review";
-      notes.push("missing license metadata");
-    }
-    if (COMPLIANCE_POLICY.review.requireTerms && !dataset.termsOfService && !dataset.termsUrl) {
-      complianceAction = "review";
-      notes.push("missing terms metadata");
-    }
-    if (complianceText && matchesAnyPattern(complianceText, COMPLIANCE_POLICY.review.costPatterns)) {
-      complianceAction = "review";
-      notes.push("possible paid access");
+    if (matchesAnyPattern(complianceText, EXPLICIT_PAID_ACCESS_PATTERNS)) {
+      notes.push("paid or subscription access required");
+    } else {
+      notes.push("dataset appears non-public or access-restricted");
     }
   }
 
@@ -119,9 +102,7 @@ export const evaluateDatasetUsage = (dataset: OpenDatasetMetadata) => {
     }
   }
 
-  const doNotUse = config.featureFlags.gatingEnforcement
-    ? complianceAction === "block"
-    : false;
+  const doNotUse = complianceAction === "block";
 
   return {
     ...dataset,

@@ -14,6 +14,12 @@ const MODEL_ROLES = [
 
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BOOLEAN_DEFAULTS = {
+  autoIngestion: true,
+  evidenceRecovery: true,
+  gatingEnforcement: true,
+  usOnlyAddressPolicy: false
+};
 
 export const SETTINGS_SCHEMA_VERSION = 1;
 
@@ -120,17 +126,80 @@ export const sanitizeRunConfig = (rawRunConfig, defaults) => {
   };
 };
 
+export const sanitizeKeyOverrides = (overrides) => {
+  if (!isPlainObject(overrides)) return {};
+  const google = typeof overrides.google === 'string' ? overrides.google.trim() : '';
+  const openai = typeof overrides.openai === 'string' ? overrides.openai.trim() : '';
+  const sanitized = {};
+  if (google) sanitized.google = google;
+  if (openai) sanitized.openai = openai;
+  return sanitized;
+};
+
+export const sanitizeOpenDataAuth = (auth) => {
+  if (!isPlainObject(auth)) return {};
+  const sanitized = {};
+  if (typeof auth.socrataAppToken === 'string' && auth.socrataAppToken.trim()) {
+    sanitized.socrataAppToken = auth.socrataAppToken.trim();
+  }
+  if (typeof auth.arcgisApiKey === 'string' && auth.arcgisApiKey.trim()) {
+    sanitized.arcgisApiKey = auth.arcgisApiKey.trim();
+  }
+  if (typeof auth.geocodingEmail === 'string' && auth.geocodingEmail.trim()) {
+    sanitized.geocodingEmail = auth.geocodingEmail.trim();
+  }
+  if (typeof auth.geocodingKey === 'string' && auth.geocodingKey.trim()) {
+    sanitized.geocodingKey = auth.geocodingKey.trim();
+  }
+  return sanitized;
+};
+
+export const sanitizeOpenDataConfig = (config) => {
+  if (!isPlainObject(config)) return null;
+  const zeroCostMode = config.zeroCostMode === true;
+  const allowPaidAccess = zeroCostMode ? false : config.allowPaidAccess === true;
+  const featureFlags = isPlainObject(config.featureFlags) ? config.featureFlags : {};
+  return {
+    zeroCostMode,
+    allowPaidAccess,
+    featureFlags: {
+      autoIngestion: typeof featureFlags.autoIngestion === 'boolean'
+        ? featureFlags.autoIngestion
+        : BOOLEAN_DEFAULTS.autoIngestion,
+      evidenceRecovery: typeof featureFlags.evidenceRecovery === 'boolean'
+        ? featureFlags.evidenceRecovery
+        : BOOLEAN_DEFAULTS.evidenceRecovery,
+      gatingEnforcement: typeof featureFlags.gatingEnforcement === 'boolean'
+        ? featureFlags.gatingEnforcement
+        : BOOLEAN_DEFAULTS.gatingEnforcement,
+      usOnlyAddressPolicy: typeof featureFlags.usOnlyAddressPolicy === 'boolean'
+        ? featureFlags.usOnlyAddressPolicy
+        : BOOLEAN_DEFAULTS.usOnlyAddressPolicy
+    },
+    auth: sanitizeOpenDataAuth(config.auth)
+  };
+};
+
 export const buildUniversalSettingsPayload = (input) => {
   const provider = input?.provider === 'openai' ? 'openai' : 'google';
   const runConfigDefaults = input?.defaults?.runConfig || input?.runConfig || {};
   const runConfig = sanitizeRunConfig(input?.runConfig, runConfigDefaults);
   const modelOverrides = sanitizeModelOverrides(input?.modelOverrides);
   const accessAllowlist = sanitizeAllowlistEntries(input?.accessAllowlist);
+  const keyOverrides = sanitizeKeyOverrides(input?.keyOverrides);
+  const openDataCandidate = sanitizeOpenDataConfig(input?.openDataConfig) || {
+    zeroCostMode: true,
+    allowPaidAccess: false,
+    featureFlags: { ...BOOLEAN_DEFAULTS },
+    auth: sanitizeOpenDataAuth(input?.openDataAuth)
+  };
   const payload = {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     provider,
     runConfig,
-    modelOverrides
+    modelOverrides,
+    keyOverrides,
+    openDataConfig: openDataCandidate
   };
   if (Object.prototype.hasOwnProperty.call(input || {}, 'accessAllowlist')) {
     payload.accessAllowlist = accessAllowlist;
@@ -150,12 +219,21 @@ export const normalizeUniversalSettingsPayload = (rawPayload, defaults) => {
   const modelOverrides = sanitizeModelOverrides(rawPayload.modelOverrides);
   const hasAllowlist = Object.prototype.hasOwnProperty.call(rawPayload, 'accessAllowlist');
   const accessAllowlist = hasAllowlist ? sanitizeAllowlistEntries(rawPayload.accessAllowlist) : undefined;
+  const keyOverrides = sanitizeKeyOverrides(rawPayload.keyOverrides);
+  const openDataConfig = sanitizeOpenDataConfig(rawPayload.openDataConfig) || {
+    zeroCostMode: true,
+    allowPaidAccess: false,
+    featureFlags: { ...BOOLEAN_DEFAULTS },
+    auth: sanitizeOpenDataAuth(null)
+  };
 
   const payload = {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     provider,
     runConfig,
-    modelOverrides
+    modelOverrides,
+    keyOverrides,
+    openDataConfig
   };
   if (hasAllowlist) {
     payload.accessAllowlist = accessAllowlist;

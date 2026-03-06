@@ -50,9 +50,12 @@ export type DallasEvidencePackResult = {
 const DALLAS_PORTAL_URL = "https://www.dallasopendata.com";
 const PRE_2023_CUTOFF = "2023-01-01T00:00:00.000";
 const DALLAS_SCHEMA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14;
-const MAX_ADDRESS_VARIANTS = 4;
+const MAX_ADDRESS_VARIANTS = 12;
 const MAX_SAMPLE_RECORDS = 3;
 const DEFAULT_RADIUS_METERS = 75;
+const DALLAS_SOCRATA_GEOMETRY_TYPE_PATTERN = /(location|point|polygon|line|geometry)/i;
+const DALLAS_SOCRATA_TEXT_TYPE_PATTERN = /(text|multiline|url|email|phone)/i;
+const DALLAS_SOCRATA_NON_TEXT_TYPE_PATTERN = /(location|point|polygon|line|geometry|number|money|percent|checkbox|calendar|date|timestamp)/i;
 
 const DATASET_CONFIG: Record<DallasDatasetKind, {
   label: string;
@@ -252,6 +255,17 @@ export const buildDallasAddressVariants = (address: string): string[] => {
 const buildSchemaHash = (fields: Array<{ name: string; type?: string }>) =>
   fields.map((field) => `${field.name}:${field.type || ""}`).join("|").toLowerCase();
 
+const isDallasTextField = (field: { name: string; type?: string }) => {
+  const type = (field.type || "").toLowerCase();
+  if (type && DALLAS_SOCRATA_NON_TEXT_TYPE_PATTERN.test(type)) {
+    return false;
+  }
+  if (type && DALLAS_SOCRATA_TEXT_TYPE_PATTERN.test(type)) {
+    return true;
+  }
+  return !/^(location|the_geom|geom)$/i.test(field.name);
+};
+
 const fieldScore = (field: string, patterns: Array<{ pattern: RegExp; score: number }>) => {
   for (const entry of patterns) {
     if (entry.pattern.test(field)) return entry.score;
@@ -300,9 +314,10 @@ const inferFieldMap = (fields: Array<{ name: string; type?: string }>, kind: Dal
         { pattern: /(^id$|_id$)/i, score: 2 }
       ];
 
-  const pickBest = (patterns: Array<{ pattern: RegExp; score: number }>) => {
+  const pickBest = (patterns: Array<{ pattern: RegExp; score: number }>, options?: { requireText?: boolean }) => {
     let best: { name: string; score: number } | null = null;
     normalized.forEach((field) => {
+      if (options?.requireText && !isDallasTextField(field)) return;
       const score = fieldScore(field.key, patterns);
       if (score <= 0) return;
       if (!best || score > best.score) best = { name: field.name, score };
@@ -310,11 +325,10 @@ const inferFieldMap = (fields: Array<{ name: string; type?: string }>, kind: Dal
     return best?.name;
   };
 
-  const geometryField = normalized.find((field) => (field.type || "").toLowerCase().includes("location"))?.name
-    || normalized.find((field) => (field.type || "").toLowerCase().includes("point"))?.name;
+  const geometryField = normalized.find((field) => DALLAS_SOCRATA_GEOMETRY_TYPE_PATTERN.test(field.type || ""))?.name;
 
   return {
-    addressField: pickBest(addressPatterns),
+    addressField: pickBest(addressPatterns, { requireText: true }),
     dateField: pickBest(datePatterns),
     typeField: pickBest(typePatterns),
     statusField: pickBest(statusPatterns),
@@ -496,7 +510,7 @@ const sanitizeRecordSet = (records: any[], fieldMap: DallasFieldMap) => {
 
 const buildWhereAddressClause = (field: string, variants: string[]) => {
   const sanitized = variants
-    .map((variant) => variant.replace(/[%_]/g, "").replace(/'/g, "''"))
+    .map((variant) => variant.toUpperCase().replace(/[%_]/g, "").replace(/'/g, "''"))
     .filter(Boolean)
     .map((variant) => `UPPER(${field}) LIKE '%${variant}%'`);
   if (sanitized.length === 0) return "";
@@ -566,7 +580,6 @@ const fetchDatasetCandidates = async (portalUrl: string, queries: string[], atte
     if (!ok) continue;
     const results = Array.isArray(response.data?.results) ? response.data.results : [];
     candidates.push(...filterTabularCandidates(results));
-    if (candidates.length >= 12) break;
   }
   return candidates;
 };
@@ -623,7 +636,7 @@ const queryDataset = async (
     const params = new URLSearchParams();
     if (selectFields.length > 0) params.set("$select", selectFields.join(","));
     if (whereClause) params.set("$where", whereClause);
-    params.set("$limit", String(25));
+    params.set("$limit", String(250));
     if (fieldMap.dateField) params.set("$order", `${fieldMap.dateField} DESC`);
 
     const response = await fetchSocrataRows(portalUrl, dataset.datasetId, params);
@@ -648,7 +661,7 @@ const queryDataset = async (
     const params = new URLSearchParams();
     if (selectFields.length > 0) params.set("$select", selectFields.join(","));
     if (whereClause) params.set("$where", whereClause);
-    params.set("$limit", String(25));
+    params.set("$limit", String(250));
     if (fieldMap.dateField) params.set("$order", `${fieldMap.dateField} DESC`);
 
     const response = await fetchSocrataRows(portalUrl, dataset.datasetId, params);
@@ -704,12 +717,18 @@ export const runDallasEvidencePack = async (input: {
       ));
       continue;
     }
-    let selected: DallasDatasetCandidate | null = null;
-    let metaResponse: { ok: boolean; data: any; error?: string } | null = null;
+    let anyQueryableCandidate = false;
+    let anyRowsMatched = false;
     for (const candidate of candidates) {
       const response = await fetchSocrataMetadata(portalUrl, candidate.datasetId);
       if (!response.ok || !response.data) {
-        metaResponse = response;
+        dataGaps.push(buildDataGap(
+          `${candidate.title} (${candidate.datasetId}) metadata unavailable.`,
+          response.error || "Metadata fetch failed.",
+          "unavailable",
+          DATASET_CONFIG[kind].recordType,
+          buildDatasetSourcePointer(portalUrl, candidate.datasetId)
+        ));
         continue;
       }
       if (requiresAuthMeta(response.data)) {
@@ -720,7 +739,6 @@ export const runDallasEvidencePack = async (input: {
           DATASET_CONFIG[kind].recordType,
           buildDatasetSourcePointer(portalUrl, candidate.datasetId)
         ));
-        metaResponse = response;
         continue;
       }
       if (!isTabularMeta(response.data)) {
@@ -731,98 +749,106 @@ export const runDallasEvidencePack = async (input: {
           DATASET_CONFIG[kind].recordType,
           buildDatasetSourcePointer(portalUrl, candidate.datasetId)
         ));
-        metaResponse = response;
         continue;
       }
-      selected = candidate;
-      metaResponse = response;
-      break;
+      anyQueryableCandidate = true;
+
+      const fields = extractFieldsFromMeta(response.data);
+      const schemaHash = buildSchemaHash(fields);
+      const cached = resolveSchemaCacheEntry(cache, candidate.datasetId, portalUrl);
+      let fieldMap: DallasFieldMap = cached?.schemaHash === schemaHash ? cached.fieldMap : {};
+      if (!fieldMap || Object.keys(fieldMap).length === 0) {
+        fieldMap = inferFieldMap(fields, kind);
+      }
+
+      if (cached && cached.schemaHash !== schemaHash) {
+        dataGaps.push(buildDataGap(
+          `${DATASET_CONFIG[kind].label} dataset schema drift detected.`,
+          `Schema hash changed; dataset ${candidate.datasetId} fields updated.`,
+          "stale",
+          DATASET_CONFIG[kind].recordType,
+          buildDatasetSourcePointer(portalUrl, candidate.datasetId, "schema drift detected")
+        ));
+      }
+
+      saveSchemaCacheEntry(cache, candidate.datasetId, portalUrl, schemaHash, fields, fieldMap);
+
+      if (kind !== "parcel" && !fieldMap.addressField && !(fieldMap.geometryField && geocodePoint)) {
+        dataGaps.push(buildDataGap(
+          `${DATASET_CONFIG[kind].label} dataset missing address field.`,
+          `Unable to locate address field in dataset ${candidate.datasetId}.`,
+          "missing",
+          DATASET_CONFIG[kind].recordType,
+          buildDatasetSourcePointer(portalUrl, candidate.datasetId)
+        ));
+        continue;
+      }
+
+      if (kind !== "parcel" && !fieldMap.dateField) {
+        dataGaps.push(buildDataGap(
+          `${DATASET_CONFIG[kind].label} dataset missing date field.`,
+          `Unable to locate date field for pre-2023 filter in dataset ${candidate.datasetId}.`,
+          "missing",
+          DATASET_CONFIG[kind].recordType,
+          buildDatasetSourcePointer(portalUrl, candidate.datasetId)
+        ));
+        continue;
+      }
+
+      const { rows, queryNote } = await queryDataset(
+        portalUrl,
+        candidate,
+        kind,
+        fieldMap,
+        addressVariants,
+        queryAttempts,
+        geocodePoint
+      );
+
+      if (rows.length === 0) {
+        dataGaps.push(buildDataGap(
+          `${DATASET_CONFIG[kind].label} dataset returned no records for the address query.`,
+          `Query returned 0 rows for dataset ${candidate.datasetId}.`,
+          "missing",
+          DATASET_CONFIG[kind].recordType,
+          buildDatasetSourcePointer(portalUrl, candidate.datasetId, queryNote)
+        ));
+      } else {
+        anyRowsMatched = true;
+      }
+
+      const sanitized = sanitizeRecordSet(rows, fieldMap);
+      summaries.push(summarizeRecords(DATASET_CONFIG[kind].label, candidate.datasetId, sanitized, queryNote));
+
+      const url = buildDatasetUrl(portalUrl, candidate.datasetId, response.data?.permalink || candidate.permalink);
+      sources.push(buildNormalizedSource(url, DATASET_CONFIG[kind].label));
     }
 
-    if (!selected || !metaResponse || !metaResponse.ok || !metaResponse.data) {
+    if (!anyQueryableCandidate) {
       const candidateIds = candidates.map((entry) => entry.datasetId).filter(Boolean).join(", ");
       dataGaps.push(buildDataGap(
-        `${DATASET_CONFIG[kind].label} dataset metadata unavailable.`,
-        metaResponse?.error
-          ? `${metaResponse.error}${candidateIds ? ` (candidates: ${candidateIds})` : ""}`
-          : `Metadata fetch failed or only map layers found.${candidateIds ? ` Candidates: ${candidateIds}` : ""}`,
-        "unavailable",
+        `${DATASET_CONFIG[kind].label} had no queryable public datasets.`,
+        candidateIds
+          ? `All discovered candidates were restricted, unavailable, or non-tabular. Candidates: ${candidateIds}`
+          : "All discovered candidates were restricted, unavailable, or non-tabular.",
+        "restricted",
         DATASET_CONFIG[kind].recordType,
         buildDatasetSourcePointer(portalUrl)
       ));
-      continue;
-    }
-
-    const fields = extractFieldsFromMeta(metaResponse.data);
-    const schemaHash = buildSchemaHash(fields);
-    const cached = resolveSchemaCacheEntry(cache, selected.datasetId, portalUrl);
-    let fieldMap: DallasFieldMap = cached?.schemaHash === schemaHash ? cached.fieldMap : {};
-    if (!fieldMap || Object.keys(fieldMap).length === 0) {
-      fieldMap = inferFieldMap(fields, kind);
-    }
-
-    if (cached && cached.schemaHash !== schemaHash) {
+    } else if (!anyRowsMatched) {
       dataGaps.push(buildDataGap(
-        `${DATASET_CONFIG[kind].label} dataset schema drift detected.`,
-        `Schema hash changed; dataset ${selected.datasetId} fields updated.`,
-        "stale",
-        DATASET_CONFIG[kind].recordType,
-        buildDatasetSourcePointer(portalUrl, selected.datasetId, "schema drift detected")
-      ));
-    }
-
-    saveSchemaCacheEntry(cache, selected.datasetId, portalUrl, schemaHash, fields, fieldMap);
-
-    if (kind !== "parcel" && !fieldMap.addressField) {
-      dataGaps.push(buildDataGap(
-        `${DATASET_CONFIG[kind].label} dataset missing address field.`,
-        `Unable to locate address field in dataset ${selected.datasetId}.`,
+        `${DATASET_CONFIG[kind].label} had no address-level matches across queryable datasets.`,
+        "All dataset queries returned zero rows for this address or spatial radius.",
         "missing",
         DATASET_CONFIG[kind].recordType,
-        buildDatasetSourcePointer(portalUrl, selected.datasetId)
-      ));
-      continue;
-    }
-
-    if (kind !== "parcel" && !fieldMap.dateField) {
-      dataGaps.push(buildDataGap(
-        `${DATASET_CONFIG[kind].label} dataset missing date field.`,
-        `Unable to locate date field for pre-2023 filter in dataset ${selected.datasetId}.`,
-        "missing",
-        DATASET_CONFIG[kind].recordType,
-        buildDatasetSourcePointer(portalUrl, selected.datasetId)
-      ));
-      continue;
-    }
-
-    const { rows, queryNote } = await queryDataset(
-      portalUrl,
-      selected,
-      kind,
-      fieldMap,
-      addressVariants,
-      queryAttempts,
-      geocodePoint
-    );
-
-    if (rows.length === 0) {
-      dataGaps.push(buildDataGap(
-        `${DATASET_CONFIG[kind].label} dataset returned no records for the address query.`,
-        `Query returned 0 rows for dataset ${selected.datasetId}.`,
-        "missing",
-        DATASET_CONFIG[kind].recordType,
-        buildDatasetSourcePointer(portalUrl, selected.datasetId, queryNote)
+        buildDatasetSourcePointer(portalUrl)
       ));
     }
-
-    const sanitized = sanitizeRecordSet(rows, fieldMap);
-    summaries.push(summarizeRecords(DATASET_CONFIG[kind].label, selected.datasetId, sanitized, queryNote));
-
-    const url = buildDatasetUrl(portalUrl, selected.datasetId, metaResponse.data?.permalink || selected.permalink);
-    sources.push(buildNormalizedSource(url, DATASET_CONFIG[kind].label));
   }
 
   writeDallasSchemaCache(cache);
+
+  const dedupedSources = Array.from(new Map(sources.map((source) => [source.uri, source])).values());
 
   if (summaries.length > 0) {
     findingsText = [
@@ -834,7 +860,7 @@ export const runDallasEvidencePack = async (input: {
 
   return {
     findingsText,
-    sources,
+    sources: dedupedSources,
     dataGaps,
     queryAttempts
   };

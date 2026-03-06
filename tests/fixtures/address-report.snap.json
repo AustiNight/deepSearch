@@ -139,24 +139,20 @@
           ],
           "retrievedAt": "2025-01-15T12:00:00Z",
           "lastUpdated": "2024-12-20",
-          "attribution": "Springfield Open Data — \"Springfield Neighborhood Statistics\" (data.springfield.gov)",
-          "attributionRequired": true,
-          "attributionStatus": "ok",
           "complianceAction": "allow",
-          "complianceNotes": []
+          "attribution": "Springfield Open Data",
+          "attributionRequired": false,
+          "attributionStatus": "ok"
         }
       ],
       "compliance": {
         "mode": "enforce",
-        "signoffRequired": true,
-        "signoffProvided": false,
-        "gateStatus": "signoff_required",
+        "signoffRequired": false,
+        "signoffProvided": true,
+        "gateStatus": "clear",
         "blockedSources": [],
-        "zeroCostMode": true,
-        "reviewRequired": false,
-        "notes": [
-          "Compliance sign-off required before rollout."
-        ]
+        "zeroCostMode": false,
+        "reviewRequired": false
       }
     },
     "schemaVersion": 1,

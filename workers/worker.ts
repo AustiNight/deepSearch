@@ -28,6 +28,7 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 
 const ACCESS_ALLOWLIST_KEY = "access_allowlist";
 const SETTINGS_KEY_PREFIX = "user_settings:";
+const SHARED_SETTINGS_KEY = "shared_settings:v2";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const MAX_ALLOWLIST_ENTRIES = 500;
@@ -96,6 +97,44 @@ type RunConfig = {
   earlyStopNoveltyRatio: number;
   earlyStopNewDomains: number;
   earlyStopNewSources: number;
+  estimatedCallLatencyMs?: number;
+  priorityWeights?: {
+    method?: {
+      llm_method_discovery?: number;
+      address_direct?: number;
+      knowledge_base_method?: number;
+      knowledge_base_domain?: number;
+      method_template_fallback?: number;
+    };
+    sector?: {
+      subtopicBoost?: number;
+      verticalSeedBase?: number;
+      rawSectorBase?: number;
+      fallback?: number;
+    };
+  };
+};
+
+type SettingsKeyOverrides = {
+  google?: string;
+  openai?: string;
+};
+
+type SettingsOpenDataConfig = {
+  zeroCostMode: boolean;
+  allowPaidAccess: boolean;
+  featureFlags: {
+    autoIngestion: boolean;
+    evidenceRecovery: boolean;
+    gatingEnforcement: boolean;
+    usOnlyAddressPolicy: boolean;
+  };
+  auth: {
+    socrataAppToken?: string;
+    arcgisApiKey?: string;
+    geocodingEmail?: string;
+    geocodingKey?: string;
+  };
 };
 
 type SettingsPayload = {
@@ -103,6 +142,8 @@ type SettingsPayload = {
   provider: "google" | "openai";
   runConfig: RunConfig;
   modelOverrides: Record<string, string>;
+  keyOverrides?: SettingsKeyOverrides;
+  openDataConfig?: SettingsOpenDataConfig;
 };
 
 type SettingsRecord = {
@@ -306,6 +347,36 @@ const normalizeRunConfig = (rawConfig: unknown): RunConfig => {
     0,
     Math.floor(toNumber(base.earlyStopNewSources, RUN_CONFIG_DEFAULTS.earlyStopNewSources))
   );
+  const estimatedCallLatencyMs = Math.max(
+    500,
+    Math.floor(toNumber(base.estimatedCallLatencyMs, 60000))
+  );
+
+  const normalizeWeight = (value: unknown, fallback: number) => clamp(toNumber(value, fallback), 0, 1);
+  const rawPriority = (base.priorityWeights && typeof base.priorityWeights === "object")
+    ? base.priorityWeights as Record<string, unknown>
+    : {};
+  const rawMethod = (rawPriority.method && typeof rawPriority.method === "object")
+    ? rawPriority.method as Record<string, unknown>
+    : {};
+  const rawSector = (rawPriority.sector && typeof rawPriority.sector === "object")
+    ? rawPriority.sector as Record<string, unknown>
+    : {};
+  const priorityWeights = {
+    method: {
+      llm_method_discovery: normalizeWeight(rawMethod.llm_method_discovery, 0.95),
+      address_direct: normalizeWeight(rawMethod.address_direct, 0.9),
+      knowledge_base_method: normalizeWeight(rawMethod.knowledge_base_method, 0.75),
+      knowledge_base_domain: normalizeWeight(rawMethod.knowledge_base_domain, 0.6),
+      method_template_fallback: normalizeWeight(rawMethod.method_template_fallback, 0.45)
+    },
+    sector: {
+      subtopicBoost: normalizeWeight(rawSector.subtopicBoost, 0.2),
+      verticalSeedBase: normalizeWeight(rawSector.verticalSeedBase, 0.3),
+      rawSectorBase: normalizeWeight(rawSector.rawSectorBase, 0.25),
+      fallback: normalizeWeight(rawSector.fallback, 0.15)
+    }
+  };
 
   return {
     minAgents,
@@ -318,6 +389,8 @@ const normalizeRunConfig = (rawConfig: unknown): RunConfig => {
     earlyStopNoveltyRatio,
     earlyStopNewDomains,
     earlyStopNewSources,
+    estimatedCallLatencyMs,
+    priorityWeights
   };
 };
 
@@ -335,6 +408,45 @@ const normalizeModelOverrides = (rawOverrides: unknown) => {
   return sanitized;
 };
 
+const trimMaybe = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+
+const normalizeSettingsKeyOverrides = (raw: unknown): SettingsKeyOverrides => {
+  const base = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const google = trimMaybe(base.google);
+  const openai = trimMaybe(base.openai);
+  const out: SettingsKeyOverrides = {};
+  if (google) out.google = google;
+  if (openai) out.openai = openai;
+  return out;
+};
+
+const normalizeSettingsOpenDataConfig = (raw: unknown): SettingsOpenDataConfig => {
+  const base = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const rawFlags = base.featureFlags && typeof base.featureFlags === "object"
+    ? base.featureFlags as Record<string, unknown>
+    : {};
+  const rawAuth = base.auth && typeof base.auth === "object"
+    ? base.auth as Record<string, unknown>
+    : {};
+  const zeroCostMode = base.zeroCostMode === true;
+  return {
+    zeroCostMode,
+    allowPaidAccess: zeroCostMode ? false : base.allowPaidAccess === true,
+    featureFlags: {
+      autoIngestion: typeof rawFlags.autoIngestion === "boolean" ? rawFlags.autoIngestion : true,
+      evidenceRecovery: typeof rawFlags.evidenceRecovery === "boolean" ? rawFlags.evidenceRecovery : true,
+      gatingEnforcement: typeof rawFlags.gatingEnforcement === "boolean" ? rawFlags.gatingEnforcement : true,
+      usOnlyAddressPolicy: typeof rawFlags.usOnlyAddressPolicy === "boolean" ? rawFlags.usOnlyAddressPolicy : false
+    },
+    auth: {
+      socrataAppToken: trimMaybe(rawAuth.socrataAppToken) || undefined,
+      arcgisApiKey: trimMaybe(rawAuth.arcgisApiKey) || undefined,
+      geocodingEmail: trimMaybe(rawAuth.geocodingEmail) || undefined,
+      geocodingKey: trimMaybe(rawAuth.geocodingKey) || undefined
+    }
+  };
+};
+
 const normalizeSettingsPayload = (rawPayload: unknown) => {
   if (!rawPayload || typeof rawPayload !== "object") {
     return { error: "settings payload required." };
@@ -347,11 +459,15 @@ const normalizeSettingsPayload = (rawPayload: unknown) => {
   const provider = payload.provider === "openai" ? "openai" : "google";
   const runConfig = normalizeRunConfig(payload.runConfig);
   const modelOverrides = normalizeModelOverrides(payload.modelOverrides);
+  const keyOverrides = normalizeSettingsKeyOverrides(payload.keyOverrides);
+  const openDataConfig = normalizeSettingsOpenDataConfig(payload.openDataConfig);
   const settings: SettingsPayload = {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     provider,
     runConfig,
     modelOverrides,
+    keyOverrides,
+    openDataConfig
   };
   return { settings };
 };
@@ -789,23 +905,46 @@ export default {
         return json({ error: "Access authentication required." }, 401, corsHeaders);
       }
 
-      const storageKey = await getSettingsStorageKey(accessEmail);
-      const legacyStorageKey = getLegacySettingsKey(accessEmail);
+      const storageKey = SHARED_SETTINGS_KEY;
+      const userStorageKey = await getSettingsStorageKey(accessEmail);
+      const legacyUserStorageKey = getLegacySettingsKey(accessEmail);
 
       const loadStoredSettings = async () => {
-        const current = await env.SETTINGS_KV.get<SettingsRecord>(storageKey, "json");
+        const current = await env.SETTINGS_KV.get<SettingsRecord>(SHARED_SETTINGS_KEY, "json");
         if (current) {
-          return { record: current, key: storageKey, legacy: false };
+          return {
+            record: current,
+            key: SHARED_SETTINGS_KEY,
+            legacy: false,
+            staleKeys: [userStorageKey, legacyUserStorageKey]
+          };
         }
-        const legacy = await env.SETTINGS_KV.get<SettingsRecord>(legacyStorageKey, "json");
+
+        const userScoped = await env.SETTINGS_KV.get<SettingsRecord>(userStorageKey, "json");
+        if (userScoped) {
+          return {
+            record: userScoped,
+            key: SHARED_SETTINGS_KEY,
+            legacy: true,
+            staleKeys: [userStorageKey, legacyUserStorageKey]
+          };
+        }
+
+        const legacy = await env.SETTINGS_KV.get<SettingsRecord>(legacyUserStorageKey, "json");
         if (legacy) {
-          return { record: legacy, key: legacyStorageKey, legacy: true };
+          return {
+            record: legacy,
+            key: SHARED_SETTINGS_KEY,
+            legacy: true,
+            staleKeys: [userStorageKey, legacyUserStorageKey]
+          };
         }
-        return { record: null, key: storageKey, legacy: false };
+
+        return { record: null, key: SHARED_SETTINGS_KEY, legacy: false, staleKeys: [userStorageKey, legacyUserStorageKey] };
       };
 
       if (request.method === "GET") {
-        const { record: stored, legacy } = await loadStoredSettings();
+        const { record: stored, legacy, staleKeys } = await loadStoredSettings();
         let resolved = stored
           ? {
             settings: stripSettingsForKv(stored.settings),
@@ -816,8 +955,10 @@ export default {
           : null;
         if (stored && (legacy || stored.updatedBy)) {
           await env.SETTINGS_KV.put(storageKey, JSON.stringify(resolved));
-          if (legacy) {
-            await env.SETTINGS_KV.delete(legacyStorageKey);
+          for (const staleKey of staleKeys) {
+            if (staleKey !== SHARED_SETTINGS_KEY) {
+              await env.SETTINGS_KV.delete(staleKey);
+            }
           }
         }
         const responseBody = {
@@ -841,7 +982,7 @@ export default {
       const expectedUpdatedAt = (data?.expectedUpdatedAt || request.headers.get("If-Match") || "").trim();
       const expectedVersionRaw = data?.expectedVersion;
       const expectedVersion = Number.isFinite(Number(expectedVersionRaw)) ? Number(expectedVersionRaw) : null;
-      const { record: stored, legacy } = await loadStoredSettings();
+      const { record: stored, legacy, staleKeys } = await loadStoredSettings();
       const storedSanitized = stored
         ? {
           settings: stripSettingsForKv(stored.settings),
@@ -853,8 +994,10 @@ export default {
       const redactStoredIfNeeded = async () => {
         if (stored && (legacy || stored.updatedBy)) {
           await env.SETTINGS_KV.put(storageKey, JSON.stringify(storedSanitized));
-          if (legacy) {
-            await env.SETTINGS_KV.delete(legacyStorageKey);
+          for (const staleKey of staleKeys) {
+            if (staleKey !== SHARED_SETTINGS_KEY) {
+              await env.SETTINGS_KV.delete(staleKey);
+            }
           }
         }
       };
@@ -903,11 +1046,12 @@ export default {
         version: (stored?.version || 0) + 1,
       };
       await env.SETTINGS_KV.put(storageKey, JSON.stringify(record));
-      if (legacy) {
-        await env.SETTINGS_KV.delete(legacyStorageKey);
+      for (const staleKey of staleKeys) {
+        if (staleKey !== SHARED_SETTINGS_KEY) {
+          await env.SETTINGS_KV.delete(staleKey);
+        }
       }
       console.log("Settings updated.", {
-        email: accessEmail,
         version: record.version,
         provider: record.settings.provider,
         modelOverrides: Object.keys(record.settings.modelOverrides || {}).length,
