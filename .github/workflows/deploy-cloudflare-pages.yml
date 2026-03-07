@@ -1,0 +1,94 @@
+name: Deploy Cloudflare Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      project_name:
+        description: "Override Cloudflare Pages project name (optional)"
+        required: false
+        type: string
+      branch:
+        description: "Override Pages branch (optional; defaults to current ref)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages-deploy
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  WRANGLER_VERSION: "4.71.0"
+
+jobs:
+  deploy-pages:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.CLOUDFLARE_PAGES_PROJECT_NAME != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Resolve deploy target
+        id: target
+        env:
+          INPUT_PROJECT_NAME: ${{ inputs.project_name }}
+          INPUT_BRANCH: ${{ inputs.branch }}
+          DEFAULT_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          REF_BRANCH: ${{ github.ref_name }}
+        run: |
+          PROJECT_NAME="${INPUT_PROJECT_NAME:-$DEFAULT_PROJECT_NAME}"
+          BRANCH_NAME="${INPUT_BRANCH:-$REF_BRANCH}"
+          if [ -z "$PROJECT_NAME" ]; then
+            echo "CLOUDFLARE_PAGES_PROJECT_NAME is not set. Add it as a repository variable or pass workflow_dispatch input."
+            exit 1
+          fi
+          if [ -z "$BRANCH_NAME" ]; then
+            echo "Unable to resolve branch for Pages deployment."
+            exit 1
+          fi
+          echo "project_name=$PROJECT_NAME" >> "$GITHUB_OUTPUT"
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+          echo "Deploying dist/ to Cloudflare Pages project '$PROJECT_NAME' (branch '$BRANCH_NAME')."
+
+      - name: Verify Cloudflare deploy secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "${CLOUDFLARE_API_TOKEN}" || (echo "Missing secret: CLOUDFLARE_API_TOKEN" && exit 1)
+          test -n "${CLOUDFLARE_ACCOUNT_ID}" || (echo "Missing secret: CLOUDFLARE_ACCOUNT_ID" && exit 1)
+
+      - name: Deploy Cloudflare Pages (Direct Upload)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler@${WRANGLER_VERSION} pages deploy dist \
+            --project-name "${{ steps.target.outputs.project_name }}" \
+            --branch "${{ steps.target.outputs.branch_name }}"
+
+  not-configured:
+    if: ${{ github.event_name == 'push' && vars.CLOUDFLARE_PAGES_PROJECT_NAME == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cloudflare Pages not configured
+        run: |
+          echo "Skipping Cloudflare Pages deploy."
+          echo "Set repository variable CLOUDFLARE_PAGES_PROJECT_NAME to enable automatic deploys on main."

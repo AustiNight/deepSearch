@@ -42,6 +42,18 @@ More details in `docs/settings.md`, `docs/universal-settings.md`, `docs/cloudfla
 
 See `CHANGELOG.md` for UI/search release notes.
 
+## Cloudflare Pages Migration (Optional, Staged)
+
+If you want to migrate static hosting from GitHub Pages to Cloudflare Pages, use the staged runbook:
+
+- `docs/cloudflare-pages-migration.md`
+
+Key behavior:
+
+- GitHub Pages deploy remains active until you cut over DNS.
+- Cloudflare Pages deploy is automated via `.github/workflows/deploy-cloudflare-pages.yml`.
+- Automatic Cloudflare Pages deploy on `main` is enabled when repository variable `CLOUDFLARE_PAGES_PROJECT_NAME` is set.
+
 ## Cloudflare Worker Proxy (Recommended for Production)
 
 To keep API keys off the client, deploy the included Worker and point the frontend at it.
@@ -61,6 +73,32 @@ Use delegated API-token auth for all day-to-day deployment/secret operations. Do
 4. Rotate Worker secrets from terminal:
    `npx wrangler@${WRANGLER_VERSION} secret put OPENAI_API_KEY --name deepsearch`
    `npx wrangler@${WRANGLER_VERSION} secret put GEMINI_API_KEY --name deepsearch`
+
+### GitHub Actions Secrets Setup (Worker Deploy)
+
+The `Deploy Worker` GitHub Actions workflow requires these repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+Configure them once:
+
+1. In Cloudflare, open **My Profile → API Tokens → Create Token**.
+2. Create a token for Worker deployments (template: **Edit Cloudflare Workers** or equivalent scoped custom token).
+3. Scope the token to the production account that owns the `deepsearch` Worker.
+4. Copy the token value (shown once at creation time).
+5. In Cloudflare dashboard, copy the production **Account ID**.
+6. In GitHub, open this repository.
+7. Go to **Settings → Secrets and variables → Actions**.
+8. Create secret `CLOUDFLARE_API_TOKEN` with the token value.
+9. Create secret `CLOUDFLARE_ACCOUNT_ID` with the Account ID.
+10. Run **Actions → Deploy Worker** (or push to `main`).
+
+Verification:
+
+- Workflow log should show:
+  - `npx wrangler@${WRANGLER_VERSION} deploy --name deepsearch`
+  - `npx wrangler@${WRANGLER_VERSION} deployments list --name deepsearch`
 
 ### Canonical Secret Ownership Model
 
