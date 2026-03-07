@@ -1,0 +1,10 @@
+{
+  "title": "Deep Searches",
+  "description": "Search and synthesis workspace.",
+  "imageUrl": "https://deepsearches.app/og.png",
+  "tags": ["ai", "search"],
+  "projectKey": "deepsearches",
+  "repoUrl": "https://github.com/AustiNight/deepSearch",
+  "readmeUrl": "https://raw.githubusercontent.com/AustiNight/deepSearch/main/README.md",
+  "carouselText": "Deep Searches is built as a React + Vite SPA with a Cloudflare Worker edge proxy for LLM and open-data calls, plus KV for shared settings and access metadata. We chose this stack for fast frontend iteration, low operations overhead, and same-origin security controls; the tradeoff is tighter Cloudflare platform coupling and extra CORS/Access policy coordination. Retrieval is source-grounded with compliance and evidence gates, which improves trust and citation quality but can soft-fail when authoritative public records are sparse or endpoint availability is inconsistent."
+}

@@ -43,7 +43,15 @@ jobs:
         run: npm ci
 
       - name: Build frontend
-        run: npm run build
+        env:
+          PROXY_BASE_URL: ${{ vars.CLOUDFLARE_PAGES_PROXY_BASE_URL }}
+        run: |
+          if [ -n "${PROXY_BASE_URL}" ]; then
+            echo "Building with PROXY_BASE_URL=${PROXY_BASE_URL}"
+          else
+            echo "Building with default PROXY_BASE_URL behavior (same-origin /api)."
+          fi
+          npm run build
 
       - name: Resolve deploy target
         id: target
@@ -76,13 +84,35 @@ jobs:
           test -n "${CLOUDFLARE_ACCOUNT_ID}" || (echo "Missing secret: CLOUDFLARE_ACCOUNT_ID" && exit 1)
 
       - name: Deploy Cloudflare Pages (Direct Upload)
+        id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -o pipefail
+          DEPLOY_LOG="$(mktemp)"
           npx wrangler@${WRANGLER_VERSION} pages deploy dist \
             --project-name "${{ steps.target.outputs.project_name }}" \
-            --branch "${{ steps.target.outputs.branch_name }}"
+            --branch "${{ steps.target.outputs.branch_name }}" | tee "$DEPLOY_LOG"
+          DEPLOY_URL="$(grep -Eo 'https://[^ ]+\.pages\.dev' "$DEPLOY_LOG" | head -n 1 || true)"
+          if [ -n "$DEPLOY_URL" ]; then
+            echo "deployment_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare Pages URL: $DEPLOY_URL"
+          fi
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "## Cloudflare Pages Deploy";
+            echo "";
+            echo "- Project: \`${{ steps.target.outputs.project_name }}\`";
+            echo "- Branch: \`${{ steps.target.outputs.branch_name }}\`";
+            if [ -n "${{ steps.deploy.outputs.deployment_url }}" ]; then
+              echo "- URL: ${{ steps.deploy.outputs.deployment_url }}";
+            else
+              echo "- URL: (not detected in wrangler output)";
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   not-configured:
     if: ${{ github.event_name == 'push' && vars.CLOUDFLARE_PAGES_PROJECT_NAME == '' }}

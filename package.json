@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "node scripts/copy-public-dotfiles.mjs",
     "preview": "vite preview",
     "vertical-logic:generate": "node scripts/vertical-logic-table.mjs",
     "vertical-logic:check": "node scripts/vertical-logic-table.mjs --check",
