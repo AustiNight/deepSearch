@@ -6,6 +6,21 @@ const isBrowser = () => typeof window !== "undefined";
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, "");
 
+const buildApiFetchHint = (url: string) => {
+  if (!isBrowser()) return "";
+  try {
+    const target = new URL(url, window.location.origin);
+    if (!target.pathname.startsWith(API_PREFIX)) return "";
+    const crossOrigin = target.origin !== window.location.origin;
+    if (crossOrigin) {
+      return ` Cross-origin API target (${target.origin}) detected. Ensure ALLOWED_ORIGINS includes ${window.location.origin} and that Cloudflare Access session/auth is valid for ${target.origin}.`;
+    }
+    return " API request appears same-origin. If this persists, re-authenticate with Cloudflare Access and retry.";
+  } catch (_) {
+    return "";
+  }
+};
+
 const getBaseUrl = () => {
   const base = resolveProxyBaseUrl();
   return base ? normalizeBaseUrl(base) : "";
@@ -40,7 +55,8 @@ export const apiFetch = async (path: string, init?: RequestInit) => {
   } catch (error) {
     if ((error as any)?.name === "AbortError") throw error;
     const message = error instanceof Error ? error.message : String(error ?? "Unknown fetch error");
-    throw new Error(`Failed to fetch API endpoint ${url}: ${message}`);
+    const hint = buildApiFetchHint(url);
+    throw new Error(`Failed to fetch API endpoint ${url}: ${message}${hint}`);
   }
 };
 

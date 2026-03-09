@@ -552,6 +552,25 @@ const getPolicyField = <T>(policy: Record<string, unknown>, snake: string, camel
   return undefined;
 };
 
+const summarizeCloudflareApiFailure = (response: Response, payload: any) => {
+  const status = response.status;
+  const apiErrors = Array.isArray(payload?.errors)
+    ? payload.errors
+      .map((entry: any) => {
+        const code = typeof entry?.code === "number" || typeof entry?.code === "string"
+          ? String(entry.code)
+          : "unknown";
+        const message = typeof entry?.message === "string" ? entry.message : "unknown error";
+        return `${code}:${message}`;
+      })
+      .filter(Boolean)
+    : [];
+  if (apiErrors.length > 0) {
+    return `status ${status} (${apiErrors.join("; ")})`;
+  }
+  return `status ${status}`;
+};
+
 const fetchAccessPolicy = async (env: Env) => {
   const { CF_API_TOKEN, CF_ACCOUNT_ID, CF_ACCESS_APP_ID, CF_ACCESS_POLICY_ID } = env;
   if (!CF_API_TOKEN || !CF_ACCOUNT_ID || !CF_ACCESS_APP_ID || !CF_ACCESS_POLICY_ID) {
@@ -572,7 +591,7 @@ const fetchAccessPolicy = async (env: Env) => {
     throw new Error("Unable to parse Cloudflare policy response.");
   }
   if (!currentResponse.ok || !currentJson?.success) {
-    throw new Error("Failed to fetch Cloudflare Access policy.");
+    throw new Error(`Failed to fetch Cloudflare Access policy (${summarizeCloudflareApiFailure(currentResponse, currentJson)}).`);
   }
   return {
     policy: currentJson.result as Record<string, unknown>,
@@ -653,7 +672,7 @@ const updateAccessPolicy = async (env: Env, entries: string[]) => {
     throw new Error("Unable to parse Cloudflare policy update response.");
   }
   if (!updateResponse.ok || !updateJson?.success) {
-    throw new Error("Failed to update Cloudflare Access policy.");
+    throw new Error(`Failed to update Cloudflare Access policy (${summarizeCloudflareApiFailure(updateResponse, updateJson)}).`);
   }
 };
 
