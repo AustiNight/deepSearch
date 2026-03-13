@@ -1,0 +1,9 @@
+{
+  "title": "DeepSearches App",
+  "description": "Research assistant agent orchestration and open data query tool.",
+  "imageUrl": "https://deepsearches.app/preview-carousel.png?v=1",
+  "tags": ["AI", "openData", "research", "orchestration"],
+  "projectKey": "deepsearches-app",
+  "repoUrl": "https://github.com/AustiNight/deepSearch.git",
+  "carouselText": "Empowering researchers to seamlessly navigate and query open data sources, while automating the orchestration of research assistant agents for efficient information retrieval."
+}

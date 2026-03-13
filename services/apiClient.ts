@@ -26,6 +26,33 @@ const getBaseUrl = () => {
   return base ? normalizeBaseUrl(base) : "";
 };
 
+const isAccessLoginRedirect = (response: Response) => {
+  if (response.type === "opaqueredirect") return true;
+  if (response.status < 300 || response.status >= 400) return false;
+  const location = response.headers.get("location") || "";
+  if (!location) return false;
+  const normalized = location.toLowerCase();
+  return normalized.includes("cloudflareaccess.com") || normalized.includes("/cdn-cgi/access/login/");
+};
+
+const diagnoseAccessAuthFailure = async (url: string) => {
+  if (!isBrowser()) return null;
+  try {
+    const probe = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      redirect: "manual",
+    });
+    if (isAccessLoginRedirect(probe)) {
+      return "Cloudflare Access authentication is required or expired. Re-authenticate and retry.";
+    }
+  } catch (_) {
+    // Ignore probe failures and fall back to the original fetch error.
+  }
+  return null;
+};
+
 const buildApiUrl = (input: string) => {
   if (!input) throw new Error("API path required.");
   if (input.startsWith("http://") || input.startsWith("https://")) {
@@ -54,7 +81,8 @@ export const apiFetch = async (path: string, init?: RequestInit) => {
     return await fetch(url, init);
   } catch (error) {
     if ((error as any)?.name === "AbortError") throw error;
-    const message = error instanceof Error ? error.message : String(error ?? "Unknown fetch error");
+    const accessAuthMessage = await diagnoseAccessAuthFailure(url);
+    const message = accessAuthMessage || (error instanceof Error ? error.message : String(error ?? "Unknown fetch error"));
     const hint = buildApiFetchHint(url);
     throw new Error(`Failed to fetch API endpoint ${url}: ${message}${hint}`);
   }

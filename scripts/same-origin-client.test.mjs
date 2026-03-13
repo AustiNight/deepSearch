@@ -51,6 +51,31 @@ const { querySocrataRag } = await import("../services/socrataRagClient.ts");
 await querySocrataRag(`test query ${Date.now()}`);
 assert.equal(lastFetchUrl, "https://app.local/api/rag/query");
 
+globalThis.window = { location: { origin: "https://deepsearches.app" } };
+let calls = 0;
+globalThis.fetch = async (_input, init) => {
+  calls += 1;
+  if (calls === 1) {
+    throw new TypeError("Failed to fetch");
+  }
+  if (init?.redirect === "manual") {
+    return {
+      status: 302,
+      type: "basic",
+      headers: new Headers({
+        location:
+          "https://deepsearches.cloudflareaccess.com/cdn-cgi/access/login/deepsearches.app",
+      }),
+    };
+  }
+  return { ok: true };
+};
+
+await assert.rejects(
+  () => apiFetch("/api/settings", { credentials: "include" }),
+  /Cloudflare Access authentication is required or expired/
+);
+
 if (originalBase === undefined) {
   delete process.env.PROXY_BASE_URL;
 } else {
