@@ -5,7 +5,8 @@ import { AgentGraph } from './components/AgentGraph';
 import { LogTerminal } from './components/LogTerminal';
 import { ReportView } from './components/ReportView';
 import { TransparencyPanel } from './components/TransparencyPanel';
-import { AgentStatus, LLMProvider, ModelOverrides, ModelRole, OpenDataAuthConfig, RunConfig, UniversalSettingsPayload } from './types';
+import { OperatorConsole } from './components/OperatorConsole';
+import { AgentStatus, LLMProvider, ModelOverrides, ModelRole, OpenDataAuthConfig, OperatorTuning, RunConfig, SourceLearningStats, UniversalSettingsPayload } from './types';
 import { getOpenAIModelDefaults, loadModelOverrides, saveModelOverrides } from './services/modelOverrides';
 import { fetchAllowlist, updateAllowlist, type AllowlistUpdateResult } from './services/accessAllowlistService';
 import {
@@ -69,6 +70,9 @@ import {
 const ENV_GEMINI_KEY = (process.env.GEMINI_API_KEY || '').trim();
 const ENV_OPENAI_KEY = (process.env.OPENAI_API_KEY || '').trim();
 const ENV_PROVIDER_RAW = (process.env.LLM_PROVIDER || '').trim().toLowerCase();
+const ENV_SOCRATA_APP_TOKEN = (process.env.SOCRATA_APP_TOKEN || '').trim();
+const ENV_ARCGIS_API_KEY = (process.env.ARCGIS_API_KEY || '').trim();
+const ENV_GEOCODING_CONTACT_EMAIL = (process.env.GEOCODING_CONTACT_EMAIL || '').trim();
 const ENV_PROVIDER = (ENV_PROVIDER_RAW === 'google' || ENV_PROVIDER_RAW === 'openai') ? ENV_PROVIDER_RAW : '';
 const DEFAULT_PROVIDER: LLMProvider = (ENV_PROVIDER as LLMProvider) || (ENV_OPENAI_KEY && !ENV_GEMINI_KEY ? 'openai' : 'google');
 const ENV_ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || '').trim();
@@ -122,6 +126,39 @@ const normalizePriorityWeights = (raw?: RunConfig['priorityWeights']) => {
       verticalSeedBase: clampWeight(sectorRaw.verticalSeedBase, defaults.sector.verticalSeedBase),
       rawSectorBase: clampWeight(sectorRaw.rawSectorBase, defaults.sector.rawSectorBase),
       fallback: clampWeight(sectorRaw.fallback, defaults.sector.fallback)
+    }
+  };
+};
+
+const DEFAULT_OPERATOR_TUNING: OperatorTuning = {
+  explorationRatio: 0.35,
+  preferredDomainWeight: 0.7,
+  noveltyFloor: 0.2,
+  authorityFloor: 70,
+  validationStrictness: 'balanced',
+  phaseBudgets: { phase05: 6, phase2b: 8, phase3b: 8 },
+  sourcePolicy: { preferred: {}, suppressed: {}, blocked: [] }
+};
+
+const normalizeOperatorTuning = (raw?: OperatorTuning | null): OperatorTuning => {
+  const sourcePolicy = raw?.sourcePolicy || DEFAULT_OPERATOR_TUNING.sourcePolicy;
+  return {
+    explorationRatio: Math.max(0, Math.min(1, Number(raw?.explorationRatio ?? DEFAULT_OPERATOR_TUNING.explorationRatio))),
+    preferredDomainWeight: Math.max(0, Math.min(1, Number(raw?.preferredDomainWeight ?? DEFAULT_OPERATOR_TUNING.preferredDomainWeight))),
+    noveltyFloor: Math.max(0, Math.min(1, Number(raw?.noveltyFloor ?? DEFAULT_OPERATOR_TUNING.noveltyFloor))),
+    authorityFloor: Math.max(0, Math.min(100, Number(raw?.authorityFloor ?? DEFAULT_OPERATOR_TUNING.authorityFloor))),
+    validationStrictness: raw?.validationStrictness === 'strict' || raw?.validationStrictness === 'permissive'
+      ? raw.validationStrictness
+      : 'balanced',
+    phaseBudgets: {
+      phase05: Math.max(1, Math.floor(Number(raw?.phaseBudgets?.phase05 ?? DEFAULT_OPERATOR_TUNING.phaseBudgets.phase05))),
+      phase2b: Math.max(1, Math.floor(Number(raw?.phaseBudgets?.phase2b ?? DEFAULT_OPERATOR_TUNING.phaseBudgets.phase2b))),
+      phase3b: Math.max(1, Math.floor(Number(raw?.phaseBudgets?.phase3b ?? DEFAULT_OPERATOR_TUNING.phaseBudgets.phase3b)))
+    },
+    sourcePolicy: {
+      preferred: { ...(sourcePolicy.preferred || {}) },
+      suppressed: { ...(sourcePolicy.suppressed || {}) },
+      blocked: Array.isArray(sourcePolicy.blocked) ? Array.from(new Set(sourcePolicy.blocked.map((d) => String(d).toLowerCase()))) : []
     }
   };
 };
@@ -217,10 +254,15 @@ const sanitizeOpenDataAuth = (input: OpenDataAuthConfig): OpenDataAuthConfig => 
   return {
     socrataAppToken: normalize(input.socrataAppToken),
     arcgisApiKey: normalize(input.arcgisApiKey),
-    geocodingEmail: normalize(input.geocodingEmail),
-    geocodingKey: normalize(input.geocodingKey)
+    geocodingEmail: normalize(input.geocodingEmail)
   };
 };
+
+const applyEnvOpenDataAuthFallback = (input: OpenDataAuthConfig): OpenDataAuthConfig => ({
+  socrataAppToken: input.socrataAppToken || ENV_SOCRATA_APP_TOKEN || undefined,
+  arcgisApiKey: input.arcgisApiKey || ENV_ARCGIS_API_KEY || undefined,
+  geocodingEmail: input.geocodingEmail || ENV_GEOCODING_CONTACT_EMAIL || undefined
+});
 
 type GraphVisualizationPrefs = {
   motion: boolean;
@@ -241,12 +283,17 @@ const App: React.FC = () => {
   const [provider, setProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
   const [keyOverrides, setKeyOverrides] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
   const [runConfig, setRunConfig] = useState<RunConfig>({ ...DEFAULT_RUN_CONFIG });
+  const [operatorTuningSettings, setOperatorTuningSettings] = useState<OperatorTuning>(DEFAULT_OPERATOR_TUNING);
+  const [sourceLearning, setSourceLearning] = useState<SourceLearningStats[]>([]);
   const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
   const [draftProvider, setDraftProvider] = useState<LLMProvider>(DEFAULT_PROVIDER);
   const [draftKeys, setDraftKeys] = useState<{ google: string; openai: string }>({ google: '', openai: '' });
   const [draftRunConfig, setDraftRunConfig] = useState<RunConfig>({ ...DEFAULT_RUN_CONFIG });
+  const [draftOperatorTuning, setDraftOperatorTuning] = useState<OperatorTuning>(DEFAULT_OPERATOR_TUNING);
   const [draftModelOverrides, setDraftModelOverrides] = useState<ModelOverrides>({});
-  const [draftOpenDataAuth, setDraftOpenDataAuth] = useState<OpenDataAuthConfig>(() => ({ ...getOpenDataConfig().auth }));
+  const [draftOpenDataAuth, setDraftOpenDataAuth] = useState<OpenDataAuthConfig>(() => (
+    { ...applyEnvOpenDataAuthFallback(getOpenDataConfig().auth) }
+  ));
   const [openDataPersist, setOpenDataPersist] = useState<boolean>(() => getOpenDataPersistencePreference());
   const [optionalKeysPolicyReady] = useState<boolean>(() => isOptionalKeysPersistenceSupported());
   const [openDataPersistNeedsReconsent, setOpenDataPersistNeedsReconsent] = useState<boolean>(false);
@@ -276,6 +323,7 @@ const App: React.FC = () => {
   const [showSkills, setShowSkills] = useState(false);
   const [showTransparency, setShowTransparency] = useState(false);
   const [showGuardrailDebug, setShowGuardrailDebug] = useState<boolean>(() => readUiPreferences().showGuardrailDebug === true);
+  const [showOperatorConsole, setShowOperatorConsole] = useState<boolean>(true);
   const [graphVisualization, setGraphVisualization] = useState<GraphVisualizationPrefs>(() => (
     normalizeGraphVisualizationPrefs(readUiPreferences().graphVisualization)
   ));
@@ -414,6 +462,9 @@ const App: React.FC = () => {
   const applySettingsPayload = (payload: UniversalSettingsPayload, options?: { updateDraft?: boolean }) => {
     setProvider(payload.provider);
     setRunConfig(payload.runConfig);
+    const resolvedTuning = normalizeOperatorTuning(payload.operatorTuning || DEFAULT_OPERATOR_TUNING);
+    setOperatorTuningSettings(resolvedTuning);
+    setSourceLearning(Array.isArray(payload.sourceLearning) ? payload.sourceLearning : []);
     setModelOverrides(payload.modelOverrides);
     writeProvider(payload.provider);
     writeRunConfig(payload.runConfig);
@@ -436,6 +487,7 @@ const App: React.FC = () => {
     if (options?.updateDraft) {
       setDraftProvider(payload.provider);
       setDraftRunConfig(payload.runConfig);
+      setDraftOperatorTuning(normalizeOperatorTuning(payload.operatorTuning || DEFAULT_OPERATOR_TUNING));
       setDraftModelOverrides(payload.modelOverrides);
       if (payload.keyOverrides) {
         setDraftKeys({
@@ -655,13 +707,25 @@ const App: React.FC = () => {
       }
     }
 
+    const seededOpenDataConfig = (() => {
+      const current = getOpenDataConfig();
+      const seededAuth = applyEnvOpenDataAuthFallback(current.auth || {});
+      const next = {
+        ...current,
+        auth: seededAuth
+      };
+      updateOpenDataConfig(next, { persist: getOpenDataPersistencePreference() });
+      return next;
+    })();
     const hasLocalSettings = hasLocalSettingsSnapshot();
     const localSnapshot = buildUniversalSettingsPayload({
       provider: resolvedProvider,
       runConfig: resolvedRunConfig,
       modelOverrides: storedOverrides,
       keyOverrides: { google: storedGoogle, openai: storedOpenAI },
-      openDataConfig: getOpenDataConfig(),
+      openDataConfig: seededOpenDataConfig,
+      operatorTuning: operatorTuningSettings,
+      sourceLearning,
       defaults: { runConfig: DEFAULT_RUN_CONFIG }
     });
 
@@ -715,6 +779,7 @@ const App: React.FC = () => {
     setProvider(draftProvider);
     setKeyOverrides(nextKeys);
     setRunConfig(nextRunConfig);
+    setOperatorTuningSettings(normalizeOperatorTuning(draftOperatorTuning));
     writeProvider(draftProvider);
     writeRunConfig(nextRunConfig);
     recordLocalSettingsUpdate();
@@ -799,6 +864,8 @@ const App: React.FC = () => {
         ...getOpenDataConfig(),
         auth: nextOpenDataAuth
       },
+      operatorTuning: draftOperatorTuning,
+      sourceLearning,
       defaults: { runConfig: DEFAULT_RUN_CONFIG }
     });
 
@@ -832,6 +899,13 @@ const App: React.FC = () => {
           tone: 'warning',
           message: 'Cloud settings changed. Load latest settings before saving.'
         });
+      } else if (settingsResult.status === 404) {
+        settingsOk = true;
+        setSettingsCloudStatus('unavailable');
+        setSettingsSyncStatus({
+          tone: 'info',
+          message: 'Cloud settings endpoint unavailable (404). Saved locally only.'
+        });
       } else {
         settingsOk = false;
         const unauthorized = settingsResult.status === 401 || settingsResult.status === 403;
@@ -859,12 +933,13 @@ const App: React.FC = () => {
     setDraftKeys(prev => ({ ...prev, [draftProvider]: '' }));
   };
 
-  const doOpenSettings = () => {
+    const doOpenSettings = () => {
     setDraftProvider(provider);
     setDraftKeys(keyOverrides);
     setDraftRunConfig(runConfig);
+    setDraftOperatorTuning(operatorTuningSettings);
     setDraftModelOverrides(modelOverrides);
-    setDraftOpenDataAuth({ ...getOpenDataConfig().auth });
+    setDraftOpenDataAuth({ ...applyEnvOpenDataAuthFallback(getOpenDataConfig().auth) });
     setOpenDataPersist(getOpenDataPersistencePreference());
     setOpenDataPersistNeedsReconsent(consumeOptionalKeysPersistenceInvalidation());
     setBulkModelValue('');
@@ -922,10 +997,9 @@ const App: React.FC = () => {
     }
   };
 
-  const socrataToken = (draftOpenDataAuth.socrataAppToken || '').trim();
-  const arcgisApiKey = (draftOpenDataAuth.arcgisApiKey || '').trim();
-  const geocodingEmail = (draftOpenDataAuth.geocodingEmail || '').trim();
-  const geocodingKey = (draftOpenDataAuth.geocodingKey || '').trim();
+    const socrataToken = (draftOpenDataAuth.socrataAppToken || '').trim();
+    const arcgisApiKey = (draftOpenDataAuth.arcgisApiKey || '').trim();
+    const geocodingEmail = (draftOpenDataAuth.geocodingEmail || '').trim();
 
   const { entries: draftAllowlistEntries, invalid: draftAllowlistInvalid } = parseAllowlistText(draftAllowlistText);
 
@@ -965,7 +1039,21 @@ const App: React.FC = () => {
     window.setTimeout(() => setAllowlistCopyStatus(''), 2000);
   };
 
-  const { agents, logs, report, isRunning, startResearch, resetRun, skills } = useOverseer();
+  const {
+    agents,
+    logs,
+    report,
+    isRunning,
+    startResearch,
+    resetRun,
+    skills,
+    operatorSnapshot,
+    operatorPhaseCards,
+    operatorExplainability,
+    operatorTuning,
+    updateOperatorTuningLive,
+    sourceLearningUpdate
+  } = useOverseer();
   const visibleAgents = showGuardrailDebug
     ? agents
     : agents.filter(agent => agent.status !== AgentStatus.SKIPPED);
@@ -1016,6 +1104,16 @@ const App: React.FC = () => {
   const draftHasKey = !!draftEffectiveKey;
   const draftUsingEnvKey = draftProvider === 'google' ? (!draftKeys.google && !!ENV_GEMINI_KEY) : (!draftKeys.openai && !!ENV_OPENAI_KEY);
 
+  useEffect(() => {
+    if (!Array.isArray(sourceLearningUpdate)) return;
+    setSourceLearning(sourceLearningUpdate);
+  }, [sourceLearningUpdate]);
+
+  useEffect(() => {
+    if (isRunning) return;
+    updateOperatorTuningLive(operatorTuningSettings);
+  }, [operatorTuningSettings, isRunning, updateOperatorTuningLive]);
+
   const requireAuth = (action: 'settings' | 'start') => {
     if (action === 'start' && isSystemTestTopic(topic)) return true;
     if (!REQUIRES_PASSWORD || isUnlocked) return true;
@@ -1032,7 +1130,12 @@ const App: React.FC = () => {
         openSettings();
         return;
     }
-    startResearch(topic, provider, effectiveKey, { ...runConfig, modelOverrides });
+    startResearch(topic, provider, effectiveKey, {
+      ...runConfig,
+      modelOverrides,
+      operatorTuning: operatorTuningSettings,
+      sourceLearning
+    });
   };
 
   const openSettings = () => {
@@ -1073,6 +1176,13 @@ const App: React.FC = () => {
   const handleNewSearch = () => {
     resetRun('user_reset');
     setTopic('');
+  };
+
+  const handleOperatorTuningChange = (next: Partial<OperatorTuning>, options?: { disruptive?: boolean }) => {
+    updateOperatorTuningLive(next, options);
+    const merged = normalizeOperatorTuning({ ...operatorTuningSettings, ...next });
+    setOperatorTuningSettings(merged);
+    setDraftOperatorTuning(merged);
   };
 
   return (
@@ -1404,24 +1514,6 @@ const App: React.FC = () => {
                     <p className="text-[10px] text-cyber-green font-mono">Contact email configured.</p>
                   ) : (
                     <p className="text-[10px] text-yellow-500 font-mono">OK: no contact email set. Nominatim still works but may be rate limited.</p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono text-gray-500 mb-1">GEOCODING_API_KEY (IF SUPPORTED)</label>
-                  <input
-                    type="password"
-                    value={draftOpenDataAuth.geocodingKey || ''}
-                    onChange={(e) => setDraftOpenDataAuth(prev => ({ ...prev, geocodingKey: e.target.value }))}
-                    placeholder="Optional provider token"
-                    className="w-full bg-black border border-gray-700 rounded p-2 text-xs focus:border-cyber-green outline-none transition-colors font-mono text-cyber-green"
-                  />
-                  <p className="text-[10px] text-gray-500 mt-1">
-                    Reserved for key-based geocoders (not enabled by default). Field format: provider API key string (paste full token, no prefix). Leave blank for Nominatim. <a href="https://nominatim.org/release-docs/latest/api/Overview/" target="_blank" className="underline hover:text-cyber-green">Nominatim overview</a>.
-                  </p>
-                  {geocodingKey ? (
-                    <p className="text-[10px] text-cyber-green font-mono">Key stored locally for supported providers.</p>
-                  ) : (
-                    <p className="text-[10px] text-yellow-500 font-mono">OK: no provider key set. Nominatim remains active; requests may be rate limited.</p>
                   )}
                 </div>
               </div>
@@ -2004,95 +2096,131 @@ const App: React.FC = () => {
 
         {/* Processing Phase */}
         {(isRunning || (agents.length > 0 && !report)) && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 h-[calc(100vh-150px)] sm:h-[calc(100vh-140px)]">
-             {/* Left: Agent Graph */}
-             <div className="lg:col-span-2 bg-black/50 border border-gray-800 rounded-lg overflow-hidden flex flex-col">
-                <div className="px-3 sm:px-4 pt-3 sm:pt-4 pb-2 border-b border-gray-900 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                   <h3 className="text-xs sm:text-sm font-mono text-gray-400 flex items-center gap-2">
-                     <Activity className="w-4 h-4 text-cyber-blue" />
-                     AGENT ORCHESTRATION GRAPH
-                   </h3>
-                   <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                     {([
-                       { key: 'motion', label: 'Motion' },
-                       { key: 'links', label: 'Links' },
-                       { key: 'focus', label: 'Focus' },
-                       { key: 'compact', label: 'Compact' }
-                     ] as const).map(toggle => {
-                       const enabled = graphVisualization[toggle.key];
-                       return (
-                         <button
-                           key={toggle.key}
-                           type="button"
-                           role="switch"
-                           aria-checked={enabled}
-                           aria-label={`${toggle.label} toggle`}
-                           onClick={() => updateGraphVisualization(toggle.key, !enabled)}
-                           className={`px-2 py-1 rounded border text-[10px] font-mono uppercase tracking-wider transition-colors ${
-                             enabled
-                               ? 'text-cyber-green border-cyber-green/40 bg-cyber-green/10'
-                               : 'text-gray-500 border-gray-700 bg-black/40'
-                           }`}
-                         >
-                           {toggle.label}
-                         </button>
-                       );
-                     })}
-                   </div>
-                </div>
-                <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-                  <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-gray-900 lg:border-b-0 lg:border-r flex flex-wrap lg:flex-col gap-2 lg:w-40 lg:shrink-0">
-                    {graphStatusChips.map(chip => (
-                      <div
-                        key={chip.key}
-                        className={`w-full min-w-[92px] px-2 py-1.5 rounded border text-[10px] font-mono uppercase tracking-wide ${chip.className}`}
-                      >
-                        <div className="opacity-75">{chip.label}</div>
-                        <div className="text-sm leading-tight font-bold">{chip.value}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex-1 min-h-0">
-                    <AgentGraph
-                      agents={visibleAgents}
-                      motionEnabled={graphVisualization.motion}
-                      linksEnabled={graphVisualization.links}
-                      focusEnabled={graphVisualization.focus}
-                      compact={graphVisualization.compact}
-                    />
-                  </div>
-                </div>
-             </div>
-
-             {/* Right: Logs */}
-             <div className="lg:col-span-1 h-full min-h-0 flex flex-col gap-3">
-                <LogTerminal logs={logs} />
-                {showGuardrailDebug && (
-                  <div className="border border-gray-800 rounded-lg bg-black/40 p-3 text-xs font-mono text-gray-300">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] text-gray-400">PERF GUARDRAILS (SKIPPED)</span>
-                      <span className="text-[10px] text-gray-600">{skippedAgents.length} skipped</span>
+          <div className="flex flex-col gap-3 min-h-[calc(100vh-150px)] sm:min-h-[calc(100vh-140px)]">
+            <div
+              className={`min-h-[22rem] overflow-hidden ${
+                showOperatorConsole
+                  ? 'h-[42vh] sm:h-[45vh] lg:h-[48vh]'
+                  : 'h-[38rem] max-h-[38rem] sm:h-[40rem] sm:max-h-[40rem]'
+              }`}
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 h-full min-h-0">
+                {/* Left: Agent Graph */}
+                <div className="lg:col-span-2 bg-black/50 border border-gray-800 rounded-lg overflow-hidden flex flex-col min-h-0">
+                  <div className="px-3 sm:px-4 pt-3 sm:pt-4 pb-2 border-b border-gray-900 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                    <h3 className="text-xs sm:text-sm font-mono text-gray-400 flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-cyber-blue" />
+                      AGENT ORCHESTRATION GRAPH
+                    </h3>
+                    <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                      {([
+                        { key: 'motion', label: 'Motion' },
+                        { key: 'links', label: 'Links' },
+                        { key: 'focus', label: 'Focus' },
+                        { key: 'compact', label: 'Compact' }
+                      ] as const).map(toggle => {
+                        const enabled = graphVisualization[toggle.key];
+                        return (
+                          <button
+                            key={toggle.key}
+                            type="button"
+                            role="switch"
+                            aria-checked={enabled}
+                            aria-label={`${toggle.label} toggle`}
+                            onClick={() => updateGraphVisualization(toggle.key, !enabled)}
+                            className={`px-2 py-1 rounded border text-[10px] font-mono uppercase tracking-wider transition-colors ${
+                              enabled
+                                ? 'text-cyber-green border-cyber-green/40 bg-cyber-green/10'
+                                : 'text-gray-500 border-gray-700 bg-black/40'
+                            }`}
+                          >
+                            {toggle.label}
+                          </button>
+                        );
+                      })}
                     </div>
-                    {skippedAgents.length === 0 ? (
-                      <p className="text-[10px] text-gray-500">No agents skipped due to guardrails.</p>
-                    ) : (
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {skippedAgents.map(agent => (
-                          <div key={agent.id} className="border border-gray-800 rounded p-2 bg-black/30">
-                            <div className="text-[11px] text-gray-200">{agent.name}</div>
-                            <div className="text-[10px] text-gray-500">{agent.task}</div>
-                            {agent.reasoning?.length > 0 && (
-                              <div className="text-[10px] text-gray-600 mt-1">
-                                {agent.reasoning.slice(0, 2).join(' | ')}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
-                )}
-             </div>
+                  <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+                    <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-gray-900 lg:border-b-0 lg:border-r flex flex-wrap lg:flex-col gap-2 lg:w-40 lg:shrink-0">
+                      {graphStatusChips.map(chip => (
+                        <div
+                          key={chip.key}
+                          className={`w-full min-w-[92px] px-2 py-1.5 rounded border text-[10px] font-mono uppercase tracking-wide ${chip.className}`}
+                        >
+                          <div className="opacity-75">{chip.label}</div>
+                          <div className="text-sm leading-tight font-bold">{chip.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex-1 min-h-0">
+                      <AgentGraph
+                        agents={visibleAgents}
+                        motionEnabled={graphVisualization.motion}
+                        linksEnabled={graphVisualization.links}
+                        focusEnabled={graphVisualization.focus}
+                        compact={graphVisualization.compact}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: Logs + Guardrail Debug */}
+                <div className="lg:col-span-1 h-full min-h-0 flex flex-col gap-3 overflow-hidden">
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <LogTerminal logs={logs} />
+                  </div>
+                  {showGuardrailDebug && (
+                    <div className="border border-gray-800 rounded-lg bg-black/40 p-3 text-xs font-mono text-gray-300 max-h-56 overflow-hidden">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] text-gray-400">PERF GUARDRAILS (SKIPPED)</span>
+                        <span className="text-[10px] text-gray-600">{skippedAgents.length} skipped</span>
+                      </div>
+                      {skippedAgents.length === 0 ? (
+                        <p className="text-[10px] text-gray-500">No agents skipped due to guardrails.</p>
+                      ) : (
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                          {skippedAgents.map(agent => (
+                            <div key={agent.id} className="border border-gray-800 rounded p-2 bg-black/30">
+                              <div className="text-[11px] text-gray-200">{agent.name}</div>
+                              <div className="text-[10px] text-gray-500">{agent.task}</div>
+                              {agent.reasoning?.length > 0 && (
+                                <div className="text-[10px] text-gray-600 mt-1">
+                                  {agent.reasoning.slice(0, 2).join(' | ')}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-gray-800 rounded-lg bg-black/40 px-3 py-2 flex items-center justify-between">
+              <span className="text-[11px] font-mono text-gray-400">OPERATOR CONSOLE</span>
+              <button
+                type="button"
+                onClick={() => setShowOperatorConsole((prev) => !prev)}
+                className="px-2 py-1 rounded border border-gray-700 text-[10px] font-mono uppercase tracking-wider text-gray-300 hover:text-white hover:border-gray-500 transition-colors"
+              >
+                {showOperatorConsole ? 'Hide Console' : 'Show Console'}
+              </button>
+            </div>
+
+            {showOperatorConsole && (
+              <div className="min-h-[65vh] lg:min-h-[85vh] border border-gray-800 rounded-lg bg-black/50 p-2 overflow-hidden">
+                <OperatorConsole
+                  snapshot={operatorSnapshot}
+                  phaseCards={operatorPhaseCards}
+                  tuning={operatorTuning}
+                  explainability={operatorExplainability}
+                  sourceLearning={sourceLearning}
+                  onTuningChange={handleOperatorTuningChange}
+                />
+              </div>
+            )}
           </div>
         )}
 

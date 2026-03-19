@@ -22,6 +22,23 @@ const BOOLEAN_DEFAULTS = {
   datasetTelemetryRanking: true,
   socrataPreferV3: false
 };
+const OPERATOR_DEFAULTS = {
+  explorationRatio: 0.35,
+  preferredDomainWeight: 0.7,
+  noveltyFloor: 0.2,
+  authorityFloor: 70,
+  validationStrictness: "balanced",
+  phaseBudgets: {
+    phase05: 6,
+    phase2b: 8,
+    phase3b: 8
+  },
+  sourcePolicy: {
+    preferred: {},
+    suppressed: {},
+    blocked: []
+  }
+};
 
 export const SETTINGS_SCHEMA_VERSION = 1;
 
@@ -32,6 +49,79 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const toNumber = (value, fallback) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+};
+
+const sanitizeDomainWeightMap = (raw) => {
+  if (!isPlainObject(raw)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const domain = String(key || "").trim().toLowerCase();
+    if (!domain) continue;
+    out[domain] = clamp(toNumber(value, 0), 0, 1);
+  }
+  return out;
+};
+
+const sanitizeDomainList = (raw) => {
+  const list = Array.isArray(raw) ? raw : [];
+  const seen = new Set();
+  const out = [];
+  for (const value of list) {
+    const domain = String(value || "").trim().toLowerCase();
+    if (!domain || seen.has(domain)) continue;
+    seen.add(domain);
+    out.push(domain);
+  }
+  return out;
+};
+
+export const sanitizeOperatorTuning = (rawTuning) => {
+  if (!isPlainObject(rawTuning)) return { ...OPERATOR_DEFAULTS, phaseBudgets: { ...OPERATOR_DEFAULTS.phaseBudgets }, sourcePolicy: { preferred: {}, suppressed: {}, blocked: [] } };
+  const base = rawTuning;
+  const strictness = base.validationStrictness === "strict" || base.validationStrictness === "permissive"
+    ? base.validationStrictness
+    : "balanced";
+  return {
+    explorationRatio: clamp(toNumber(base.explorationRatio, OPERATOR_DEFAULTS.explorationRatio), 0, 1),
+    preferredDomainWeight: clamp(toNumber(base.preferredDomainWeight, OPERATOR_DEFAULTS.preferredDomainWeight), 0, 1),
+    noveltyFloor: clamp(toNumber(base.noveltyFloor, OPERATOR_DEFAULTS.noveltyFloor), 0, 1),
+    authorityFloor: clamp(toNumber(base.authorityFloor, OPERATOR_DEFAULTS.authorityFloor), 0, 100),
+    validationStrictness: strictness,
+    phaseBudgets: {
+      phase05: Math.max(1, Math.floor(toNumber(base.phaseBudgets?.phase05, OPERATOR_DEFAULTS.phaseBudgets.phase05))),
+      phase2b: Math.max(1, Math.floor(toNumber(base.phaseBudgets?.phase2b, OPERATOR_DEFAULTS.phaseBudgets.phase2b))),
+      phase3b: Math.max(1, Math.floor(toNumber(base.phaseBudgets?.phase3b, OPERATOR_DEFAULTS.phaseBudgets.phase3b)))
+    },
+    sourcePolicy: {
+      preferred: sanitizeDomainWeightMap(base.sourcePolicy?.preferred),
+      suppressed: sanitizeDomainWeightMap(base.sourcePolicy?.suppressed),
+      blocked: sanitizeDomainList(base.sourcePolicy?.blocked)
+    }
+  };
+};
+
+export const sanitizeSourceLearning = (rawLearning, maxEntries = 300) => {
+  const entries = Array.isArray(rawLearning) ? rawLearning : [];
+  const out = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    if (!isPlainObject(entry)) continue;
+    const domain = String(entry.domain || "").trim().toLowerCase();
+    if (!domain || seen.has(domain)) continue;
+    seen.add(domain);
+    out.push({
+      domain,
+      runsSeen: Math.max(0, Math.floor(toNumber(entry.runsSeen, 0))),
+      runsValidated: Math.max(0, Math.floor(toNumber(entry.runsValidated, 0))),
+      citationSurvivalRate: clamp(toNumber(entry.citationSurvivalRate, 0), 0, 1),
+      authorityAvg: clamp(toNumber(entry.authorityAvg, 0), 0, 100),
+      recencyAvg: clamp(toNumber(entry.recencyAvg, 0), 0, 1),
+      lastSeenAt: Math.max(0, Math.floor(toNumber(entry.lastSeenAt, Date.now())))
+    });
+  }
+  return out
+    .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+    .slice(0, Math.max(10, maxEntries));
 };
 
 export const sanitizeModelOverrides = (overrides) => {
@@ -150,9 +240,6 @@ export const sanitizeOpenDataAuth = (auth) => {
   if (typeof auth.geocodingEmail === 'string' && auth.geocodingEmail.trim()) {
     sanitized.geocodingEmail = auth.geocodingEmail.trim();
   }
-  if (typeof auth.geocodingKey === 'string' && auth.geocodingKey.trim()) {
-    sanitized.geocodingKey = auth.geocodingKey.trim();
-  }
   return sanitized;
 };
 
@@ -209,6 +296,12 @@ export const buildUniversalSettingsPayload = (input) => {
     keyOverrides,
     openDataConfig: openDataCandidate
   };
+  if (Object.prototype.hasOwnProperty.call(input || {}, "operatorTuning")) {
+    payload.operatorTuning = sanitizeOperatorTuning(input?.operatorTuning);
+  }
+  if (Object.prototype.hasOwnProperty.call(input || {}, "sourceLearning")) {
+    payload.sourceLearning = sanitizeSourceLearning(input?.sourceLearning);
+  }
   if (Object.prototype.hasOwnProperty.call(input || {}, 'accessAllowlist')) {
     payload.accessAllowlist = accessAllowlist;
   }
@@ -243,6 +336,12 @@ export const normalizeUniversalSettingsPayload = (rawPayload, defaults) => {
     keyOverrides,
     openDataConfig
   };
+  if (Object.prototype.hasOwnProperty.call(rawPayload, "operatorTuning")) {
+    payload.operatorTuning = sanitizeOperatorTuning(rawPayload.operatorTuning);
+  }
+  if (Object.prototype.hasOwnProperty.call(rawPayload, "sourceLearning")) {
+    payload.sourceLearning = sanitizeSourceLearning(rawPayload.sourceLearning);
+  }
   if (hasAllowlist) {
     payload.accessAllowlist = accessAllowlist;
   }

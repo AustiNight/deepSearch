@@ -17,6 +17,7 @@ const FAILED_GEOCODE_CACHE_TTL_MS = 60 * 1000;
 const NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search";
 const CENSUS_GEOCODER_ENDPOINT = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
 const DALLAS_GEOCODER_ENDPOINT = "https://gis.dallascityhall.com/arcgis/rest/services/ToolServices/Dallas_Address_Points_Locator/GeocodeServer/findAddressCandidates";
+const ARCGIS_WORLD_GEOCODER_ENDPOINT = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates";
 
 const loadCacheFromStorage = () => {
   const cached = readGeocodeCache();
@@ -98,6 +99,19 @@ const buildDallasGeocoderUrl = (address: string) => {
   return `${DALLAS_GEOCODER_ENDPOINT}?${params.toString()}`;
 };
 
+const buildArcGisWorldGeocoderUrl = (address: string, apiKey?: string) => {
+  const params = new URLSearchParams({
+    f: "pjson",
+    SingleLine: address,
+    outSR: "4326",
+    maxLocations: "1"
+  });
+  if (apiKey) {
+    params.set("token", apiKey);
+  }
+  return `${ARCGIS_WORLD_GEOCODER_ENDPOINT}?${params.toString()}`;
+};
+
 const isLikelyDallasJurisdiction = (jurisdiction?: Jurisdiction) => {
   const city = String(jurisdiction?.city || "").toLowerCase();
   const county = String(jurisdiction?.county || "").toLowerCase();
@@ -152,6 +166,29 @@ const geocodeWithCensus = async (address: string): Promise<GeocodeResult | null>
     point,
     normalizedAddress: typeof first?.matchedAddress === "string" ? first.matchedAddress : address,
     provider: "census",
+    confidence: parseConfidence(first?.score, 100)
+  };
+};
+
+const geocodeWithArcGisWorld = async (address: string): Promise<GeocodeResult | null> => {
+  const config = getOpenDataConfig();
+  const apiKey = (config.auth.arcgisApiKey || "").trim();
+  if (!apiKey) return null;
+  await enforceRateLimit("geocode:arcgis-world", OPEN_DATA_GEOCODE_RATE_LIMIT_MS);
+  const response = await fetchJsonWithRetry<any>(buildArcGisWorldGeocoderUrl(address, apiKey), { retries: 1, minDelayMs: 400 }, {
+    portalType: "arcgis",
+    portalUrl: "https://geocode.arcgis.com"
+  });
+  if (!response.ok || !response.data) return null;
+  const candidates = Array.isArray(response.data?.candidates) ? response.data.candidates : [];
+  if (candidates.length === 0) return null;
+  const first = candidates[0];
+  const point = parsePoint(first?.location?.y, first?.location?.x);
+  if (!point) return null;
+  return {
+    point,
+    normalizedAddress: typeof first?.address === "string" ? first.address : address,
+    provider: "arcgis-world",
     confidence: parseConfidence(first?.score, 100)
   };
 };
@@ -216,6 +253,9 @@ export const geocodeAddress = async (input: GeocodeInput): Promise<GeocodeResult
     }
     if (!resolved && isLikelyUsJurisdiction(input.jurisdiction, candidate)) {
       resolved = await geocodeWithCensus(candidate);
+    }
+    if (!resolved) {
+      resolved = await geocodeWithArcGisWorld(candidate);
     }
     if (!resolved) {
       resolved = await geocodeWithNominatim(candidate);

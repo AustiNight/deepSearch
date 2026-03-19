@@ -95,6 +95,15 @@ if (!exists(".githooks/pre-commit")) {
   }
 }
 
+if (!exists(".githooks/pre-push")) {
+  errors.push("Pre-push hook missing at .githooks/pre-push.");
+} else {
+  const prepushHook = readText(".githooks/pre-push");
+  if (!/test:openai-schema/.test(prepushHook)) {
+    errors.push("Pre-push hook must run the OpenAI schema lint.");
+  }
+}
+
 if (!exists("docs/incident-response.md")) {
   errors.push("Incident response guide missing at docs/incident-response.md.");
 } else {
@@ -118,6 +127,9 @@ if (!/pull_request\s*:/.test(guardrailsWorkflow)) {
 }
 if (!/test:secrets/.test(guardrailsWorkflow)) {
   errors.push("Guardrails workflow must run test:secrets.");
+}
+if (!/test:openai-schema/.test(guardrailsWorkflow)) {
+  errors.push("Guardrails workflow must run test:openai-schema.");
 }
 
 if (errors.length > 0) {

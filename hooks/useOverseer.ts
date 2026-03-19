@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunConfig, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision, DataGap, OpenDatasetMetadata, PriorityWeights } from '../types';
+import { Agent, AgentStatus, AgentType, LogEntry, FinalReport, Finding, Skill, LLMProvider, ExhaustionMetrics, ModelOverrides, ModelRole, NormalizedSource, PrimaryRecordCoverage, Jurisdiction, SourceTaxonomy, RunConfig, RunMetrics, EvidenceRecoveryMetrics, ConfidenceQualityMetrics, ParcelResolutionMetrics, ReportSection, EvidenceGateDecision, DataGap, OpenDatasetMetadata, PriorityWeights, OperatorTuning, OperatorSnapshot, OperatorPhaseCard, OperatorExplainabilityEvent, SourceLearningStats } from '../types';
 import { initializeGemini, generateSectorAnalysis as generateSectorAnalysisGemini, performDeepResearch as performDeepResearchGemini, critiqueAndFindGaps as critiqueAndFindGapsGemini, synthesizeGrandReport as synthesizeGrandReportGemini, extractResearchMethods as extractResearchMethodsGemini, validateReport as validateReportGemini, proposeTaxonomyGrowth as proposeTaxonomyGrowthGemini, classifyResearchVertical as classifyResearchVerticalGemini } from '../services/geminiService';
 import { initializeOpenAI, generateSectorAnalysis as generateSectorAnalysisOpenAI, performDeepResearch as performDeepResearchOpenAI, critiqueAndFindGaps as critiqueAndFindGapsOpenAI, synthesizeGrandReport as synthesizeGrandReportOpenAI, extractResearchMethods as extractResearchMethodsOpenAI, validateReport as validateReportOpenAI, proposeTaxonomyGrowth as proposeTaxonomyGrowthOpenAI, classifyResearchVertical as classifyResearchVerticalOpenAI } from '../services/openaiService';
 import { buildReportFromRawText, coerceReportData, looksLikeJsonText } from '../services/reportFormatter';
@@ -68,6 +68,100 @@ const normalizeDomain = (url: string) => {
   } catch (_) {
     return '';
   }
+};
+
+const PHASE_CARD_IDS: Array<OperatorPhaseCard["phase"]> = ["0.5", "2", "2B", "3B", "4"];
+
+const defaultOperatorTuning = (): OperatorTuning => ({
+  explorationRatio: 0.35,
+  preferredDomainWeight: 0.7,
+  noveltyFloor: 0.2,
+  authorityFloor: 70,
+  validationStrictness: "balanced",
+  phaseBudgets: {
+    phase05: 6,
+    phase2b: 8,
+    phase3b: 8
+  },
+  sourcePolicy: {
+    preferred: {},
+    suppressed: {},
+    blocked: []
+  }
+});
+
+const emptyOperatorSnapshot = (): OperatorSnapshot => ({
+  phase: "idle",
+  elapsedMs: 0,
+  callsUsed: 0,
+  callsBudget: MAX_EXTERNAL_CALLS_PER_RUN,
+  newDomains: 0,
+  newSources: 0,
+  authoritativeRatio: 0,
+  preferredHitRate: 0,
+  citationSurvivalRate: 0,
+  blockedSources: 0
+});
+
+const emptyPhaseCards = (): OperatorPhaseCard[] => PHASE_CARD_IDS.map((phase) => ({
+  phase,
+  status: "idle",
+  elapsedMs: 0,
+  novelty: 0,
+  preferredHitRate: 0
+}));
+
+const clamp01 = (value: number) => clamp(value, 0, 1);
+
+const normalizeOperatorTuning = (raw?: Partial<OperatorTuning> | null): OperatorTuning => {
+  const defaults = defaultOperatorTuning();
+  const strictness = raw?.validationStrictness === "strict" || raw?.validationStrictness === "permissive"
+    ? raw.validationStrictness
+    : "balanced";
+  return {
+    explorationRatio: clamp01(Number(raw?.explorationRatio ?? defaults.explorationRatio)),
+    preferredDomainWeight: clamp01(Number(raw?.preferredDomainWeight ?? defaults.preferredDomainWeight)),
+    noveltyFloor: clamp01(Number(raw?.noveltyFloor ?? defaults.noveltyFloor)),
+    authorityFloor: clamp(Number(raw?.authorityFloor ?? defaults.authorityFloor), 0, 100),
+    validationStrictness: strictness,
+    phaseBudgets: {
+      phase05: Math.max(1, Math.floor(Number(raw?.phaseBudgets?.phase05 ?? defaults.phaseBudgets.phase05))),
+      phase2b: Math.max(1, Math.floor(Number(raw?.phaseBudgets?.phase2b ?? defaults.phaseBudgets.phase2b))),
+      phase3b: Math.max(1, Math.floor(Number(raw?.phaseBudgets?.phase3b ?? defaults.phaseBudgets.phase3b)))
+    },
+    sourcePolicy: {
+      preferred: Object.fromEntries(
+        Object.entries(raw?.sourcePolicy?.preferred || {}).map(([domain, weight]) => [String(domain).toLowerCase(), clamp01(Number(weight))])
+      ),
+      suppressed: Object.fromEntries(
+        Object.entries(raw?.sourcePolicy?.suppressed || {}).map(([domain, penalty]) => [String(domain).toLowerCase(), clamp01(Number(penalty))])
+      ),
+      blocked: uniqueList((raw?.sourcePolicy?.blocked || []).map((domain) => String(domain).toLowerCase()))
+    }
+  };
+};
+
+const domainMatchesRule = (domain: string, ruleDomain: string) => {
+  if (!domain || !ruleDomain) return false;
+  return domain === ruleDomain || domain.endsWith(`.${ruleDomain}`);
+};
+
+const getPolicyWeightForDomain = (weights: Record<string, number>, domain: string) => {
+  if (!domain) return 0;
+  let best = 0;
+  for (const [ruleDomain, weight] of Object.entries(weights || {})) {
+    if (domainMatchesRule(domain, ruleDomain)) {
+      best = Math.max(best, clamp01(Number(weight)));
+    }
+  }
+  return best;
+};
+
+const isBlockedByPolicy = (blockedDomains: string[], domain: string) => {
+  for (const blocked of blockedDomains || []) {
+    if (domainMatchesRule(domain, blocked)) return true;
+  }
+  return false;
 };
 
 const SOURCE_TRACKING_PARAMS = new Set([
@@ -144,7 +238,7 @@ const buildDiagnosticsSection = (input: {
     '| Metric | Value |',
     '| --- | --- |',
     `| Raw sources collected | ${input.rawSourceCount} |`,
-    `| Allowed public sources | ${input.allowedSourceCount} |`,
+    `| Report-backed public sources | ${input.allowedSourceCount} |`,
     `| Source links filtered out | ${input.filteredOutCount} |`,
     `| Canonical URL remaps applied | ${input.canonicalMatchedCount} |`,
     `| Restricted/non-public sources blocked | ${input.blockedSourceCount} |`,
@@ -1720,12 +1814,20 @@ export const useOverseer = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [operatorSnapshot, setOperatorSnapshot] = useState<OperatorSnapshot>(() => emptyOperatorSnapshot());
+  const [operatorPhaseCards, setOperatorPhaseCards] = useState<OperatorPhaseCard[]>(() => emptyPhaseCards());
+  const [operatorExplainability, setOperatorExplainability] = useState<OperatorExplainabilityEvent[]>([]);
+  const [sourceLearningUpdate, setSourceLearningUpdate] = useState<SourceLearningStats[] | null>(null);
+  const [operatorTuning, setOperatorTuning] = useState<OperatorTuning>(() => defaultOperatorTuning());
   
   const findingsRef = useRef<Finding[]>([]);
   const runVersionRef = useRef(0);
   const runIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const isRunningRef = useRef(false);
+  const operatorTuningRef = useRef<OperatorTuning>(defaultOperatorTuning());
+  const queuedOperatorTuningRef = useRef<OperatorTuning | null>(null);
+  const phaseBudgetUsageRef = useRef<{ phase05: number; phase2b: number; phase3b: number }>({ phase05: 0, phase2b: 0, phase3b: 0 });
 
   useEffect(() => {
     try {
@@ -1739,6 +1841,46 @@ export const useOverseer = () => {
   useEffect(() => {
     isRunningRef.current = isRunning;
   }, [isRunning]);
+
+  useEffect(() => {
+    operatorTuningRef.current = operatorTuning;
+  }, [operatorTuning]);
+
+  const queueExplainability = useCallback((text: string) => {
+    setOperatorExplainability((prev) => {
+      const next = [...prev, { id: generateId(), timestamp: Date.now(), text }];
+      return next.slice(-80);
+    });
+  }, []);
+
+  const setPhaseCardState = useCallback((phase: OperatorPhaseCard["phase"], updates: Partial<OperatorPhaseCard>) => {
+    setOperatorPhaseCards((prev) => prev.map((card) => (
+      card.phase === phase ? { ...card, ...updates } : card
+    )));
+  }, []);
+
+  const updateOperatorTuningLive = useCallback((
+    nextTuning: Partial<OperatorTuning>,
+    options?: { disruptive?: boolean }
+  ) => {
+    const merged = normalizeOperatorTuning({ ...operatorTuningRef.current, ...nextTuning });
+    const current = operatorTuningRef.current;
+    const budgetCutBelowUsage =
+      merged.phaseBudgets.phase05 < phaseBudgetUsageRef.current.phase05
+      || merged.phaseBudgets.phase2b < phaseBudgetUsageRef.current.phase2b
+      || merged.phaseBudgets.phase3b < phaseBudgetUsageRef.current.phase3b;
+    const newBlockAdded = merged.sourcePolicy.blocked.some((domain) => !current.sourcePolicy.blocked.includes(domain));
+    const disruptive = options?.disruptive || budgetCutBelowUsage || newBlockAdded;
+    if (isRunningRef.current && disruptive) {
+      queuedOperatorTuningRef.current = merged;
+      queueExplainability('queued disruptive tuning update for next checkpoint');
+      return;
+    }
+    queuedOperatorTuningRef.current = null;
+    operatorTuningRef.current = merged;
+    setOperatorTuning(merged);
+    queueExplainability('applied live operator tuning update');
+  }, [queueExplainability]);
 
   const appendLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
     setLogs(prev => [...prev, {
@@ -1783,7 +1925,13 @@ export const useOverseer = () => {
     setLogs([]);
     setReport(null);
     setFindings([]);
+    setOperatorSnapshot(emptyOperatorSnapshot());
+    setOperatorPhaseCards(emptyPhaseCards());
+    setOperatorExplainability([]);
+    setSourceLearningUpdate(null);
     findingsRef.current = [];
+    phaseBudgetUsageRef.current = { phase05: 0, phase2b: 0, phase3b: 0 };
+    queuedOperatorTuningRef.current = null;
     const runStartedAt = Date.now();
     const runMetrics: RunMetrics = {};
   }, []);
@@ -1792,7 +1940,7 @@ export const useOverseer = () => {
     topic: string,
     provider: LLMProvider,
     apiKey: string,
-    runConfig?: RunConfig & { modelOverrides?: ModelOverrides }
+    runConfig?: RunConfig & { modelOverrides?: ModelOverrides; operatorTuning?: OperatorTuning; sourceLearning?: SourceLearningStats[] }
   ) => {
     const previousRunId = runIdRef.current;
     const previousController = abortControllerRef.current;
@@ -1829,6 +1977,11 @@ export const useOverseer = () => {
     const addressLike = isAddressLike(topic);
     const addressRedactionPatterns = buildAddressRedactionPatterns(topic);
     const allowEvidenceRecoveryCache = !addressLike;
+    const initialOperatorTuning = normalizeOperatorTuning(runConfig?.operatorTuning || operatorTuningRef.current);
+    operatorTuningRef.current = initialOperatorTuning;
+    setOperatorTuning(initialOperatorTuning);
+    const sourceLearningSeed = Array.isArray(runConfig?.sourceLearning) ? runConfig.sourceLearning : [];
+    const sourceLearningByDomain = new Map(sourceLearningSeed.map((entry) => [entry.domain, entry]));
 
     const addLog = (agentId: string, agentName: string, message: string, type: LogEntry['type'] = 'info') => {
       if (!isActive()) return;
@@ -1862,7 +2015,13 @@ export const useOverseer = () => {
     setLogs([]);
     setReport(null);
     setFindings([]);
+    setOperatorSnapshot(emptyOperatorSnapshot());
+    setOperatorPhaseCards(emptyPhaseCards());
+    setOperatorExplainability([]);
+    setSourceLearningUpdate(null);
     findingsRef.current = [];
+    phaseBudgetUsageRef.current = { phase05: 0, phase2b: 0, phase3b: 0 };
+    queuedOperatorTuningRef.current = null;
     resetPortalErrorMetrics();
     const runStartedAt = Date.now();
     const runMetrics: RunMetrics = {};
@@ -1966,12 +2125,26 @@ export const useOverseer = () => {
       method_template_fallback: priorityWeights.method.method_template_fallback
     };
 
+    const extractSiteDomain = (query: string) => {
+      const match = query.match(/\bsite:([^\s]+)/i);
+      if (!match?.[1]) return "";
+      return match[1].toLowerCase().replace(/^www\./, "");
+    };
+
     const scoreMethodQuery = (query: string) => {
+      const tuning = operatorTuningRef.current;
       const meta = methodQueryMeta.get(query);
       const base = METHOD_QUERY_PRIORITY[meta?.source || 'method_template_fallback']
         ?? METHOD_QUERY_PRIORITY.method_template_fallback;
       const quotedBonus = query.includes('"') ? 0.05 : 0;
-      return base + quotedBonus;
+      const domain = extractSiteDomain(query);
+      const preferredWeight = getPolicyWeightForDomain(tuning.sourcePolicy.preferred, domain);
+      const suppressedWeight = getPolicyWeightForDomain(tuning.sourcePolicy.suppressed, domain);
+      const historicalBoost = domain ? clamp01((sourceLearningByDomain.get(domain)?.citationSurvivalRate || 0) * 0.15) : 0;
+      const domainBias = (1 - tuning.explorationRatio) * tuning.preferredDomainWeight;
+      const policyBoost = domainBias * (preferredWeight + historicalBoost);
+      const policyPenalty = domainBias * suppressedWeight;
+      return base + quotedBonus + policyBoost - policyPenalty;
     };
 
     const performanceBudget = {
@@ -2009,7 +2182,47 @@ export const useOverseer = () => {
       findings: []
     };
     addAgent(overseer);
-    const logOverseer = (
+    const classifyPhaseCard = (phaseText: string): OperatorPhaseCard["phase"] | null => {
+      if (/PHASE 0\.5/i.test(phaseText)) return "0.5";
+      if (/PHASE 2B/i.test(phaseText)) return "2B";
+      if (/PHASE 2/i.test(phaseText)) return "2";
+      if (/PHASE 3B/i.test(phaseText)) return "3B";
+      if (/PHASE 4/i.test(phaseText)) return "4";
+      return null;
+    };
+
+    const applyCheckpointTuning = (checkpoint: "phase05" | "phase2" | "phase3b" | "phase4") => {
+      if (queuedOperatorTuningRef.current) {
+        operatorTuningRef.current = queuedOperatorTuningRef.current;
+        setOperatorTuning(queuedOperatorTuningRef.current);
+        queuedOperatorTuningRef.current = null;
+        queueExplainability(`applied queued tuning at ${checkpoint} checkpoint`);
+      }
+      queueExplainability(`checkpoint reached: ${checkpoint}`);
+    };
+
+    const updateSnapshot = (input: Partial<OperatorSnapshot>) => {
+      const elapsed = Date.now() - runStartedAt;
+      const current = operatorTuningRef.current;
+      setOperatorSnapshot((prev) => ({
+        ...prev,
+        elapsedMs: elapsed,
+        callsBudget: performanceBudget.maxExternalCalls,
+        callsUsed: performanceState.externalCallsUsed,
+        blockedSources: prev.blockedSources,
+        ...input,
+        authoritativeRatio: clamp01(Number(input.authoritativeRatio ?? prev.authoritativeRatio)),
+        preferredHitRate: clamp01(Number(input.preferredHitRate ?? prev.preferredHitRate)),
+        citationSurvivalRate: clamp01(Number(input.citationSurvivalRate ?? prev.citationSurvivalRate)),
+        phase: input.phase || prev.phase || "idle",
+        stopReason: input.stopReason ?? prev.stopReason
+      }));
+      if (current.validationStrictness === "strict") {
+        // minor no-op branch to keep strictness visible in runtime path
+      }
+    };
+
+    const logOperator = (
       phase: string,
       decision: string,
       action: string,
@@ -2017,6 +2230,14 @@ export const useOverseer = () => {
       type: LogEntry['type'] = 'info'
     ) => {
       addLog(overseerId, overseer.name, buildNarrativeMessage(phase, decision, action, outcome), type);
+      const phaseCard = classifyPhaseCard(phase);
+      if (phaseCard) {
+        const elapsedMs = Date.now() - runStartedAt;
+        const status = type === "success" ? "complete" : type === "warning" ? "stopped" : "running";
+        setPhaseCardState(phaseCard, { status, elapsedMs, reason: outcome || action });
+      }
+      queueExplainability(`${phase}: ${decision} -> ${action}${outcome ? ` (${outcome})` : ""}`);
+      updateSnapshot({ phase, stopReason: type === "warning" ? outcome || action : undefined });
     };
 
     type DeepResearchResult = {
@@ -2033,7 +2254,30 @@ export const useOverseer = () => {
     };
 
     const canUseExternalCall = (_phase: string, _query?: string) => {
+      const tuning = operatorTuningRef.current;
+      const queryDomain = typeof _query === "string"
+        ? ((_query.match(/\bsite:([^\s]+)/i)?.[1] || "").toLowerCase().replace(/^www\./, ""))
+        : "";
+      if (queryDomain && isBlockedByPolicy(tuning.sourcePolicy.blocked, queryDomain)) {
+        return { allowed: false, reason: 'external_call_budget', detail: `blocked domain policy: ${queryDomain}` };
+      }
+      const getPhaseBudgetKey = (phase: string): "phase05" | "phase2b" | "phase3b" | null => {
+        if (/PHASE 0\.5/i.test(phase)) return "phase05";
+        if (/PHASE 2B/i.test(phase)) return "phase2b";
+        if (/PHASE 3B/i.test(phase)) return "phase3b";
+        return null;
+      };
+      const phaseBudgetKey = getPhaseBudgetKey(_phase);
+      if (phaseBudgetKey) {
+        const used = phaseBudgetUsageRef.current[phaseBudgetKey];
+        const limit = tuning.phaseBudgets[phaseBudgetKey];
+        if (used >= limit) {
+          return { allowed: false, reason: 'external_call_budget', detail: `${phaseBudgetKey} budget exhausted (${used}/${limit})` };
+        }
+        phaseBudgetUsageRef.current[phaseBudgetKey] = used + 1;
+      }
       performanceState.externalCallsUsed += 1;
+      updateSnapshot({});
       return { allowed: true, reason: null, detail: undefined };
     };
 
@@ -2143,7 +2387,7 @@ export const useOverseer = () => {
       evidenceGateDecisions.push(decision);
       const stageLabel = stage.replace(/_/g, ' ').toUpperCase();
       const reasonText = decision.reasons?.slice(0, 2).join(' | ');
-      logOverseer(
+      logOperator(
         `EVIDENCE GATE: ${stageLabel}`,
         decision.passed ? 'gate clear' : 'soft-fail',
         decision.metrics ? `sources ${decision.metrics.totalSources ?? 'n/a'}` : 'capture gate decision',
@@ -2151,11 +2395,11 @@ export const useOverseer = () => {
         decision.passed ? 'success' : 'warning'
       );
     };
-    logOverseer('PHASE 0: INIT', 'start run', 'initialize providers + taxonomy', `topic "${topic}"`, 'action');
+    logOperator('PHASE 0: INIT', 'start run', 'initialize providers + taxonomy', `topic "${topic}"`, 'action');
     let failureContext = 'run initialization';
     try {
       if (isSystemTestTopic(topic)) {
-        logOverseer(
+        logOperator(
           'PHASE 0: SYSTEM TEST',
           'detected test phrase',
           'bypass external LLM and run smoke flow',
@@ -2259,7 +2503,7 @@ export const useOverseer = () => {
         });
 
         updateAgent(overseerId, { status: AgentStatus.COMPLETE });
-        logOverseer(
+        logOperator(
           'PHASE 0: SYSTEM TEST',
           'complete',
           'deliver system test report',
@@ -2294,7 +2538,7 @@ export const useOverseer = () => {
       let classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
       const weightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
       const selectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
-      logOverseer(
+      logOperator(
         'PHASE 0: VERTICAL CLASSIFICATION',
         `select ${selectedSummary}${classification.isUncertain ? ' (uncertain)' : ''}`,
         `weights ${weightSummary}`,
@@ -2311,7 +2555,7 @@ export const useOverseer = () => {
         const discoveryQueries = uniqueList(expanded.map(e => e.query)).slice(0, Math.min(2, maxMethodAgents));
 
         if (discoveryQueries.length > 0) {
-          logOverseer(
+          logOperator(
             'PHASE 0B: GENERAL DISCOVERY',
             'reduce classification uncertainty',
             `spawn ${discoveryQueries.length} scouts`,
@@ -2370,7 +2614,7 @@ export const useOverseer = () => {
             classification = normalizeClassification(classificationRaw, validVerticalIds, hintVerticals);
             const reweightSummary = classification.verticals.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
             const reselectedSummary = classification.selected.map(v => `${v.id}:${v.weight.toFixed(2)}`).join(', ') || 'none';
-            logOverseer(
+            logOperator(
               'PHASE 0B: RECLASSIFY',
               `select ${reselectedSummary}${classification.isUncertain ? ' (uncertain)' : ''}`,
               `weights ${reweightSummary}`,
@@ -2394,7 +2638,7 @@ export const useOverseer = () => {
       });
 
       if (selectedVerticals.length > 1) {
-        logOverseer(
+        logOperator(
           'PHASE 0: HYBRID BRANCHING',
           'multiple verticals selected',
           'prepare parallel subtopic packs',
@@ -2407,7 +2651,7 @@ export const useOverseer = () => {
         const blueprintSummary = blueprintSelections
           .map(b => `${b.label}: ${b.fields.join(', ') || 'no fields'}`)
           .join(' | ');
-        logOverseer(
+        logOperator(
           'PHASE 0: BLUEPRINT',
           'load expected fields',
           `fields ${blueprintSummary}`,
@@ -2417,7 +2661,7 @@ export const useOverseer = () => {
       }
 
       if (nameVariants.length > 0) {
-        logOverseer(
+        logOperator(
           'PHASE 0: NAME VARIANTS',
           'expand person aliases',
           'generate search variants',
@@ -2495,7 +2739,7 @@ export const useOverseer = () => {
         const label = verticalLabels.get(id) || id;
         return `${label}: ${stats.subtopics} subtopics, ${stats.tactics} tactics`;
       }).join(' | ') || 'none';
-      logOverseer(
+      logOperator(
         'PHASE 0.7: COVERAGE',
         `select ${selectedVerticalIds.length} verticals`,
         `tactic packs ${tacticPacks.length}, tactics ${expandedTactics.length}`,
@@ -2505,7 +2749,7 @@ export const useOverseer = () => {
 
       tacticPacks.forEach(pack => {
         const templates = uniqueList(pack.expanded.map(t => t.template));
-        logOverseer(
+        logOperator(
           'PHASE 0.7: TACTIC PACK',
           `select ${pack.verticalLabel} · ${pack.subtopicLabel}`,
           `templates ${templates.join(' | ')}`,
@@ -2594,7 +2838,7 @@ export const useOverseer = () => {
             });
             if (vetResult.accepted > 0) {
               const acceptedPreview = vetResult.acceptedItems.slice(0, 5).join(' | ');
-              logOverseer(
+              logOperator(
                 'PHASE 2: TAXONOMY GROWTH',
                 `accept ${vetResult.accepted} proposals`,
                 `templates ${acceptedPreview || 'none'}`,
@@ -2607,7 +2851,7 @@ export const useOverseer = () => {
                 .slice(0, 5)
                 .map(item => `${item.item} (${item.reason})`)
                 .join(' | ');
-              logOverseer(
+              logOperator(
                 'PHASE 2: TAXONOMY GROWTH',
                 `reject ${vetResult.rejected} proposals`,
                 `templates ${rejectedPreview || 'none'}`,
@@ -2616,7 +2860,7 @@ export const useOverseer = () => {
               );
             }
           } catch (e: any) {
-            logOverseer(
+            logOperator(
               'PHASE 2: TAXONOMY GROWTH',
               'error while vetting proposals',
               'skip persistence',
@@ -2628,6 +2872,7 @@ export const useOverseer = () => {
       };
 
       // --- PHASE 0.5: METHOD DISCOVERY (HOW TO RESEARCH THE TOPIC) ---
+      applyCheckpointTuning("phase05");
       const discoveryTemplates = (selectedVerticalIds.includes('location') && isAddressLike(topic))
         ? METHOD_DISCOVERY_TEMPLATES_ADDRESS
         : (selectedVerticalIds.includes('individual') ? METHOD_DISCOVERY_TEMPLATES_PERSON : METHOD_DISCOVERY_TEMPLATES_GENERAL);
@@ -2659,7 +2904,7 @@ export const useOverseer = () => {
         : discoveryQueriesWithOpenData;
       discoveryTemplateQueries.forEach(q => registerMethodQuery(q, { source: 'method_discovery_template' }));
       if (orderedDiscoveryQueries.length > 0) {
-        logOverseer(
+        logOperator(
           'PHASE 0.5: METHOD DISCOVERY',
           'collect method candidates',
           `spawn ${orderedDiscoveryQueries.length} scouts`,
@@ -2728,7 +2973,7 @@ export const useOverseer = () => {
       }
 
       // --- PHASE 1: DIMENSIONAL MAPPING (SECTORS) ---
-      logOverseer(
+      logOperator(
         'PHASE 1: DIMENSIONAL MAPPING',
         'derive sector plan',
         'request sector analysis with taxonomy + blueprint context',
@@ -2821,7 +3066,7 @@ export const useOverseer = () => {
       if (sectors.length > maxAgents) {
         const trimmed = sectors.slice(0, maxAgents);
         if (subtopicSectors.length > maxAgents) {
-          logOverseer(
+          logOperator(
             'PHASE 1: AGENT CAP',
             'subtopic packs exceed cap',
             'trim sector list',
@@ -2861,7 +3106,7 @@ export const useOverseer = () => {
         ...methodCandidateQueries
       ]).slice(0, Math.max(maxMethodAgents, maxMethodAgents * maxRounds));
 
-      logOverseer(
+      logOperator(
         'PHASE 2: LOOP CONFIG',
         forceExhaustion ? 'forceExhaustion enabled' : 'forceExhaustion disabled',
         `minRounds ${minRounds}, maxRounds ${maxRounds}`,
@@ -2872,6 +3117,10 @@ export const useOverseer = () => {
       const shouldStopAfterRound = (round: number, metrics: ExhaustionMetrics) => {
         if (forceExhaustion) return false;
         if (round < minRounds) return false;
+        if (metrics.queryNoveltyRatio < operatorTuningRef.current.noveltyFloor) {
+          queueExplainability(`round ${round}: novelty ${metrics.queryNoveltyRatio.toFixed(2)} below floor ${operatorTuningRef.current.noveltyFloor.toFixed(2)}; force exploration`);
+          return false;
+        }
         if (metrics.diminishingReturnsScore < earlyStopDiminishingScore) return false;
         const lowNovelty = metrics.queryNoveltyRatio <= earlyStopNoveltyRatio;
         const lowSources = metrics.newSources <= earlyStopNewSources;
@@ -2885,12 +3134,13 @@ export const useOverseer = () => {
 
       for (let round = 1; round <= maxRounds; round += 1) {
         ensureActive();
+        applyCheckpointTuning("phase2");
         const roundQueries: string[] = [];
         const roundSources: string[] = [];
         const roundSectors = round === 1 ? sectors : [];
 
         if (roundSectors.length > 0) {
-          logOverseer(
+          logOperator(
             `PHASE 2: DEEP DRILL (ROUND ${round}/${maxRounds})`,
             'run recursive analysis',
             `spawn ${roundSectors.length} agents`,
@@ -3007,7 +3257,7 @@ export const useOverseer = () => {
         });
 
         if (methodQueriesToRun.length > 0) {
-          logOverseer(
+          logOperator(
             `PHASE 2B: METHOD AUDIT (ROUND ${round}/${maxRounds})`,
             'expand coverage with independent queries',
             `spawn ${methodQueriesToRun.length} agents`,
@@ -3110,7 +3360,7 @@ export const useOverseer = () => {
 
           await runSafely(Promise.all(methodAgentPromises));
         } else if (round === 1) {
-          logOverseer(
+          logOperator(
             'PHASE 2B: METHOD AUDIT',
             'agent cap reached',
             'skip method audit',
@@ -3127,13 +3377,31 @@ export const useOverseer = () => {
         }
 
         const metrics = recordExhaustionRound(exhaustionTracker, `round_${round}`, roundQueries, roundSources);
-        logOverseer(
+        logOperator(
           `PHASE 2: EXHAUSTION METRICS (ROUND ${round}/${maxRounds})`,
           'evaluate stop thresholds',
           `novelty ${metrics.queryNoveltyRatio.toFixed(2)} newDomains ${metrics.newDomains}/${metrics.totalDomains} newSources ${metrics.newSources}/${metrics.totalSources}`,
           `diminishing ${metrics.diminishingReturnsScore.toFixed(2)} queries ${metrics.uniqueQueries}/${metrics.totalQueries}`,
           'info'
         );
+        const roundDomains = uniqueList(roundSources.map((uri) => normalizeDomain(uri)).filter(Boolean));
+        const preferredDomainHits = roundDomains.filter((domain) => {
+          const policyPreferred = getPolicyWeightForDomain(operatorTuningRef.current.sourcePolicy.preferred, domain) > 0;
+          const historical = (sourceLearningByDomain.get(domain)?.runsValidated || 0) > 0;
+          return policyPreferred || historical;
+        }).length;
+        const preferredHitRate = roundDomains.length > 0 ? preferredDomainHits / roundDomains.length : 0;
+        setPhaseCardState("2", {
+          novelty: clamp01(metrics.queryNoveltyRatio),
+          preferredHitRate: clamp01(preferredHitRate),
+          elapsedMs: Date.now() - runStartedAt,
+          status: "running"
+        });
+        updateSnapshot({
+          newDomains: metrics.newDomains,
+          newSources: metrics.newSources,
+          preferredHitRate: clamp01(preferredHitRate)
+        });
         const baseStop = shouldStopAfterRound(round, metrics);
         if (baseStop) {
           const verticalGate = evaluateVerticalExhaustion({
@@ -3147,7 +3415,7 @@ export const useOverseer = () => {
             brandDomainHint
           });
           if (verticalGate.blockEarlyStop) {
-            logOverseer(
+            logOperator(
               'PHASE 2: EXHAUSTION GATE',
               'override early stop',
               'continue search',
@@ -3170,7 +3438,7 @@ export const useOverseer = () => {
       }
       if (loopStopReason) {
         const detail = loopStopRound ? `${loopStopDetail || ''} (round ${loopStopRound})`.trim() : (loopStopDetail || undefined);
-        logOverseer(
+        logOperator(
           'PHASE 2: LOOP EXIT',
           loopStopReason,
           'halt additional rounds',
@@ -3181,7 +3449,7 @@ export const useOverseer = () => {
 
       // --- PHASE 3: CROSS-EXAMINATION (GAP FILL) ---
       updateAgent(overseerId, { status: AgentStatus.ANALYZING });
-      logOverseer(
+      logOperator(
         'PHASE 3: RED TEAM',
         'audit for contradictions + gaps',
         'analyze aggregate findings with taxonomy context',
@@ -3202,7 +3470,7 @@ export const useOverseer = () => {
       const isExhausted = latestMetrics ? exhaustionScore >= earlyStopDiminishingScore : false;
 
       if ((forceExhaustion || !isExhausted) && critique.newMethod) {
-         logOverseer(
+         logOperator(
            'PHASE 3: RED TEAM',
            'gap detected',
            'spawn gap-fill agent',
@@ -3269,7 +3537,7 @@ export const useOverseer = () => {
            );
            usedQueries.add(gapQuery);
            if (gapResult.skipped) {
-             logOverseer(
+             logOperator(
                'PHASE 3: RED TEAM',
                'gap fill skipped',
                'performance guardrail hit',
@@ -3303,7 +3571,7 @@ export const useOverseer = () => {
            }
          }
       } else if (critique.newMethod) {
-        logOverseer(
+        logOperator(
           'PHASE 3: RED TEAM',
           'gap detected but exhaustion high',
           'skip gap-fill agent',
@@ -3311,7 +3579,7 @@ export const useOverseer = () => {
           'info'
         );
       } else {
-        logOverseer(
+        logOperator(
           'PHASE 3: RED TEAM',
           'no critical gaps detected',
           'proceed to exhaustion test',
@@ -3321,6 +3589,7 @@ export const useOverseer = () => {
       }
 
       // --- PHASE 3B: EXHAUSTION TEST (INDEPENDENT SEARCH) ---
+      applyCheckpointTuning("phase3b");
       const currentSources = findingsRef.current.flatMap((f: any) => f.rawSources || []);
       const currentDomainCount = new Set(currentSources.map((s: any) => normalizeDomain(s.uri))).size;
       const shouldExhaust =
@@ -3349,7 +3618,7 @@ export const useOverseer = () => {
           .slice(0, Math.min(remainingCapacity, maxMethodAgents));
 
         if (exhaustQueries.length > 0) {
-          logOverseer(
+          logOperator(
             'PHASE 3B: EXHAUSTION TEST',
             'validate completeness',
             `spawn ${exhaustQueries.length} scouts`,
@@ -3461,7 +3730,7 @@ export const useOverseer = () => {
             recordExhaustionRound(exhaustionTracker, 'exhaustion_test', executedQueries, phase3BSources);
           }
         } else {
-          logOverseer(
+          logOperator(
             'PHASE 3B: EXHAUSTION TEST',
             'no remaining unique methods',
             'skip exhaustion scouts',
@@ -3482,7 +3751,7 @@ export const useOverseer = () => {
           portalCandidates.slice(0, primeBudget).forEach((portalUrl) => {
             const guard = canUseExternalCall('PHASE 3C: OPEN DATA PRIME', portalUrl);
             if (!guard.allowed) {
-              logOverseer(
+              logOperator(
                 'PHASE 3C: OPEN DATA PRIME',
                 'performance guardrail',
                 `skip portal priming for ${portalUrl}`,
@@ -3500,7 +3769,7 @@ export const useOverseer = () => {
               maxPortals: primingCandidates.length
             }));
             if (primeResult && typeof primeResult === 'object' && (primeResult as any).datasetsDiscovered > 0) {
-              logOverseer(
+              logOperator(
                 'PHASE 3C: OPEN DATA PRIME',
                 'seeded dataset index',
                 `discovered ${(primeResult as any).datasetsDiscovered} dataset(s)`,
@@ -3516,7 +3785,7 @@ export const useOverseer = () => {
           });
         }
         if (portalCandidates.length === 0) {
-          logOverseer(
+          logOperator(
             'PHASE 3C: OPEN DATA PARCEL',
             'no portal candidates',
             'skip generic open data parcel resolution',
@@ -3524,7 +3793,7 @@ export const useOverseer = () => {
             'warning'
           );
         } else {
-          logOverseer(
+          logOperator(
             'PHASE 3C: OPEN DATA PARCEL',
             'attempt generic parcel resolution',
             `try ${portalCandidates.length} open data portal candidates`,
@@ -3549,7 +3818,7 @@ export const useOverseer = () => {
             attempts
               .filter((attempt: any) => attempt?.skipped)
               .forEach((attempt: any) => {
-                logOverseer(
+                logOperator(
                   'PHASE 3C: OPEN DATA PARCEL',
                   'performance guardrail',
                   `skip portal ${attempt.portalUrl}`,
@@ -3583,7 +3852,7 @@ export const useOverseer = () => {
                 const count = Array.isArray(entry?.sources) ? entry.sources.length : 0;
                 return sum + count;
               }, 0);
-              logOverseer(
+              logOperator(
                 'PHASE 3C: OPEN DATA PARCEL',
                 'parcel evidence recovered',
                 `capture ${totalSources} source(s) from ${successfulFindings.length} portal(s)`,
@@ -3603,7 +3872,7 @@ export const useOverseer = () => {
         const phaseLabel = cityProfile.phaseLabel || `PHASE 3D: CITY PROFILE (${cityProfile.id.toUpperCase()})`;
         const guard = canUseExternalCall(phaseLabel, topic);
         if (!guard.allowed) {
-          logOverseer(
+          logOperator(
             phaseLabel,
             'performance guardrail',
             `skip ${cityProfile.label} city profile`,
@@ -3611,7 +3880,7 @@ export const useOverseer = () => {
             'warning'
           );
         } else {
-          logOverseer(
+          logOperator(
             phaseLabel,
             `run ${cityProfile.label} city evidence profile`,
             `query city-specific open data sources for ${cityProfile.label}`,
@@ -3640,7 +3909,7 @@ export const useOverseer = () => {
                   .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType || 'query'}:${entry.matched ?? 0}`)
                   .join(' | ')
                 : undefined;
-              logOverseer(
+              logOperator(
                 phaseLabel,
                 `${cityProfile.label} profile complete`,
                 `sources ${profileSources.length}`,
@@ -3654,7 +3923,7 @@ export const useOverseer = () => {
                   .map((entry: any) => `${entry.datasetId || 'unknown'}:${entry.queryType || 'query'}:${entry.matched ?? 0}`)
                   .join(' | ')
                 : undefined;
-              logOverseer(
+              logOperator(
                 phaseLabel,
                 'no open data findings',
                 `${cityProfile.label} profile returned no usable records`,
@@ -3682,7 +3951,7 @@ export const useOverseer = () => {
           latencyMs: 0
         };
         if (!evidenceStatus.meetsAll) {
-          logOverseer(
+          logOperator(
             'PHASE 3C: EVIDENCE RECOVERY',
             EVIDENCE_RECOVERY_ERROR_TAXONOMY.threshold_unmet.summary,
             'prioritize authoritative property records + GIS layers',
@@ -3728,7 +3997,7 @@ export const useOverseer = () => {
           evidenceRecoveryMetrics.attempted = runnableQueries.length > 0;
 
           if (runnableQueries.length === 0 && skippedQueries.length === 0) {
-            logOverseer(
+            logOperator(
               'PHASE 3C: EVIDENCE RECOVERY',
               'no recovery queries available',
               'skip recovery pass',
@@ -3773,7 +4042,7 @@ export const useOverseer = () => {
               if (queryScore < EVIDENCE_RECOVERY_PRIORITY_SCORE_MIN
                 && evidenceStatus.meetsAuthoritative
                 && evidenceStatus.meetsAuthorityScore) {
-                logOverseer(
+                logOperator(
                   'PHASE 3C: EVIDENCE RECOVERY',
                   'priority stopping rule triggered',
                   'skip low-priority recovery queries',
@@ -3846,7 +4115,7 @@ export const useOverseer = () => {
                   );
                   if (result?.skipped) {
                     const skipReason = result.skipReason || 'guardrail';
-                    logOverseer(
+                    logOperator(
                       'PHASE 3C: EVIDENCE RECOVERY',
                       'recovery skipped',
                       'performance guardrail hit',
@@ -3873,7 +4142,7 @@ export const useOverseer = () => {
 
               if (!result || result.sources.length === 0) {
                 updateAgent(agentId, { status: AgentStatus.FAILED });
-                logOverseer(
+                logOperator(
                   'PHASE 3C: EVIDENCE RECOVERY',
                   EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_failed.summary,
                   'query failed',
@@ -3932,7 +4201,7 @@ export const useOverseer = () => {
           evidenceStatus = evaluateEvidence(collectSources());
           if (!evidenceStatus.meetsAll) {
             evidenceRecoveryMetrics.exhausted = true;
-            logOverseer(
+            logOperator(
               'PHASE 3C: EVIDENCE RECOVERY',
               EVIDENCE_RECOVERY_ERROR_TAXONOMY.recovery_exhausted.summary,
               'thresholds still unmet',
@@ -3940,7 +4209,7 @@ export const useOverseer = () => {
               'warning'
             );
           } else {
-            logOverseer(
+            logOperator(
               'PHASE 3C: EVIDENCE RECOVERY',
               'thresholds met after recovery',
               'resume synthesis',
@@ -3968,7 +4237,7 @@ export const useOverseer = () => {
         evidenceRecoveryMetrics.latencyMs = Date.now() - evidenceRecoveryStart;
         runMetrics.evidenceRecovery = evidenceRecoveryMetrics;
       } else if (addressLike && enforceUsOnlyPolicy) {
-        logOverseer(
+        logOperator(
           'PHASE 3C: EVIDENCE RECOVERY',
           'skip recovery for non-US address',
           'US-only policy active',
@@ -3983,8 +4252,9 @@ export const useOverseer = () => {
       }
 
       // --- PHASE 4: GRAND SYNTHESIS ---
+      applyCheckpointTuning("phase4");
       updateAgent(overseerId, { status: AgentStatus.THINKING });
-      logOverseer(
+      logOperator(
         'PHASE 4: GRAND SYNTHESIS',
         'compile report',
         'synthesize findings with citations',
@@ -4017,7 +4287,7 @@ export const useOverseer = () => {
           const fallbackCompliance = enforceCompliance(fallbackSources);
           if (fallbackCompliance.allowedSources.length > 0) {
             complianceResult = fallbackCompliance;
-            logOverseer(
+            logOperator(
               'PHASE 4: EVIDENCE',
               'recovered fallback allowed sources',
               `recovered ${fallbackCompliance.allowedSources.length} sources`,
@@ -4028,7 +4298,7 @@ export const useOverseer = () => {
         }
       }
       if (complianceResult.blockedSources.length > 0) {
-        logOverseer(
+        logOperator(
           'PHASE 4: COMPLIANCE',
           'blocked disallowed sources',
           `blocked ${complianceResult.blockedSources.length} sources`,
@@ -4037,8 +4307,26 @@ export const useOverseer = () => {
         );
       }
       const rankedSources = rankSourcesByAuthorityAndRecency(complianceResult.allowedSources);
-      const allowedSources = rankedSources.map((entry) => entry.source.uri);
-      if (allowedSources.length === 0) {
+      const reportBackedSources = rankedSources.map((entry) => entry.source.uri);
+      const preferredSources = rankedSources
+        .filter((entry) => {
+          const domain = entry.source.domain || normalizeDomain(entry.source.uri);
+          const policyPreferred = getPolicyWeightForDomain(operatorTuningRef.current.sourcePolicy.preferred, domain) > 0;
+          const historical = (sourceLearningByDomain.get(domain)?.runsValidated || 0) > 0;
+          return policyPreferred || historical;
+        })
+        .map((entry) => entry.source.uri);
+      const preferredHitRate = rankedSources.length > 0 ? preferredSources.length / rankedSources.length : 0;
+      const authoritativeRatio = rankedSources.length > 0
+        ? rankedSources.filter((entry) => entry.authorityScore >= operatorTuningRef.current.authorityFloor).length / rankedSources.length
+        : 0;
+      updateSnapshot({
+        phase: 'PHASE 4: GRAND SYNTHESIS',
+        authoritativeRatio,
+        preferredHitRate,
+        blockedSources: complianceResult.blockedSources.length
+      });
+      if (reportBackedSources.length === 0) {
         const totalFindings = findingsRef.current.length;
         const totalRawSources = allRawSources.length;
         const blockedCount = complianceResult.blockedSources.length;
@@ -4063,9 +4351,9 @@ export const useOverseer = () => {
           blockedCount ? `blocked ${blockedCount}` : null,
           guardrailFlags.length > 0 ? `guardrails ${guardrailFlags.join('+')}` : null
         ].filter(Boolean);
-        logOverseer(
+        logOperator(
           'PHASE 4: EVIDENCE',
-          'no allowed sources',
+          'no report-backed public sources',
           reason,
           detailParts.join(' | '),
           'warning'
@@ -4075,14 +4363,15 @@ export const useOverseer = () => {
       const finalReportData = await runSafely(synthesizeGrandReport(
         topic,
         findingsRef.current,
-        allowedSources,
+        preferredSources,
+        operatorTuningRef.current.authorityFloor,
         modelOverrides,
         requestOptions
       ));
       const rawText = (finalReportData as any)?.__rawText;
       if (rawText) {
         const providerLabel = provider === 'openai' ? 'openai' : 'gemini';
-        logOverseer(
+        logOperator(
           'PHASE 4: SYNTHESIS',
           'non-JSON output',
           'persist raw output in memory',
@@ -4092,7 +4381,7 @@ export const useOverseer = () => {
       }
       
       // Calculate total unique sources across all agents
-      const uniqueSourceCount = allowedSources.length;
+      const uniqueSourceCount = reportBackedSources.length;
 
       const baseReport = finalReportData && typeof finalReportData === 'object' && !(finalReportData as any).__rawText
         ? coerceReportData(finalReportData, topic)
@@ -4152,7 +4441,7 @@ export const useOverseer = () => {
       };
 
       const parsedSections = Array.isArray(normalizedReport.sections) ? normalizedReport.sections : [];
-      const allowedLookup = buildAllowedSourceLookup(allowedSources);
+      const allowedLookup = buildAllowedSourceLookup(reportBackedSources);
       let filteredOutCount = 0;
       let canonicalMatchedCount = 0;
       let sections = parsedSections.map((section: any) => {
@@ -4191,7 +4480,7 @@ export const useOverseer = () => {
         return { ...viz, sources };
       });
       if (filteredOutCount > 0) {
-        logOverseer(
+        logOperator(
           'PHASE 4: SOURCE FILTER',
           'remove non-grounded links',
           `filtered ${filteredOutCount} sources`,
@@ -4200,7 +4489,7 @@ export const useOverseer = () => {
         );
       }
       if (canonicalMatchedCount > 0) {
-        logOverseer(
+        logOperator(
           'PHASE 4: SOURCE FILTER',
           'canonical source matches applied',
           `remapped ${canonicalMatchedCount} source link(s)`,
@@ -4213,7 +4502,7 @@ export const useOverseer = () => {
         : "Summary generation failed.";
 
       if (sections.length === 0) {
-        logOverseer(
+        logOperator(
           'PHASE 4: SYNTHESIS',
           'missing structured sections',
           'inject fallback section',
@@ -4246,7 +4535,8 @@ export const useOverseer = () => {
       const validation = await runSafely(validateReport(
         topic,
         reportCandidate,
-        allowedSources,
+        preferredSources,
+        operatorTuningRef.current.validationStrictness,
         modelOverrides,
         requestOptions
       ));
@@ -4280,7 +4570,7 @@ export const useOverseer = () => {
         const issues = validationIssues.length > 0
           ? validationIssues.map((issue: any) => formatValidationIssue(issue))
           : [];
-        logOverseer(
+        logOperator(
           'PHASE 4: VALIDATION',
           'report failed validation',
           'append issues to report',
@@ -4374,7 +4664,7 @@ export const useOverseer = () => {
           }
         };
         if (!primaryRecordCoverage.complete) {
-          logOverseer(
+          logOperator(
             'PHASE 4: PRIMARY RECORDS',
             'primary records checklist incomplete',
             'suppress complete badge',
@@ -4400,7 +4690,7 @@ export const useOverseer = () => {
           lastUpdated: Date.now()
         });
       } else {
-        logOverseer(
+        logOperator(
           'PHASE 4: KNOWLEDGE BASE',
           'skip update',
           'validation failed',
@@ -4469,7 +4759,7 @@ export const useOverseer = () => {
           performanceState.latencyBudgetExceeded ? 'latency budget hit' : null,
           performanceState.externalCallBudgetExceeded ? 'external call cap hit' : null
         ].filter(Boolean).join(' | ');
-        logOverseer(
+        logOperator(
           'PHASE 4: PERF GUARDRAIL',
           'performance guardrail triggered',
           'report finalized with capped search',
@@ -4485,7 +4775,7 @@ export const useOverseer = () => {
           .slice(0, 2)
           .map(([code, count]) => `${code}:${count}`)
           .join(' | ');
-        logOverseer(
+        logOperator(
           'PHASE 4: PORTAL ERRORS',
           'portal errors observed',
           `total ${portalErrors.total}`,
@@ -4495,7 +4785,7 @@ export const useOverseer = () => {
       }
       const sloGate = evaluateSloGate(runMetrics);
       if (sloGate.gateStatus === 'blocked') {
-        logOverseer(
+        logOperator(
           'PHASE 4: SLO GATE',
           'release gate blocked',
           'SLOs below baseline',
@@ -4513,7 +4803,7 @@ export const useOverseer = () => {
       };
       const diagnosticsSection = buildDiagnosticsSection({
         rawSourceCount: allRawSources.length,
-        allowedSourceCount: allowedSources.length,
+        allowedSourceCount: reportBackedSources.length,
         filteredOutCount,
         canonicalMatchedCount,
         blockedSourceCount: complianceResult.blockedSources.length,
@@ -4530,6 +4820,47 @@ export const useOverseer = () => {
             ...reportWithMetrics,
             sections: [...reportWithMetrics.sections, diagnosticsSection]
           };
+      const runDomains = uniqueList(reportBackedSources.map((uri) => normalizeDomain(uri)).filter(Boolean));
+      const reportDomains = uniqueList(reportSourceDetails.map((source) => source.domain || normalizeDomain(source.uri)).filter(Boolean));
+      const citationSurvivalRate = runDomains.length > 0
+        ? reportDomains.filter((domain) => runDomains.includes(domain)).length / runDomains.length
+        : 0;
+      updateSnapshot({
+        phase: 'PHASE 4: COMPLETE',
+        citationSurvivalRate,
+        preferredHitRate,
+        authoritativeRatio,
+        blockedSources: complianceResult.blockedSources.length
+      });
+      const nextLearningMap = new Map<string, SourceLearningStats>(sourceLearningByDomain);
+      const sourceScoresByDomain = new Map<string, { authoritySum: number; recencySum: number; count: number }>();
+      rankedSources.forEach((entry) => {
+        const domain = entry.source.domain || normalizeDomain(entry.source.uri);
+        if (!domain) return;
+        const prev = sourceScoresByDomain.get(domain) || { authoritySum: 0, recencySum: 0, count: 0 };
+        prev.authoritySum += entry.authorityScore;
+        prev.recencySum += entry.recencyScore;
+        prev.count += 1;
+        sourceScoresByDomain.set(domain, prev);
+      });
+      sourceScoresByDomain.forEach((score, domain) => {
+        const prev = nextLearningMap.get(domain);
+        const seen = (prev?.runsSeen || 0) + 1;
+        const validated = (prev?.runsValidated || 0) + (postSynthesisPassed ? 1 : 0);
+        const authorityAvg = ((prev?.authorityAvg || 0) * (seen - 1) + (score.authoritySum / Math.max(1, score.count))) / seen;
+        const recencyAvg = ((prev?.recencyAvg || 0) * (seen - 1) + (score.recencySum / Math.max(1, score.count))) / seen;
+        const survival = ((prev?.citationSurvivalRate || 0) * (seen - 1) + citationSurvivalRate) / seen;
+        nextLearningMap.set(domain, {
+          domain,
+          runsSeen: seen,
+          runsValidated: validated,
+          citationSurvivalRate: clamp01(survival),
+          authorityAvg: clamp(authorityAvg, 0, 100),
+          recencyAvg: clamp01(recencyAvg),
+          lastSeenAt: Date.now()
+        });
+      });
+      setSourceLearningUpdate(Array.from(nextLearningMap.values()).sort((a, b) => b.lastSeenAt - a.lastSeenAt).slice(0, 300));
 
       setReportSafe({
         ...reportWithDiagnostics,
@@ -4537,7 +4868,7 @@ export const useOverseer = () => {
       });
       
       updateAgent(overseerId, { status: AgentStatus.COMPLETE });
-      logOverseer(
+      logOperator(
         'PHASE 4: COMPLETE',
         'final report ready',
         'deliver report to UI',
@@ -4557,7 +4888,7 @@ export const useOverseer = () => {
         ? `${failureContext}: ${safeErrorMessage}`
         : safeErrorMessage;
       console.error(safeErrorDetail);
-      logOverseer(
+      logOperator(
         'PHASE 4: FAILURE',
         'system error',
         'abort run',
@@ -4569,7 +4900,21 @@ export const useOverseer = () => {
         setIsRunningSafe(false);
       }
     }
-  }, [skills]);
+  }, [skills, queueExplainability, setPhaseCardState]);
 
-  return { agents, logs, report, isRunning, startResearch, resetRun, skills };
+  return {
+    agents,
+    logs,
+    report,
+    isRunning,
+    startResearch,
+    resetRun,
+    skills,
+    operatorSnapshot,
+    operatorPhaseCards,
+    operatorExplainability,
+    operatorTuning,
+    updateOperatorTuningLive,
+    sourceLearningUpdate
+  };
 };

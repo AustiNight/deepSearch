@@ -393,15 +393,13 @@ const isNonEmptyAuth = (auth: OpenDataAuthConfig | undefined | null) => {
     (auth.socrataAppToken && auth.socrataAppToken.trim())
     || (auth.arcgisApiKey && auth.arcgisApiKey.trim())
     || (auth.geocodingEmail && auth.geocodingEmail.trim())
-    || (auth.geocodingKey && auth.geocodingKey.trim())
   );
 };
 
 const normalizeAuth = (auth?: OpenDataAuthConfig | null): OpenDataAuthConfig => ({
   socrataAppToken: auth?.socrataAppToken?.trim() || undefined,
   arcgisApiKey: auth?.arcgisApiKey?.trim() || undefined,
-  geocodingEmail: auth?.geocodingEmail?.trim() || undefined,
-  geocodingKey: auth?.geocodingKey?.trim() || undefined
+  geocodingEmail: auth?.geocodingEmail?.trim() || undefined
 });
 
 const normalizeFeatureFlags = (flags?: Partial<OpenDataFeatureFlags>): OpenDataFeatureFlags => ({

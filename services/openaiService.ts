@@ -3,7 +3,8 @@ import type {
   ModelRole,
   NormalizedSource,
   Skill,
-  SourceNormalizationDiagnostics
+  SourceNormalizationDiagnostics,
+  ValidationStrictness
 } from "../types";
 import { isAddressLike } from "../data/verticalLogic";
 import {
@@ -12,6 +13,7 @@ import {
   MIN_EVIDENCE_TOTAL_SOURCES
 } from "../constants";
 import type { TaxonomyProposalBundle } from "../data/researchTaxonomy";
+import { REPORT_SCHEMA } from "../data/reportSchema";
 import { parseJsonFromText, tryParseJsonFromText } from "./jsonUtils";
 import { coerceReportData } from "./reportFormatter";
 import { getOpenAIModelDefaults, resolveModelForRole } from "./modelOverrides";
@@ -142,54 +144,6 @@ const toSafeErrorMessage = (error: unknown) => {
 
 const shouldRetryWithLegacyWebSearch = (message: string) => {
   return WEB_SEARCH_TOOL_REJECTION_PATTERN.test(message);
-};
-
-const REPORT_SCHEMA = {
-  type: "object",
-  properties: {
-    schemaVersion: { type: "number" },
-    title: { type: "string" },
-    summary: { type: "string" },
-    sections: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          content: { type: "string" },
-          sources: { type: "array", items: { type: "string" } }
-        },
-        required: ["title", "content", "sources"],
-        additionalProperties: false
-      }
-    },
-    visualizations: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          type: { type: "string" },
-          title: { type: "string" },
-          caption: { type: "string" },
-          sources: { type: "array", items: { type: "string" } },
-          data: { type: "object" }
-        },
-        required: ["type", "title", "data"],
-        additionalProperties: false
-      }
-    },
-    provenance: {
-      type: "object",
-      properties: {
-        totalSources: { type: "number" },
-        methodAudit: { type: "string" }
-      },
-      required: ["totalSources", "methodAudit"],
-      additionalProperties: false
-    }
-  },
-  required: ["title", "summary", "sections", "provenance"],
-  additionalProperties: false
 };
 
 const isValidReportData = (data: any) => {
@@ -376,21 +330,29 @@ export const proposeTaxonomyGrowth = async (input: {
 export const validateReport = async (
   topic: string,
   report: any,
-  allowedSources: string[] = [],
+  preferredSources: string[] = [],
+  validationStrictness: ValidationStrictness = "balanced",
   modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
   ensureOpenAIReady();
   const model = resolveRoleModel('validation', modelOverrides);
+  const strictnessDirective = validationStrictness === "strict"
+    ? "Apply strict validation. Mark uncertain support as unsupported_claim."
+    : validationStrictness === "permissive"
+      ? "Apply permissive validation. Only flag clearly unsupported claims."
+      : "Apply balanced validation with practical citation checks.";
   const prompt = `
     Topic: "${topic}"
-    Allowed Sources:
-    ${allowedSources.join('\n')}
+    Preferred/Historical Sources:
+    ${preferredSources.join('\n')}
+    Validation strictness: ${validationStrictness}
 
     Report JSON:
     ${JSON.stringify(report).substring(0, 20000)}
 
-    You are an independent reviewer. Verify that claims include inline citations from allowed sources.
+    You are an independent reviewer. Verify that claims include inline citations from report-backed public sources.
+    ${strictnessDirective}
     Flag any unsupported claims, fabricated links, or missing citations.
     Return JSON with:
     - isValid: boolean
@@ -720,7 +682,8 @@ export const critiqueAndFindGaps = async (
 export const synthesizeGrandReport = async (
   topic: string,
   allFindings: any[],
-  allowedSources: string[] = [],
+  preferredSources: string[] = [],
+  authorityFloor: number = 70,
   modelOverrides?: ModelOverrides,
   options?: RequestOptions
 ) => {
@@ -736,9 +699,9 @@ export const synthesizeGrandReport = async (
     RAW DATA: ${f.content}
   `).join("\n====================\n");
 
-  const allowedSourcesText = allowedSources.length > 0
-    ? `ALLOWED SOURCES (ordered by authority + recency; prefer earlier sources when conflicts occur):\n${allowedSources.join('\n')}\n`
-    : `ALLOWED SOURCES: none provided\n`;
+  const preferredSourcesText = preferredSources.length > 0
+    ? `PREFERRED / HISTORICALLY SUCCESSFUL SOURCES (ordered by authority + recency; use as guidance, not an exclusive allowlist):\n${preferredSources.join('\n')}\n`
+    : `PREFERRED SOURCES: none provided\n`;
 
   const addressDirective = isAddressLike(topic)
     ? `
@@ -760,17 +723,17 @@ export const synthesizeGrandReport = async (
     INPUT DATA:
     ${input}
 
-    ${allowedSourcesText}
+    ${preferredSourcesText}
 
     You are the Chief Intelligence Officer. Write a "DEEP DIVE" RESEARCH REPORT.
     ${addressDirective}
 
     RULES:
     1. **NO FLUFF**. Every sentence must convey a fact or analysis.
-    2. **CLAIM-LEVEL CITATIONS REQUIRED**. Every sentence with a factual claim must end with one or more inline URL citations from allowed sources. Do not rely on section-level citations or the bibliography alone.
-    3. **BIBLIOGRAPHY IS MANDATORY**. Use ONLY allowed sources. If you cannot support a claim from allowed sources, explicitly say "Source not found" and avoid numeric claims.
+    2. **CLAIM-LEVEL CITATIONS REQUIRED**. Every sentence with a factual claim must end with one or more inline URL citations from public, report-backed sources. Do not rely on section-level citations or the bibliography alone.
+    3. **BIBLIOGRAPHY IS MANDATORY**. Prefer preferred/historical sources when available, but include other public sources if necessary and explicitly identify them as emerging/non-preferred in narrative language.
     4. **COMPARE & CONTRAST**. Do not just list facts. Compare Option A vs Option B with numbers.
-    5. **SOURCE PRIORITY**: Prefer higher-authority sources (government/official > quasi-official > aggregator > social) and the most recent evidence. When sources conflict, prioritize authority first, then recency.
+    5. **SOURCE PRIORITY**: Prefer higher-authority sources (government/official > quasi-official > aggregator > social) and the most recent evidence. When sources conflict, prioritize authority first, then recency. Favor sources with authority score >= ${Math.max(0, Math.min(100, authorityFloor))}.
     6. **HYPOTHESIS**: Based on the data, what is the strongest conclusion?
 
     STRUCTURE:

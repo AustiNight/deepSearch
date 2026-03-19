@@ -48,7 +48,6 @@ const loadFromStorage = (): OpenDataRuntimeConfig | null => {
     auth?.socrataAppToken
     || auth?.arcgisApiKey
     || auth?.geocodingEmail
-    || auth?.geocodingKey
   );
   if (!settingsRecord && !hasAuth) return null;
   return mergeConfig({
@@ -91,8 +90,7 @@ const mergeConfig = (input: Partial<OpenDataRuntimeConfig>): OpenDataRuntimeConf
     auth: {
       socrataAppToken: input.auth?.socrataAppToken,
       arcgisApiKey: input.auth?.arcgisApiKey,
-      geocodingEmail: input.auth?.geocodingEmail,
-      geocodingKey: input.auth?.geocodingKey
+      geocodingEmail: input.auth?.geocodingEmail
     }
   };
 };

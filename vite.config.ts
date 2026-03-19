@@ -4,17 +4,32 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    const explicitProxyBase = (env.PROXY_BASE_URL || '').trim();
+    const devApiProxyTarget = (env.DEV_API_PROXY_TARGET || 'http://127.0.0.1:8787').trim();
+    const shouldEnableDevApiProxy = mode === 'development' && !explicitProxyBase;
     return {
       base: '/',
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: shouldEnableDevApiProxy
+          ? {
+              '/api': {
+                target: devApiProxyTarget,
+                changeOrigin: true,
+                secure: false,
+              }
+            }
+          : undefined
       },
       plugins: [react()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY),
+        'process.env.SOCRATA_APP_TOKEN': JSON.stringify(env.SOCRATA_APP_TOKEN),
+        'process.env.ARCGIS_API_KEY': JSON.stringify(env.ARCGIS_API_KEY),
+        'process.env.GEOCODING_CONTACT_EMAIL': JSON.stringify(env.GEOCODING_CONTACT_EMAIL),
         'process.env.LLM_PROVIDER': JSON.stringify(env.LLM_PROVIDER),
         'process.env.OPENAI_MODEL_FAST': JSON.stringify(env.OPENAI_MODEL_FAST),
         'process.env.OPENAI_MODEL_REASONING': JSON.stringify(env.OPENAI_MODEL_REASONING),

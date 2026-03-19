@@ -16,6 +16,7 @@
     "calibration:open-data": "node --loader ./scripts/ts-loader.mjs scripts/open-data-calibration.mjs",
     "test:sources": "node scripts/source-normalization.test.mjs",
     "test:settings": "node scripts/settings-serialization.test.mjs",
+    "test:openai-schema": "node --loader ./scripts/ts-loader.mjs scripts/openai-schema-lint.test.mjs",
     "test:address-quality": "node --loader ./scripts/ts-loader.mjs scripts/address-quality.test.mjs",
     "test:address-evidence": "node --loader ./scripts/ts-loader.mjs scripts/address-evidence-enforcement.test.mjs",
     "test:address-report": "node --loader ./scripts/ts-loader.mjs scripts/address-report.e2e.test.mjs",
@@ -34,7 +35,7 @@
     "test:kv-policy": "node --loader ./scripts/ts-loader.mjs scripts/kv-policy.test.mjs",
     "test:pages": "node scripts/pages-sanity.test.mjs",
     "test:transparency-map": "node scripts/transparency-map-updates.test.mjs",
-    "test": "npm run test:sources && npm run test:settings && npm run test:address-quality && npm run test:address-evidence && npm run test:address-report && npm run test:dallas-enforcement && npm run test:failure-modes && npm run test:open-data && npm run test:open-data-cross-city && npm run test:storage-policy && npm run test:same-origin && npm run test:redaction && npm run test:rag && npm run test:routing && npm run test:ui && npm run test:guardrails && npm run test:secrets && npm run test:kv-policy && npm run test:pages && npm run test:transparency-map",
+    "test": "npm run test:sources && npm run test:settings && npm run test:openai-schema && npm run test:address-quality && npm run test:address-evidence && npm run test:address-report && npm run test:dallas-enforcement && npm run test:failure-modes && npm run test:open-data && npm run test:open-data-cross-city && npm run test:storage-policy && npm run test:same-origin && npm run test:redaction && npm run test:rag && npm run test:routing && npm run test:ui && npm run test:guardrails && npm run test:secrets && npm run test:kv-policy && npm run test:pages && npm run test:transparency-map",
     "hooks:install": "node scripts/install-git-hooks.mjs"
   },
   "dependencies": {
@@ -50,6 +51,7 @@
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "wrangler": "^4.71.0"
   }
 }

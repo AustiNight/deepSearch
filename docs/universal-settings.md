@@ -21,7 +21,7 @@ Fields
   - `zeroCostMode`
   - `allowPaidAccess`
   - `featureFlags`
-  - `auth` (`socrataAppToken`, `arcgisApiKey`, `geocodingEmail`, `geocodingKey`)
+  - `auth` (`socrataAppToken`, `arcgisApiKey`, `geocodingEmail`)
 
 RunConfig fields
 - `minAgents`

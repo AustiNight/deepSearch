@@ -6,13 +6,15 @@ interface Props {
 }
 
 export const LogTerminal: React.FC<Props> = ({ logs }) => {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   useEffect(() => {
     if (!isAtBottom) return;
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    // Keep scrolling confined to the log pane so page scroll/focus is never hijacked.
+    el.scrollTop = el.scrollHeight;
   }, [logs, isAtBottom]);
 
   const handleScroll = () => {
@@ -63,7 +65,6 @@ export const LogTerminal: React.FC<Props> = ({ logs }) => {
             </span>
           </div>
         ))}
-        <div ref={bottomRef} />
       </div>
     </div>
   );

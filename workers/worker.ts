@@ -141,8 +141,35 @@ type SettingsOpenDataConfig = {
     socrataAppToken?: string;
     arcgisApiKey?: string;
     geocodingEmail?: string;
-    geocodingKey?: string;
   };
+};
+
+type ValidationStrictness = "strict" | "balanced" | "permissive";
+
+type SourceDomainPolicy = {
+  preferred: Record<string, number>;
+  suppressed: Record<string, number>;
+  blocked: string[];
+};
+
+type OperatorTuning = {
+  explorationRatio: number;
+  preferredDomainWeight: number;
+  noveltyFloor: number;
+  authorityFloor: number;
+  validationStrictness: ValidationStrictness;
+  phaseBudgets: { phase05: number; phase2b: number; phase3b: number };
+  sourcePolicy: SourceDomainPolicy;
+};
+
+type SourceLearningStats = {
+  domain: string;
+  runsSeen: number;
+  runsValidated: number;
+  citationSurvivalRate: number;
+  authorityAvg: number;
+  recencyAvg: number;
+  lastSeenAt: number;
 };
 
 type SettingsPayload = {
@@ -152,6 +179,8 @@ type SettingsPayload = {
   modelOverrides: Record<string, string>;
   keyOverrides?: SettingsKeyOverrides;
   openDataConfig?: SettingsOpenDataConfig;
+  operatorTuning?: OperatorTuning;
+  sourceLearning?: SourceLearningStats[];
 };
 
 type SettingsRecord = {
@@ -333,6 +362,30 @@ const toNumber = (value: unknown, fallback: number) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const normalizeDomainWeightMap = (raw: unknown) => {
+  const base = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(base)) {
+    const domain = String(key || "").trim().toLowerCase();
+    if (!domain) continue;
+    out[domain] = clamp(toNumber(value, 0), 0, 1);
+  }
+  return out;
+};
+
+const normalizeDomainList = (raw: unknown) => {
+  const values = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const domain = String(value || "").trim().toLowerCase();
+    if (!domain || seen.has(domain)) continue;
+    seen.add(domain);
+    out.push(domain);
+  }
+  return out;
+};
+
 const normalizeRunConfig = (rawConfig: unknown): RunConfig => {
   const base = (rawConfig && typeof rawConfig === "object") ? (rawConfig as Record<string, unknown>) : {};
   const minAgents = Math.max(1, Math.floor(toNumber(base.minAgents, RUN_CONFIG_DEFAULTS.minAgents)));
@@ -455,10 +508,62 @@ const normalizeSettingsOpenDataConfig = (raw: unknown): SettingsOpenDataConfig =
     auth: {
       socrataAppToken: trimMaybe(rawAuth.socrataAppToken) || undefined,
       arcgisApiKey: trimMaybe(rawAuth.arcgisApiKey) || undefined,
-      geocodingEmail: trimMaybe(rawAuth.geocodingEmail) || undefined,
-      geocodingKey: trimMaybe(rawAuth.geocodingKey) || undefined
+      geocodingEmail: trimMaybe(rawAuth.geocodingEmail) || undefined
     }
   };
+};
+
+const normalizeOperatorTuning = (raw: unknown): OperatorTuning => {
+  const base = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const strictness = base.validationStrictness === "strict" || base.validationStrictness === "permissive"
+    ? base.validationStrictness
+    : "balanced";
+  const phaseBudgets = base.phaseBudgets && typeof base.phaseBudgets === "object"
+    ? base.phaseBudgets as Record<string, unknown>
+    : {};
+  const sourcePolicy = base.sourcePolicy && typeof base.sourcePolicy === "object"
+    ? base.sourcePolicy as Record<string, unknown>
+    : {};
+  return {
+    explorationRatio: clamp(toNumber(base.explorationRatio, 0.35), 0, 1),
+    preferredDomainWeight: clamp(toNumber(base.preferredDomainWeight, 0.7), 0, 1),
+    noveltyFloor: clamp(toNumber(base.noveltyFloor, 0.2), 0, 1),
+    authorityFloor: clamp(toNumber(base.authorityFloor, 70), 0, 100),
+    validationStrictness: strictness,
+    phaseBudgets: {
+      phase05: Math.max(1, Math.floor(toNumber(phaseBudgets.phase05, 6))),
+      phase2b: Math.max(1, Math.floor(toNumber(phaseBudgets.phase2b, 8))),
+      phase3b: Math.max(1, Math.floor(toNumber(phaseBudgets.phase3b, 8)))
+    },
+    sourcePolicy: {
+      preferred: normalizeDomainWeightMap(sourcePolicy.preferred),
+      suppressed: normalizeDomainWeightMap(sourcePolicy.suppressed),
+      blocked: normalizeDomainList(sourcePolicy.blocked)
+    }
+  };
+};
+
+const normalizeSourceLearning = (raw: unknown, maxEntries = 300): SourceLearningStats[] => {
+  const values = Array.isArray(raw) ? raw : [];
+  const out: SourceLearningStats[] = [];
+  const seen = new Set<string>();
+  for (const entry of values) {
+    const item = entry && typeof entry === "object" ? entry as Record<string, unknown> : null;
+    if (!item) continue;
+    const domain = String(item.domain || "").trim().toLowerCase();
+    if (!domain || seen.has(domain)) continue;
+    seen.add(domain);
+    out.push({
+      domain,
+      runsSeen: Math.max(0, Math.floor(toNumber(item.runsSeen, 0))),
+      runsValidated: Math.max(0, Math.floor(toNumber(item.runsValidated, 0))),
+      citationSurvivalRate: clamp(toNumber(item.citationSurvivalRate, 0), 0, 1),
+      authorityAvg: clamp(toNumber(item.authorityAvg, 0), 0, 100),
+      recencyAvg: clamp(toNumber(item.recencyAvg, 0), 0, 1),
+      lastSeenAt: Math.max(0, Math.floor(toNumber(item.lastSeenAt, Date.now())))
+    });
+  }
+  return out.sort((a, b) => b.lastSeenAt - a.lastSeenAt).slice(0, Math.max(10, maxEntries));
 };
 
 const normalizeSettingsPayload = (rawPayload: unknown): NormalizedSettingsPayloadResult => {
@@ -483,6 +588,12 @@ const normalizeSettingsPayload = (rawPayload: unknown): NormalizedSettingsPayloa
     keyOverrides,
     openDataConfig
   };
+  if (Object.prototype.hasOwnProperty.call(payload, "operatorTuning")) {
+    settings.operatorTuning = normalizeOperatorTuning(payload.operatorTuning);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "sourceLearning")) {
+    settings.sourceLearning = normalizeSourceLearning(payload.sourceLearning);
+  }
   return { settings };
 };
 

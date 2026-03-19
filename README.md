@@ -131,5 +131,6 @@ Dashboard login is break-glass only. Use it only when token-based terminal workf
 Use `.ralph/runbooks/openai-worker-secret-rotation.md` for the timed, terminal-only procedure and rollback path.
 
 Notes:
-- If `PROXY_BASE_URL` is set, the app will use the proxy and no client API keys are required.
+- If `PROXY_BASE_URL` is set, the app will use that proxy base and no client API keys are required.
+- In local `vite` development, when `PROXY_BASE_URL` is not set, `/api/*` is proxied to `DEV_API_PROXY_TARGET` (default `http://127.0.0.1:8787`) so settings/allowlist endpoints resolve if `wrangler dev` is running.
 - `ADMIN_PASSWORD` is a client-side gate, not a security boundary. Real security comes from the proxy.

@@ -27,6 +27,9 @@ jobs:
       - name: Secret scan
         run: npm run test:secrets
 
+      - name: OpenAI schema strict lint
+        run: npm run test:openai-schema
+
       - name: KV policy check
         run: npm run test:kv-policy
 

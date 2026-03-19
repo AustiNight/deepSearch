@@ -566,7 +566,6 @@ export type OpenDataAuthConfig = {
   socrataAppToken?: string;
   arcgisApiKey?: string;
   geocodingEmail?: string;
-  geocodingKey?: string;
 };
 
 export type OpenDataRuntimeConfig = {
@@ -796,6 +795,67 @@ export type PriorityWeights = {
   sector?: SectorPriorityWeights;
 };
 
+export type ValidationStrictness = "strict" | "balanced" | "permissive";
+
+export interface SourceDomainPolicy {
+  preferred: Record<string, number>;
+  suppressed: Record<string, number>;
+  blocked: string[];
+}
+
+export interface SourceLearningStats {
+  domain: string;
+  runsSeen: number;
+  runsValidated: number;
+  citationSurvivalRate: number;
+  authorityAvg: number;
+  recencyAvg: number;
+  lastSeenAt: number;
+}
+
+export interface OperatorTuning {
+  explorationRatio: number;
+  preferredDomainWeight: number;
+  noveltyFloor: number;
+  authorityFloor: number;
+  validationStrictness: ValidationStrictness;
+  phaseBudgets: {
+    phase05: number;
+    phase2b: number;
+    phase3b: number;
+  };
+  sourcePolicy: SourceDomainPolicy;
+}
+
+export interface OperatorSnapshot {
+  phase: string;
+  elapsedMs: number;
+  callsUsed: number;
+  callsBudget: number;
+  newDomains: number;
+  newSources: number;
+  authoritativeRatio: number;
+  preferredHitRate: number;
+  citationSurvivalRate: number;
+  blockedSources: number;
+  stopReason?: string;
+}
+
+export interface OperatorPhaseCard {
+  phase: "0.5" | "2" | "2B" | "3B" | "4";
+  status: "idle" | "running" | "complete" | "stopped" | "skipped";
+  elapsedMs: number;
+  novelty: number;
+  preferredHitRate: number;
+  reason?: string;
+}
+
+export interface OperatorExplainabilityEvent {
+  id: string;
+  timestamp: number;
+  text: string;
+}
+
 export type UniversalSettingsPayload = {
   schemaVersion: number;
   provider: LLMProvider;
@@ -807,6 +867,8 @@ export type UniversalSettingsPayload = {
     openai?: string;
   };
   openDataConfig?: OpenDataRuntimeConfig;
+  operatorTuning?: OperatorTuning;
+  sourceLearning?: SourceLearningStats[];
 };
 
 export type UniversalSettingsResponse = {

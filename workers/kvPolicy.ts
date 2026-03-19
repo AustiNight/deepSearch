@@ -54,8 +54,7 @@ export const stripSettingsForKv = <T extends Record<string, unknown>>(settings: 
       auth: {
         socrataAppToken: typeof openDataConfigRaw.auth?.socrataAppToken === "string" ? openDataConfigRaw.auth.socrataAppToken : undefined,
         arcgisApiKey: typeof openDataConfigRaw.auth?.arcgisApiKey === "string" ? openDataConfigRaw.auth.arcgisApiKey : undefined,
-        geocodingEmail: typeof openDataConfigRaw.auth?.geocodingEmail === "string" ? openDataConfigRaw.auth.geocodingEmail : undefined,
-        geocodingKey: typeof openDataConfigRaw.auth?.geocodingKey === "string" ? openDataConfigRaw.auth.geocodingKey : undefined
+        geocodingEmail: typeof openDataConfigRaw.auth?.geocodingEmail === "string" ? openDataConfigRaw.auth.geocodingEmail : undefined
       }
     };
     })()
@@ -79,7 +78,9 @@ export const stripSettingsForKv = <T extends Record<string, unknown>>(settings: 
         socrataPreferV3: false
       },
       auth: {}
-    }
+    },
+    operatorTuning: raw.operatorTuning,
+    sourceLearning: Array.isArray(raw.sourceLearning) ? raw.sourceLearning : undefined
   };
 };
 
