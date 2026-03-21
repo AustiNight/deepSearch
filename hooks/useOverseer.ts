@@ -46,6 +46,13 @@ import { resolveParcelFromOpenDataPortal } from '../services/openDataParcelResol
 import { runOpenDataParcelResolutionPhase } from '../services/openDataPhase3C';
 import { resolveCityOpenDataProfile } from '../services/cityOpenDataProfiles';
 import { normalizeSourcesFromText } from '../services/sourceNormalization';
+import {
+  buildIndividualRecallQueries,
+  buildIndividualVerificationQueries,
+  buildPersonNameVariants,
+  computeIndividualSourceCoverage,
+  extractLikelyPersonName
+} from '../services/personDiscovery';
 import { redactSensitiveTextWithPatterns } from '../services/redaction';
 import {
   EVIDENCE_RECOVERY_CACHE_TTL_MS,
@@ -1020,6 +1027,27 @@ const extractSourceDomainsFromFindings = (findings: Array<{ rawSources?: any[] }
   return uniqueList(domains);
 };
 
+const collectRawSourcesFromFindings = (findings: Array<{ rawSources?: any[] }>) => {
+  const out: Array<{ uri?: string; domain?: string; title?: string; snippet?: string }> = [];
+  findings.forEach((finding: any) => {
+    const sources = Array.isArray(finding?.rawSources) ? finding.rawSources : [];
+    sources.forEach((source: any) => {
+      if (typeof source === 'string') {
+        out.push({ uri: source });
+        return;
+      }
+      if (!source || typeof source !== 'object') return;
+      out.push({
+        uri: typeof source.uri === 'string' ? source.uri : undefined,
+        domain: typeof source.domain === 'string' ? source.domain : undefined,
+        title: typeof source.title === 'string' ? source.title : undefined,
+        snippet: typeof source.snippet === 'string' ? source.snippet : undefined
+      });
+    });
+  });
+  return out;
+};
+
 const countNameVariantsUsed = (usedQueries: Set<string>, nameVariants: string[]) => {
   const normalizedQueries = Array.from(usedQueries).map(normalizeForMatch);
   const normalizedVariants = uniqueList(nameVariants.map(normalizeForMatch)).filter(Boolean);
@@ -1057,6 +1085,28 @@ const evaluateVerticalExhaustion = (context: {
   };
 
   if (context.selectedVerticalIds.includes('individual')) {
+    const profileKeywords = [
+      'official website',
+      'biography',
+      'profile',
+      'interview',
+      'instagram',
+      'facebook',
+      'linkedin',
+      'tiktok',
+      'youtube',
+      'twitter',
+      'x.com'
+    ];
+    const profileDomainHints = [
+      'instagram.com',
+      'facebook.com',
+      'linkedin.com',
+      'tiktok.com',
+      'youtube.com',
+      'x.com',
+      'twitter.com'
+    ];
     const employmentKeywords = [
       'employed',
       'employment',
@@ -1082,12 +1132,14 @@ const evaluateVerticalExhaustion = (context: {
       'analyst'
     ];
     const employmentFound = hasKeyword(employmentKeywords);
+    const profileSignalsFound = hasKeyword(profileKeywords)
+      || sourceDomains.some((domain) => profileDomainHints.some((hint) => domain === hint || domain.endsWith(`.${hint}`)));
     const variantTarget = context.nameVariants.length === 0 ? 0 : Math.min(5, context.nameVariants.length);
     const variantsUsed = countNameVariantsUsed(context.usedQueries, context.nameVariants);
-    if (!employmentFound && variantTarget > 0 && variantsUsed < variantTarget) {
-      reasons.push(`Individual: employment not found; ${variantsUsed}/${variantTarget} name variants attempted.`);
-    } else if (!employmentFound && variantTarget === 0) {
-      reasons.push('Individual: employment signal not found.');
+    if (!employmentFound && !profileSignalsFound && variantTarget > 0) {
+      reasons.push(`Individual: no profile signals found; ${variantsUsed}/${variantTarget} name variants attempted.`);
+    } else if (!employmentFound && !profileSignalsFound && variantTarget === 0) {
+      reasons.push('Individual: no employment/profile signal found.');
     }
   }
 
@@ -1356,35 +1408,6 @@ const computeExhaustionScore = (metrics: ExhaustionMetrics) => {
 
 const formatWeightedVerticals = (verticals: WeightedVertical[]) => {
   return verticals.map(v => `${v.id} (${v.weight.toFixed(2)})`).join(', ');
-};
-
-const buildNameVariants = (topic: string) => {
-  const cleaned = topic.replace(/\s+/g, ' ').trim();
-  const parts = cleaned.split(' ').filter(Boolean);
-  if (parts.length < 2) return [];
-  const suffixes = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
-  const rawLast = parts[parts.length - 1];
-  const rawSuffix = suffixes.has(rawLast.toLowerCase()) ? rawLast : '';
-  const baseParts = rawSuffix ? parts.slice(0, -1) : parts.slice();
-  if (baseParts.length < 2) return [];
-  const first = baseParts[0];
-  const last = baseParts[baseParts.length - 1];
-  const middleParts = baseParts.slice(1, -1);
-  const middle = middleParts.join(' ');
-  const middleInitials = middleParts.map(p => p[0]).join(' ');
-  const suffix = rawSuffix ? ` ${rawSuffix}` : '';
-
-  const variants = [
-    `${first} ${last}${suffix}`.trim(),
-    `${last}, ${first}${suffix}`.trim(),
-    `${first} ${middle} ${last}${suffix}`.trim(),
-    `${first} ${middleInitials} ${last}${suffix}`.trim(),
-    `${first[0]}. ${last}${suffix}`.trim(),
-    `${first} ${last}`.trim(),
-    `${last} ${first}`.trim()
-  ];
-
-  return uniqueList(variants.filter(v => v.replace(/\s+/g, '').length >= 4));
 };
 
 const extractDomainFromTopic = (topic: string) => {
@@ -1777,6 +1800,11 @@ const dedupeParagraphs = (text: string) => {
 };
 
 const DEFAULT_METHOD_AUDIT = "Deep Drill Protocol: 3-Stage Recursive Verification.";
+const INDIVIDUAL_SOURCE_CLASS_MINIMUMS = {
+  official: 1,
+  news: 1,
+  social: 1
+} as const;
 
 
 const buildNarrativeMessage = (phase: string, decision: string, action: string, outcome?: string) => {
@@ -2627,7 +2655,8 @@ export const useOverseer = () => {
 
       const selectedVerticals = classification.selected;
       const selectedVerticalIds = selectedVerticals.map(v => v.id);
-      const nameVariants = selectedVerticalIds.includes('individual') ? buildNameVariants(topic) : [];
+      const nameVariants = selectedVerticalIds.includes('individual') ? buildPersonNameVariants(topic) : [];
+      const personNameHint = selectedVerticalIds.includes('individual') ? extractLikelyPersonName(topic) : '';
       const blueprintSelections = selectedVerticalIds.map(id => {
         const vertical = taxonomy.verticals.find(v => v.id === id);
         return {
@@ -2876,10 +2905,21 @@ export const useOverseer = () => {
       const discoveryTemplates = (selectedVerticalIds.includes('location') && isAddressLike(topic))
         ? METHOD_DISCOVERY_TEMPLATES_ADDRESS
         : (selectedVerticalIds.includes('individual') ? METHOD_DISCOVERY_TEMPLATES_PERSON : METHOD_DISCOVERY_TEMPLATES_GENERAL);
-      const discoveryTopics = nameVariants.length > 0 ? nameVariants : (addressLike ? topicVariants : [topic]);
+      const discoveryTopics = nameVariants.length > 0
+        ? nameVariants
+        : (selectedVerticalIds.includes('individual') && personNameHint ? [personNameHint] : (addressLike ? topicVariants : [topic]));
       const discoveryTemplateQueries = uniqueList(
         discoveryTemplates.flatMap(t => discoveryTopics.map(name => t.replace('{topic}', name)))
       );
+      const individualRecallQueries = selectedVerticalIds.includes('individual')
+        ? buildIndividualRecallQueries({
+          topic,
+          nameVariants: discoveryTopics,
+          city: extractCityFromTopic(topic),
+          state: extractStateFromTopic(topic),
+          domainHint: extractDomainFromTopic(topic)
+        })
+        : [];
       const tacticDiscoveryQueries = uniqueList(
         tacticPacks.flatMap(pack => pack.expanded.slice(1, 3).map(t => t.query))
       );
@@ -2888,9 +2928,10 @@ export const useOverseer = () => {
         .slice(0, 1);
       const discoveryQueries = uniqueList([
         ...forcedDiscoveryQueries,
+        ...individualRecallQueries,
         ...(tacticDiscoveryQueries.length > 0 ? tacticDiscoveryQueries : subtopicSeedQueries),
         ...discoveryTemplateQueries
-      ]).slice(0, Math.min(6, maxMethodAgents));
+      ]).slice(0, Math.min(selectedVerticalIds.includes('individual') ? 8 : 6, maxMethodAgents));
       const openDataDiscoveryHints = addressLike && !enforceUsOnlyPolicy
         ? getOpenDatasetHints(["parcel", "zoning", "permit", "code", "311", "911"])
         : [];
@@ -3369,6 +3410,124 @@ export const useOverseer = () => {
           );
         }
 
+        const individualCoverageBeforeVerification = selectedVerticalIds.includes('individual')
+          ? computeIndividualSourceCoverage(
+              collectRawSourcesFromFindings(findingsRef.current as Array<{ rawSources?: any[] }>),
+              INDIVIDUAL_SOURCE_CLASS_MINIMUMS
+            )
+          : null;
+        const verificationQueriesToRun = individualCoverageBeforeVerification && !individualCoverageBeforeVerification.meetsAll
+          ? buildIndividualVerificationQueries({
+              topic,
+              nameVariants,
+              city: extractCityFromTopic(topic),
+              state: extractStateFromTopic(topic),
+              domainHint: extractDomainFromTopic(topic),
+              missingClasses: individualCoverageBeforeVerification.missing
+            })
+              .filter((query) => !usedQueries.has(query))
+              .slice(0, Math.min(3, maxMethodAgents))
+          : [];
+        if (verificationQueriesToRun.length > 0) {
+          logOperator(
+            `PHASE 2C: VERIFICATION LANE (ROUND ${round}/${maxRounds})`,
+            'backfill missing source classes',
+            `spawn ${verificationQueriesToRun.length} agents`,
+            `missing ${individualCoverageBeforeVerification?.missing.join(', ')} | queries ${verificationQueriesToRun.join(' | ')}`,
+            'action'
+          );
+          const verificationCandidates = verificationQueriesToRun.map((query) => ({
+            item: query,
+            priority: scoreMethodQuery(query),
+            label: query
+          }));
+          const verificationPlan = planBudgetedCalls({
+            candidates: verificationCandidates,
+            phase: `PHASE 2C: VERIFICATION LANE (ROUND ${round}/${maxRounds})`,
+            minSpacingMs: 250,
+            maxSpacingMs: 1200
+          });
+          const runnableVerificationQueries = verificationPlan.allowed.map(entry => entry.item);
+          const skippedVerificationQueries = verificationPlan.skipped.map(entry => entry.item);
+
+          skippedVerificationQueries.forEach((query: string, index: number) => {
+            const agentId = generateId();
+            const agentName = buildAgentNameForQuery(`Verification R${round}`, query, index);
+            const agent: Agent = {
+              id: agentId,
+              name: agentName,
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: 'Source-class verification',
+              reasoning: [`Verification query: ${query}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            markAgentSkipped(
+              agentId,
+              agentName,
+              (verificationPlan.limitingReason || 'latency_budget') as 'latency_budget' | 'external_call_budget',
+              `PHASE 2C: VERIFICATION LANE (ROUND ${round}/${maxRounds})`,
+              query
+            );
+          });
+
+          const verificationAgentPromises = runnableVerificationQueries.map(async (query: string, index: number) => {
+            const delayMs = verificationPlan.spacingMs * index;
+            if (delayMs > 0) {
+              await wait(delayMs, signal);
+            }
+            ensureActive();
+            usedQueries.add(query);
+            roundQueries.push(query);
+
+            const agentId = generateId();
+            const agentName = buildAgentNameForQuery(`Verification R${round}`, query, index);
+            const agent: Agent = {
+              id: agentId,
+              name: agentName,
+              type: AgentType.RESEARCHER,
+              status: AgentStatus.SEARCHING,
+              task: 'Source-class verification',
+              reasoning: [`Verification query: ${query}`],
+              findings: [],
+              parentId: overseerId
+            };
+            addAgent(agent);
+            addLog(agentId, agentName, `Deployed for: ${query}`, 'info');
+
+            const result = await runDeepResearchWithGuards(
+              agentId,
+              agentName,
+              `PHASE 2C: VERIFICATION LANE (ROUND ${round}/${maxRounds})`,
+              'Source-class verification',
+              query,
+              (msg) => addLog(agentId, agentName, msg, 'info'),
+              { modelOverrides, role: 'method_audit', signal }
+            );
+            if (result.skipped) {
+              return;
+            }
+            roundSources.push(...result.sources.map(s => s.uri).filter(Boolean));
+            const newFinding: Finding = {
+              source: agentName,
+              content: result.text,
+              confidence: 0.82,
+              url: result.sources.map(s => s.uri).join(', ')
+            };
+            updateAgent(agentId, {
+              status: AgentStatus.COMPLETE,
+              findings: [newFinding],
+              reasoning: [`Indexed ${result.sources.length} sources`, `Data Volume: ${result.text.length} chars`]
+            });
+            addLog(agentId, agentName, `Verification lane complete. Sources Vetted: ${result.sources.length}`, 'success');
+            pushFinding({ ...newFinding, ...{ rawSources: result.sources } } as any);
+          });
+
+          await runSafely(Promise.all(verificationAgentPromises));
+        }
+
         if (roundQueries.length === 0) {
           loopStopReason = 'no queries remaining';
           loopStopDetail = 'no sector or method queries available';
@@ -3422,6 +3581,29 @@ export const useOverseer = () => {
               verticalGate.reasons.join(' | '),
               'info'
             );
+            continue;
+          }
+          const individualCoverageGate = selectedVerticalIds.includes('individual')
+            ? computeIndividualSourceCoverage(
+                collectRawSourcesFromFindings(findingsRef.current as Array<{ rawSources?: any[] }>),
+                INDIVIDUAL_SOURCE_CLASS_MINIMUMS
+              )
+            : null;
+          if (individualCoverageGate && !individualCoverageGate.meetsAll) {
+            const detail = [
+              `missing ${individualCoverageGate.missing.join(', ')}`,
+              `official ${individualCoverageGate.counts.official}/${INDIVIDUAL_SOURCE_CLASS_MINIMUMS.official}`,
+              `news ${individualCoverageGate.counts.news}/${INDIVIDUAL_SOURCE_CLASS_MINIMUMS.news}`,
+              `social ${individualCoverageGate.counts.social}/${INDIVIDUAL_SOURCE_CLASS_MINIMUMS.social}`
+            ].join(' | ');
+            logOperator(
+              'PHASE 2: SOURCE-COVERAGE GATE',
+              'override early stop',
+              'continue verification lane',
+              detail,
+              'warning'
+            );
+            continue;
           } else {
             loopStopReason = 'early stop thresholds met';
             loopStopDetail = `round ${round} met novelty/domains/sources thresholds`;
@@ -4249,6 +4431,41 @@ export const useOverseer = () => {
           attempted: false,
           success: true
         };
+      }
+
+      if (selectedVerticalIds.includes('individual')) {
+        const individualCoverage = computeIndividualSourceCoverage(
+          collectRawSourcesFromFindings(findingsRef.current as Array<{ rawSources?: any[] }>),
+          INDIVIDUAL_SOURCE_CLASS_MINIMUMS
+        );
+        if (!individualCoverage.meetsAll) {
+          const reasons = [
+            `missing source classes: ${individualCoverage.missing.join(', ')}`,
+            `official ${individualCoverage.counts.official}/${INDIVIDUAL_SOURCE_CLASS_MINIMUMS.official}`,
+            `news ${individualCoverage.counts.news}/${INDIVIDUAL_SOURCE_CLASS_MINIMUMS.news}`,
+            `social ${individualCoverage.counts.social}/${INDIVIDUAL_SOURCE_CLASS_MINIMUMS.social}`
+          ];
+          logOperator(
+            'PHASE 3C: SOURCE COVERAGE',
+            'individual class coverage unmet',
+            'continue with constrained synthesis',
+            reasons.join(' | '),
+            'warning'
+          );
+          preSynthesisGatePassed = false;
+          recordEvidenceGate('pre_synthesis', {
+            passed: false,
+            status: 'soft_fail',
+            reasons
+          });
+        } else if (!addressLike) {
+          preSynthesisGatePassed = true;
+          recordEvidenceGate('pre_synthesis', {
+            passed: true,
+            status: 'clear',
+            reasons: []
+          });
+        }
       }
 
       // --- PHASE 4: GRAND SYNTHESIS ---
